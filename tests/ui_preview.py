@@ -124,8 +124,17 @@ with sync_playwright() as p:
             assert page.locator(".chat-home-recent").is_visible()
             assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
             page.locator(".mode-switch").get_by_role("link",name="工作").click()
-            page.get_by_role("heading",name="资料录入",exact=True).wait_for()
-            assert page.get_by_label("选择资料文件").is_visible()
+            page.get_by_role("region",name="资料录入").wait_for()
+            assert page.get_by_label("输入录入资料").is_visible()
+            assert page.get_by_role("button",name="添加录入资料").is_visible()
+            page.get_by_role("button",name="添加录入资料").click()
+            page.get_by_role("button",name="上传图片、PDF 或 Word").wait_for()
+            page.get_by_role("button",name="添加录入资料").click()
+            page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
+            page.get_by_role("button",name="发送资料").click()
+            page.locator(".work-review-preview .katex").first.wait_for()
+            page.once("dialog",lambda dialog:dialog.accept())
+            page.get_by_role("button",name="移除资料").click()
             assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
             assert page.locator(".workflow-board").count()==0
             page.locator(".mode-switch").get_by_role("link",name="聊天").click()
