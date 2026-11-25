@@ -19,3 +19,11 @@ def test_empty_source_does_not_claim_complete_content():
     result=assemble_source_export(src,[],[])
     assert result["has_source_content"] is False
     assert result["blocks"][0]["content"]=="登记信息"
+
+
+def test_pending_source_batch_is_not_exported():
+    src=SimpleNamespace(title="来源",subject="高等数学",source_type="exam",content="登记")
+    draft=SimpleNamespace(id="draft",title="草稿",blocks=[{"uid":"q","kind":"question","content":"未入库"}])
+    result=assemble_source_export(src,[draft],[])
+    assert not result["has_source_content"]
+    assert all(b.get("content")!="未入库" for b in result["blocks"])

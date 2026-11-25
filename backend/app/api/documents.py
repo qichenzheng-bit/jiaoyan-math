@@ -26,6 +26,7 @@ class Block(BaseModel):
     analysis:str=Field(default="",max_length=50000)
     proof:str=Field(default="",max_length=50000)
     chapter:str=Field(default="",max_length=120)
+    subject:str|None=Field(default=None,max_length=40)
     question_type:str=Field(default="",max_length=20)
     unit_type:str=Field(default="",max_length=24)
     resource_id:str|None=Field(default=None,max_length=36)
@@ -103,7 +104,8 @@ def assemble_source_export(source, documents, resources):
     """Read-only export: preserve saved batch order and block snapshots."""
     blocks=[]
     seen=set()
-    batches=[d for d in documents if d.blocks]
+    # Pending draft questions/knowledge must never appear in exported material.
+    batches=[d for d in documents if d.blocks and not any(b["kind"] in ("question","knowledge") for b in d.blocks)]
     for d in batches:
         if len(batches)>1:
             blocks.append(Block(uid="batch-"+d.id[:30],kind="heading",title=d.title).model_dump())
@@ -134,10 +136,18 @@ def source_export(source_id:str,db:Session=Depends(get_db)):
     if source.kind!="source":raise HTTPException(404,"来源不存在")
     # Intake batches and explicitly promoted original documents, not unrelated compositions.
     documents=list(db.scalars(select(Doc).where(Doc.source_id==source.id,Doc.archived==False).order_by(Doc.created_at,Doc.id)))
-    documents=[d for d in documents if d.kind=="intake" or source.content.endswith("对应文档编号 "+d.id)]
+    documents=[d for d in documents if (d.kind=="intake" and (any(b["kind"]=="reference" for b in d.blocks) or db.scalar(select(DocumentRegistration.id).where(DocumentRegistration.document_id==d.id,DocumentRegistration.result_revision==d.revision).limit(1)))) or (d.kind!="intake" and source.content.endswith("对应文档编号 "+d.id))]
     linked_ids=select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source.id,ResourceSourceLink.provenance_role.in_(("original","reproduced")))
     resources=list(db.scalars(select(Resource).where(Resource.archived==False,Resource.kind.in_(("question","knowledge")),or_(Resource.source_id==source.id,Resource.id.in_(linked_ids))).order_by(Resource.created_at,Resource.id)))
-    return assemble_source_export(source,documents,resources)
+    result=assemble_source_export(source,documents,resources)
+    if not result["has_source_content"]:raise HTTPException(409,"该来源尚无已入库资料，不能导出")
+    return result
+
+@router.get("/{id}/export")
+def export_document(id:str,db:Session=Depends(get_db)):
+    d=row(db,id)
+    if d.kind=="intake":raise HTTPException(409,"录入文档不支持直接导出，请入库后从来源库导出")
+    return public(d)
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):return public(row(db,id))
@@ -555,6 +565,52 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
     d.blocks=[replacements.get(b["uid"],b) for b in d.blocks];d.revision+=1;d.updated_at=now();references(db,d)
     record=DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=body.revision,result_revision=d.revision,entries=history,created_at=now())
     db.add(record);audit(db,"document.registration.batch",user.id);db.commit()
+    return public(d)
+
+@router.post("/{id}/manual-save",dependencies=[Depends(require_origin)])
+def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    """Save the phone intake document and register entered items in one transaction."""
+    bank.admin_lock(db,user)
+    d=row(db,id)
+    if d.archived or body.revision!=d.revision or d.kind!="intake" or body.kind!="intake":
+        raise HTTPException(409,"录入文档已归档、类型错误或版本变化，请重新加载")
+    if body.source_id!=d.source_id:
+        raise HTTPException(422,"不能在卡片录入中更换资料来源")
+    blocks=validate(db,body,d.blocks)
+    history=[]
+    count=0
+    for i,b in enumerate(blocks):
+        if b["kind"] not in ("question","knowledge"):continue
+        if not b["content"].strip():
+            raise HTTPException(422,f"第 {i+1} 个条目的正文不能为空")
+        count+=1
+        title=b["title"].strip() or ("题目" if b["kind"]=="question" else "知识单元")+f" {i+1}"
+        source=bank.active_source(db,d.source_id) if d.source_id else None
+        data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=b.get("subject") or body.subject,
+            content=b["content"],answer=b["answer"],solution=b["solution"],analysis=b.get("analysis",""),proof=b.get("proof",""),
+            chapter=b["chapter"],question_type=b["question_type"],unit_type=b["unit_type"],
+            source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
+        # Manual entry is authoritative. Preserve distinct entries, even when the
+        # content matches an existing question; never silently merge/overwrite it.
+        if db.scalar(bank.exact(db,data).limit(1)):
+            data["dedup_override"]=True
+            data["dedup_reason"]="手动录入：保留独立条目及其来源"
+        primary=data.pop("source_id")
+        r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**data,source_id=None,
+            revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+        db.add(r);db.flush()
+        if primary:bank.change_primary(db,r,primary)
+        replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
+        replacement["snapshot"]=bank.view(r)
+        blocks[i]=replacement
+        history.append({"uid":b["uid"],"action":"create","reason":"手动直接入库","input":b,"before":None,
+                        "after":bank.view(r),"knowledge_ids":[],"source_id":primary})
+        audit(db,"resource.create",user.id)
+    before=d.revision
+    d.blocks=blocks;d.subject=normalize_subject(body.subject);d.title=body.title.strip()
+    d.revision+=1;d.updated_at=now();references(db,d)
+    db.add(DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=before,result_revision=d.revision,entries=history,created_at=now()))
+    audit(db,"document.manual.save",user.id);db.commit()
     return public(d)
 
 @router.get("/{id}/registration-history")
