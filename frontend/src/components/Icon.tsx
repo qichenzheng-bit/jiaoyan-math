@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 const paths:Record<string,ReactNode>={
+ more:<><circle cx="5" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.8" fill="currentColor" stroke="none"/></>,
  sidebar:<><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-4-3-4 3-4"/></>,
  chat:<><path d="M20 11a8 8 0 0 1-8 8H4l2-4a8 8 0 1 1 14-4Z"/></>,
  graph:<><circle cx="6" cy="6" r="3"/><circle cx="18" cy="7" r="3"/><circle cx="12" cy="18" r="3"/><path d="m9 6 6 1M7 9l4 6m6-5-4 5"/></>,

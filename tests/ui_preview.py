@@ -102,7 +102,9 @@ with sync_playwright() as p:
         if name=="19-intake-intent":
             page.locator(".chat-intake-suggestion").wait_for()
             assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
+            page.get_by_role("button",name="更多选项",exact=True).click()
             page.locator("#chat-session-actions").get_by_role("button",name="管理",exact=True).wait_for()
+            page.get_by_role("button",name="更多选项",exact=True).click()
             page.screenshot(path=str(OUT/(name+".png")),full_page=False)
             page.get_by_role("button",name="使用本次用户原文").click()
             page.wait_for_url("**/intelligence?from=msg-user&intent=question")
@@ -123,6 +125,9 @@ with sync_playwright() as p:
             assert page.get_by_text("今天想做什么？",exact=True).count()==0
             assert page.locator(".chat-home-recent").is_visible()
             assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            assert page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型").get_attribute("href")=="/qoder"
+            page.get_by_role("button",name="更多选项",exact=True).click()
             page.locator(".mode-switch").get_by_role("link",name="工作").click()
             page.get_by_role("region",name="资料录入").wait_for()
             assert page.get_by_label("输入录入资料").is_visible()
@@ -136,6 +141,9 @@ with sync_playwright() as p:
             page.once("dialog",lambda dialog:dialog.accept())
             page.get_by_role("button",name="移除资料").click()
             assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            assert page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型").is_visible()
+            page.get_by_role("button",name="更多选项",exact=True).click()
             assert page.locator(".workflow-board").count()==0
             page.locator(".mode-switch").get_by_role("link",name="聊天").click()
             page.locator(".chat-home-recent").wait_for()
