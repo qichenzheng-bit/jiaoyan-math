@@ -28,6 +28,10 @@ def answer(route):
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
       "/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if p=="/files" and route.request.method=="POST":
+        result={"id":"file-demo","name":q.get("name",["demo.tex"])[0],"media_type":"text/plain","previewable":False}
+    if p=="/intelligence/import" and route.request.method=="POST":
+        result={"import_id":"import-demo","file_id":"file-demo","file_name":"demo.tex","text":r"求 $\frac{1}{x}$ 的导数。","method":"text","start":1,"end":1,"total_units":None,"warnings":[]}
     if p=="/resources":
         rows=[source] if q.get("kind")==["source"] else items
         result={"items":rows,"total":len(rows)}
@@ -65,6 +69,13 @@ with sync_playwright() as p:
             assert page.get_by_label("原文",exact=True).input_value().startswith("录入题目")
             assert page.get_by_text("已带入聊天正文").is_visible()
             page.goto("http://127.0.0.1:4173/chat",wait_until="networkidle")
+        if name=="18-intelligence":
+            page.get_by_label("选择资料文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
+            page.get_by_role("button",name="提取并预览").click()
+            page.locator(".material-preview .katex").first.wait_for()
+            page.get_by_role("button",name="使用提取内容").click()
+            assert page.get_by_label("原文",exact=True).input_value()==r"求 $\frac{1}{x}$ 的导数。"
+            assert page.get_by_text("已关联原文件：demo.tex").is_visible()
         if name=="19-intake-intent":
             page.locator(".chat-intake-suggestion").wait_for()
             page.screenshot(path=str(OUT/(name+".png")),full_page=False)

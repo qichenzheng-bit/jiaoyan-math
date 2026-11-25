@@ -20,6 +20,7 @@ class Start(BaseModel):
     text:str=Field(min_length=1,max_length=24000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
     import_id:str|None=Field(default=None,max_length=36)
+    import_reviewed:bool=False
     source_message_id:str|None=Field(default=None,max_length=36)
     source_id:str|None=Field(default=None,max_length=36)
     input_origin:Literal["manual","chat_draft"]="manual"
@@ -93,8 +94,10 @@ def build_provenance(db,body):
         if not record:raise HTTPException(404,"导入记录不存在")
         file=db.get(StoredFile,record.file_id)
         if not file or file.archived:raise HTTPException(422,"原始文件已归档")
+        if record.metadata_json.get("warnings") and not body.import_reviewed:
+            raise HTTPException(422,"请先核对原始文件及提取警告")
         return {"kind":"file_import","intent":body.intent,"import_id":record.id,"file_id":file.id,
-                "file_name":file.name,"sha256":file.sha256,"edited":record.text!=body.text,**record.metadata_json}
+                "file_name":file.name,"sha256":file.sha256,"edited":record.text!=body.text,"import_reviewed":body.import_reviewed,**record.metadata_json}
     if body.source_message_id:
         m=chat_source(db,body.source_message_id)
         return {"kind":"chat_"+m.role,"session_id":m.session_id,"message_id":m.id,
