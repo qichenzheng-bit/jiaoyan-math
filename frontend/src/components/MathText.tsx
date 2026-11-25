@@ -23,6 +23,16 @@ export function mathTokens(content:string):Token[]{
  if(pos<content.length)result.push({kind:'text',value:content.slice(pos)})
  return result
 }
+function textNodes(value:string,compact:boolean):ReactNode[]{
+ // Legacy pure-LaTeX lines sometimes omit delimiters. Only recognize explicit mathematical commands on a non-prose line.
+ return value.split(/(\n)/).map((line,i)=>{
+  const s=line.trim()
+  if(s&&/\\(?:frac|dfrac|tfrac|lim|sum|prod|int|iint|iiint|sqrt|infty|partial|alpha|beta|gamma|theta|lambda|pi|sin|cos|tan|ln|log|leq|geq|neq|to|cdot|times|begin|left|right|mathbb|mathbf|vec|overline)\b/.test(s)&&!/[^\x00-\x7f]/.test(s)&&!/(?:https?:|\\(?:text|href|url)\b)/.test(s)){
+   return <MathFormula key={i} latex={s} display={!compact}/>
+  }
+  return <span key={i}>{line}</span>
+ })
+}
 function nodes(content:string,compact:boolean):ReactNode[]{return mathTokens(content).map((t,i)=>{
  if(t.kind==='math'){
   // AMS display wrappers are normalized for KaTeX without changing the stored formula.
@@ -32,7 +42,7 @@ function nodes(content:string,compact:boolean):ReactNode[]{return mathTokens(con
  if(t.kind==='bold')return <strong key={i}>{nodes(t.value,compact)}</strong>
  if(t.kind==='code')return <code key={i}>{t.value}</code>
  if(t.kind==='pre')return compact?<code key={i}>{t.value}</code>:<pre key={i}><code>{t.value}</code></pre>
- return <span key={i}>{t.value}</span>
+ return <span key={i}>{textNodes(t.value,compact)}</span>
 })}
 export function MathText({content,compact=false}:{content:string;compact?:boolean}){
  return compact?<span className="math-text-inline">{nodes(content??'',true)}</span>:<div className="chat-rich math-text-block">{nodes(content??'',false)}</div>
