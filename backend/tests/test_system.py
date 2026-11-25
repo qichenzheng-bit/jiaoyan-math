@@ -17,3 +17,7 @@ def test_business_api_requires_login():
     for path in ("/api/resources", "/api/resources/subjects", "/api/qoder/status"):
         assert client.get(path).status_code == 401
     assert client.post("/api/qoder/test", json={"model": "Auto", "prompt": "test"}).status_code == 401
+
+def test_qoder_login_requires_admin():
+    for action in ("start", "cancel"):
+        assert client.post("/api/qoder/login/"+action).status_code == 401

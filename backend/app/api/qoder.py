@@ -42,3 +42,11 @@ def status():
 def test(body:Prompt):
     if not body.prompt.strip(): raise HTTPException(422,"请输入测试内容")
     return request("POST","/test",body.model_dump())
+
+@router.post("/login/start", dependencies=[Depends(require_origin)])
+def login_start():
+    return request("POST", "/login/start", {})
+
+@router.post("/login/cancel", dependencies=[Depends(require_origin)])
+def login_cancel():
+    return request("POST", "/login/cancel", {})

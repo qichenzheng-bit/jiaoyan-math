@@ -5,3 +5,6 @@
 Qoder CN：调用参考旧仓库 cli_specs 和 command_builder，仅 Auto/Fast 两档实验。网页使用现有管理员鉴权及 Origin 校验，调用本机 Unix socket 独立 worker。worker 不以 Web/Runner 账号或 root 运行，不继承数据库环境；默认关闭工具及会话持久化，临时空目录调用。未安装/授权时显示不可用；不可将 PAT、密码或登录文件上传至仓库。账号登录与 Linux PATH、实际参数必须现场验证。安装见 https://qoder.com.cn/cli ，应以独立账号安装、授权。系统服务模板和 worker 需管理员审阅后安装到 /opt/jiaoyan-qoder、/etc/systemd/system，不能从可写工作目录直接以 root 执行。网页仅单轮同步测试，40 秒超时，不是生产聊天或任务系统。
 
 验收：CI 的 Alembic schema check、PostgreSQL CRUD 与前端构建；服务器先验证资源录入、查重和归档，然后独立账号 CLI 安装登录、启动 worker、网页测试。未验证真实模型调用。
+
+## 网页登录升级
+通过官方 qoderclicn login 启动授权，最多等待五分钟，授权链接仅接受官方域名；不输出原始登录日志或密码。CLI 完成登录不等于推理可用，实际模型响应后标记已验证。原有 CLI 凭据不删除。首次升级需管理员校验并更新 /opt/jiaoyan-qoder/qoder_worker.py，随后重启独立 worker；普通网页部署不能改写 root 持有的 worker。跨设备登录回调及已安装 CLI 的非交互输出需现场验收。
