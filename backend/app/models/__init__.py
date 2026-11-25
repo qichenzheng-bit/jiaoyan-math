@@ -211,6 +211,23 @@ class IntakeJob(Base):
     created_at: Mapped[int]=mapped_column(BigInteger)
     updated_at: Mapped[int]=mapped_column(BigInteger)
 
+class IntakeSupplement(Base):
+    __tablename__="intake_supplements"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    job_id: Mapped[str]=mapped_column(ForeignKey("intake_jobs.id",ondelete="RESTRICT"),index=True)
+    item_uid: Mapped[str]=mapped_column(String(36))
+    base_revision: Mapped[int]=mapped_column(Integer)
+    base_item: Mapped[dict]=mapped_column(JSON)
+    fields: Mapped[list]=mapped_column(JSON)
+    instruction: Mapped[str]=mapped_column(Text)
+    model: Mapped[str]=mapped_column(String(80))
+    state: Mapped[str]=mapped_column(String(16))
+    detail: Mapped[str]=mapped_column(Text)
+    proposal: Mapped[dict]=mapped_column(JSON)
+    accepted: Mapped[list]=mapped_column(JSON)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
 class StudioItem(Base):
     __tablename__="studio_items"
     id: Mapped[str]=mapped_column(String(36),primary_key=True)

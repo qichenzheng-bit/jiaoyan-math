@@ -167,6 +167,24 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert j["provenance"]["intent"]=="question"
         assert client.post("/api/intelligence/jobs/"+j["id"]+"/retry",headers=origin,json={"revision":j["revision"]}).status_code==409
         assert j["state"]=="review" and j["source_id"]==created_doc["source_id"]
+        def fake_supplement(method,path,body=None):
+            if path=="/status":return {"chat_available":True}
+            if path=="/chat/start":return {"state":"running"}
+            return {"state":"done","answer":'{"answer":"1","solution":"利用重要极限"}'}
+        monkeypatch.setattr(qoder,"request",fake_supplement)
+        base="/api/intelligence/jobs/"+j["id"]+"/supplements"
+        proposal=client.post(base,headers=origin,json={"revision":j["revision"],"item_uid":j["items"][0]["uid"],"fields":["answer","solution"]})
+        assert proposal.status_code==200,proposal.text
+        sid=proposal.json()["id"]
+        assert client.get(base).json()[0]["state"]=="review"
+        assert client.get("/api/intelligence/jobs/"+j["id"]).json()["items"][0]["answer"]==""
+        assert client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]}).status_code==409
+        merged=client.post(base+"/"+sid+"/accept",headers=origin,json={"revision":j["revision"],"fields":["answer"]})
+        assert merged.status_code==200,merged.text
+        j=merged.json()
+        assert j["items"][0]["answer"]=="1" and j["items"][0]["solution"]==""
+        assert client.get(base).json()[0]["accepted"]==["answer"]
+        monkeypatch.setattr(qoder,"request",fake_ingest)
         converted=client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]})
         assert converted.status_code==200,converted.text
         converted_doc=client.get("/api/documents/"+converted.json()["document_id"]).json()
