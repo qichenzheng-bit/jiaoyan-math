@@ -24,4 +24,8 @@ const paths:Record<string,ReactNode>={
 export function Icon({name,size=20}:{name:string;size?:number}){
  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]??paths.home}</svg>
 }
-export function BrandMark(){return <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 36 36" width="30" height="30" fill="none"><path d="M5 23 12 10l6 13 6-13 7 13" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 28h22" stroke="currentColor" strokeWidth="1.6" opacity=".65" strokeLinecap="round"/></svg></span>}
+const lightLogo = new URL('../assets/logo.svg', import.meta.url).href
+const darkLogo = new URL('../assets/logo-dark.svg', import.meta.url).href
+export function BrandMark({onDark=false}:{onDark?:boolean}){
+ return <span className={'brand-logo'+(onDark?' on-dark':'')}><img className="logo-light" src={lightLogo} alt="微光数学"/><img className="logo-dark" src={darkLogo} alt="微光数学"/></span>
+}

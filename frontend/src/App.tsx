@@ -75,7 +75,7 @@ export default function App(){
  return <div className="shell">
   {menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
   <nav className={menu?'nav open':'nav'} aria-label="主导航">
-   <Link className="brand" to="/" onClick={()=>setMenu(false)}><BrandMark/><span><strong>{preferences.display_name}</strong><small>MATH STUDIO</small></span></Link>
+   <Link className="brand" to="/" onClick={()=>setMenu(false)}><BrandMark/>{preferences.display_name!==defaults.display_name&&<span className="custom-brand-name">{preferences.display_name}</span>}</Link>
    <div className="nav-scroll">{groups.map(g=><section className="nav-group" key={g.id}><div className="nav-label">{g.label}</div>{modules.filter(m=>m.group===g.id).map(m=><NavLink key={m.path} end={m.path==='/'} to={m.path} onClick={()=>setMenu(false)}><Icon name={m.icon} size={19}/><span>{m.name}</span>{m.path===location.pathname&&<span className="active-indicator"/>}</NavLink>)}</section>)}</div>
    <div className="nav-footer"><span className="avatar">{user.slice(0,1).toUpperCase()}</span><div className="account"><strong>{user}</strong><small>个人教研空间</small></div><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={logout}><Icon name="logout" size={19}/></button></div>
   </nav>
