@@ -110,6 +110,10 @@ with sync_playwright() as p:
             continue
         if name=="00-home":
             assert page.get_by_label("输入消息").is_visible()
+            assert page.locator(".clean-chat.chat-main-area").count()==1
+            assert page.locator(".clean-chat .chat-main-area").count()==0
+            assert page.locator(".clean-chat > .chat-composer > textarea").count()==1
+            assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px' && getComputedStyle(el).boxShadow === 'none'")
             assert page.get_by_text("今天想做什么？",exact=True).is_visible()
             assert page.locator(".chat-history").count()==0
             assert page.locator(".workflow-step").count()==0
@@ -234,6 +238,9 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT/"10-home-mobile.png"),full_page=False)
     assert page.locator(".mobile-tabs").count()==0
     assert page.get_by_label("输入消息").is_visible()
+    assert page.locator(".clean-chat > .chat-composer").is_visible()
+    assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.get_by_role("button",name="打开导航").click()
     assert page.locator(".nav.open").is_visible()
     page.locator(".nav.open").get_by_role("button",name="教学教研",exact=True).click()
