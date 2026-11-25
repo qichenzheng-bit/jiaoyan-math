@@ -214,6 +214,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert applied.json()["blocks"][0]["answer"]=="1"
         assert applied.json()["revision"]==converted_doc["revision"]+1
         assert client.get(edit_base+"/"+eid).json()["state"]=="accepted"
+        assert any(t["id"]==eid and t["kind"]=="document_ai" and t["document_id"]==converted_doc["id"] and t["state"]=="accepted" for t in client.get("/api/tasks").json())
         assert client.post(edit_base,headers=origin,json=payload).status_code==409
         monkeypatch.setattr(qoder,"request",fake_ingest)
         assert client.get("/api/documents/"+created_doc["id"]+"/origin").json() is None
