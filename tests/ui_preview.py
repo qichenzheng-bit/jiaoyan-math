@@ -292,25 +292,29 @@ with sync_playwright() as p:
         route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture,ensure_ascii=False))
     context.route("**/api/qoder/status",login_api)
     page.goto("http://127.0.0.1:4173/qoder",wait_until="networkidle")
-    page.get_by_role("button",name="登录账号",exact=True).click()
+    page.get_by_role("button",name="获取授权链接",exact=True).click()
     page.get_by_role("alert").filter(has_text="Qoder CN 暂不可用").wait_for()
     login_fixture.update(available=True,detail="CLI 已安装",auth_ui=False,model_discovery=True)
     page.get_by_role("button",name="刷新状态").click()
     page.get_by_text("服务器执行服务版本过旧，不支持网页授权。",exact=True).wait_for()
-    page.get_by_role("button",name="登录账号",exact=True).click()
+    page.get_by_role("button",name="获取授权链接",exact=True).click()
     page.get_by_role("alert").filter(has_text="尚不支持网页授权").wait_for()
     login_fixture.update(auth_ui=True)
     page.get_by_role("button",name="刷新状态").click()
     page.get_by_text("服务器执行服务版本过旧，不支持网页授权。",exact=True).wait_for(state="detached")
-    page.evaluate("window.open = () => null")
+    page.evaluate("window.__authPopupCount=0; window.open=()=>{window.__authPopupCount++;return null}")
     def start_login(route):
         login_fixture["login"]={"state":"waiting","url":"https://qoder.com.cn/auth/login?state=preview","detail":"请在浏览器完成官方授权"}
         route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture["login"],ensure_ascii=False))
     context.route("**/api/qoder/login/start",start_login)
-    page.get_by_role("button",name="登录账号",exact=True).click()
+    page.get_by_role("button",name="获取授权链接",exact=True).click()
     link=page.get_by_role("link",name="打开授权页",exact=True)
     link.wait_for()
     assert link.get_attribute("href")=="https://qoder.com.cn/auth/login?state=preview"
+    assert page.get_by_label("授权链接",exact=True).input_value()=="https://qoder.com.cn/auth/login?state=preview"
+    assert page.evaluate("window.__authPopupCount")==0
+    assert page.get_by_role("button",name="复制授权链接",exact=True).is_enabled()
+    assert page.get_by_role("button",name="我已登录，检查状态",exact=True).is_enabled()
     assert page.get_by_text("等待授权",exact=True).is_visible()
     page.screenshot(path=str(OUT/"31-qoder-auth-mobile.png"),full_page=False)
     # Complete the simulated official login: the current account's actual
