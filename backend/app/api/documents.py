@@ -34,7 +34,7 @@ class Block(BaseModel):
     score:float=Field(default=0,ge=0,le=1000)
 class Draft(BaseModel):
     title:str=Field(min_length=1,max_length=200)
-    kind:Literal["intake","handout","paper"]="intake"
+    kind:Literal["intake","handout","paper","textbook"]="intake"
     subject:str=Field(default="",max_length=40)
     source_id:str|None=Field(default=None,max_length=36)
     blocks:list[Block]=Field(default_factory=list,max_length=200)
@@ -88,7 +88,7 @@ def references(db,d):
     for id in existing-files:db.delete(db.get(FileReference,(id,"teaching_document",d.id)))
     for id in files-existing:storage.link_file(db,id,"teaching_document",d.id)
 @router.get("")
-def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["intake","handout","paper"]|None=None,source_id:str|None=Query(None,max_length=36),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["intake","handout","paper","textbook"]|None=None,source_id:str|None=Query(None,max_length=36),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
     stmt=select(Doc).where(Doc.archived==archived)
     if q.strip():stmt=stmt.where(Doc.title.contains(q.strip(),autoescape=True))
     if kind:stmt=stmt.where(Doc.kind==kind)
@@ -146,10 +146,10 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
 @router.post("/{id}/promote",dependencies=[Depends(require_origin)])
 def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
-    if d.archived or d.revision!=body.revision or d.kind not in ("paper","handout") or not d.blocks:raise HTTPException(409,"文档不可转正或版本冲突")
+    if d.archived or d.revision!=body.revision or d.kind not in ("paper","handout","textbook") or not d.blocks:raise HTTPException(409,"文档不可转正或版本冲突")
     if d.source_id:return public(d)
-    text="自编"+("试卷" if d.kind=="paper" else "讲义")+"；对应文档编号 "+d.id
-    data=bank.clean(bank.Draft(kind="source",title=d.title,subject=d.subject,content=text,source_type="exam" if d.kind=="paper" else "handout",authority_tier="internal_handout"),db)
+    text="自编"+{"paper":"试卷","handout":"讲义","textbook":"教材"}[d.kind]+"；对应文档编号 "+d.id
+    data=bank.clean(bank.Draft(kind="source",title=d.title,subject=d.subject,content=text,source_type={"paper":"exam","handout":"handout","textbook":"textbook"}[d.kind],authority_tier="internal_handout"),db)
     r=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(r);db.flush();bank.snapshot(db,r)
     d.source_id=r.id;d.revision+=1;d.updated_at=now();references(db,d)
