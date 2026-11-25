@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from datetime import date
 from pydantic import BaseModel,Field,ValidationError
 from fastapi import APIRouter,Depends,HTTPException,Query
-from sqlalchemy import select,func
+from sqlalchemy import select,func,or_
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user,require_origin,now,audit
@@ -108,9 +108,11 @@ def save_version(db,r):
 @router.get("/presets")
 def presets():return PRESETS
 @router.get("")
-def listing(kind:Kind,q:str=Query("",max_length=200),archived:bool=False,limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(kind:Kind,q:str=Query("",max_length=200),category:str=Query("",max_length=24),favorite:bool=False,archived:bool=False,limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
     stmt=select(Item).where(Item.kind==kind,Item.archived==archived)
-    if q.strip():stmt=stmt.where(Item.title.contains(q.strip(),autoescape=True))
+    if category:stmt=stmt.where(Item.data["category"].as_string()==category)
+    if favorite:stmt=stmt.where(Item.data["favorite"].as_boolean()==True)
+    if q.strip():stmt=stmt.where(or_(Item.title.contains(q.strip(),autoescape=True),Item.data["note"].as_string().contains(q.strip(),autoescape=True),Item.data["content"].as_string().contains(q.strip(),autoescape=True)))
     return {"items":[public(r) for r in db.scalars(stmt.order_by(Item.updated_at.desc(),Item.id).offset(offset).limit(limit))],"total":db.scalar(select(func.count()).select_from(stmt.subquery()))}
 @router.post("",dependencies=[Depends(require_origin)])
 def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):

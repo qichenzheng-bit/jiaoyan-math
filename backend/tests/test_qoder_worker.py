@@ -37,3 +37,13 @@ def test_chat_events():
 
 def test_model_parser_rejects_option_like_rows():
     assert worker.parse_models('MODEL\n--unsafe\n- Auto\n* Fast') == ['Auto','Fast']
+
+def test_durable_job_snapshot(tmp_path,monkeypatch):
+    monkeypatch.setattr(worker,"SNAPSHOT_DIR",tmp_path)
+    ident="12345678-1234-1234-1234-123456789abc"
+    worker.save_snapshot({"id":ident,"state":"done","answer":"完成","detail":""})
+    assert worker.load_snapshot(ident)["answer"]=="完成"
+    assert worker.chat_state(ident)[0]==200
+    assert worker.load_snapshot("../bad") is None
+    worker.save_snapshot({"id":ident,"state":"running","answer":"","detail":""})
+    assert worker.load_snapshot(ident)["state"]=="failed"

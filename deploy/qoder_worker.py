@@ -211,7 +211,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 3, "chat_available": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 4, "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
@@ -280,6 +280,53 @@ def chat_event(event):
 def chat_snapshot(job):
     return {k: job[k] for k in ("id","state","answer","detail")}
 
+
+# Finished snapshots survive a worker restart until the web service reads them.
+# A bounded, private cache is not a replacement for the PostgreSQL history.
+SNAPSHOT_DIR = Path.home() / ".jiaoyan-job-results"
+SNAPSHOT_MAX = 512
+SNAPSHOT_TTL = 7 * 86400
+
+def save_snapshot(job):
+    if not JOB_ID.fullmatch(job["id"]):
+        return
+    SNAPSHOT_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = SNAPSHOT_DIR / (job["id"] + ".json")
+    fd, name = tempfile.mkstemp(dir=SNAPSHOT_DIR, prefix=".result-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({**chat_snapshot(job), "saved_at": int(time.time())}, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+def load_snapshot(ident):
+    if not JOB_ID.fullmatch(ident):
+        return None
+    try:
+        path = SNAPSHOT_DIR / (ident + ".json")
+        if path.stat().st_size > 512000:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if value.get("id") != ident or time.time()-value.get("saved_at",0)>SNAPSHOT_TTL:
+            return None
+        if value.get("state") == "running":
+            value.update(state="failed",detail="执行服务已重启；保留已写入的结果")
+        return chat_snapshot(value)
+    except (OSError,ValueError,TypeError,KeyError):
+        return None
+
+def prune_snapshots():
+    try:
+        files = sorted(SNAPSHOT_DIR.glob("*.json"), key=lambda p:p.stat().st_mtime, reverse=True)
+        for i,path in enumerate(files):
+            if i>=SNAPSHOT_MAX or time.time()-path.stat().st_mtime>SNAPSHOT_TTL:
+                path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
 def chat_run(job, exe, model, prompt):
     global chat_active
     proc = None
@@ -347,6 +394,12 @@ def chat_run(job, exe, model, prompt):
         with lock:
             state="stopped" if job["cancel"] else "failed" if failure or not job["answer"] else "done"
             job.update(state=state,detail={"stopped":"已停止生成","failed":"模型调用失败或超时，请检查授权、额度及 CLI 事件格式","done":""}[state],proc=None)
+            try:
+                save_snapshot(job)
+                prune_snapshots()
+            except OSError:
+                # Live result remains available if the disk is temporarily unavailable.
+                pass
             chat_active=None
 
 def chat_start(data):
@@ -359,11 +412,15 @@ def chat_start(data):
     if not exe: return 503,{"detail":"未安装 Qoder CN CLI"}
     with lock:
         if ident in chat_jobs: return 200,chat_snapshot(chat_jobs[ident])
+        cached=load_snapshot(ident)
+        if cached: return 200,cached
         if chat_active or login_process is not None: return 409,{"detail":"当前已有模型任务或授权，请先完成"}
         # Keep a bounded number of completed jobs for reconnecting clients.
         for old in list(chat_jobs)[:-31]:
             if chat_jobs[old]["state"]!="running": del chat_jobs[old]
         job={"id":ident,"state":"running","answer":"","detail":"","proc":None,"cancel":False}
+        try: save_snapshot(job)
+        except OSError: return 503,{"detail":"任务结果缓存不可写，请检查执行服务存储"}
         chat_jobs[ident]=job
         chat_active=ident
         threading.Thread(target=chat_run,args=(job,exe,model,prompt),daemon=True).start()
@@ -372,7 +429,9 @@ def chat_start(data):
 def chat_state(ident, cancel=False):
     with lock:
         job=chat_jobs.get(ident)
-        if not job: return 404,{"detail":"执行任务不存在，可能已重启"}
+        if not job:
+            cached=load_snapshot(ident)
+            return (200,cached) if cached else (404,{"detail":"执行任务不存在或结果已过期"})
         if cancel and job["state"]=="running":
             job["cancel"]=True
             if job["proc"]: stop_process(job["proc"])

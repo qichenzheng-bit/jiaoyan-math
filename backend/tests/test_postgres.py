@@ -137,6 +137,9 @@ def test_migration_and_login(tmp_path, monkeypatch):
         a=asset.json()
         assert client.put("/api/studio/"+a["id"],headers=origin,json={"kind":"asset","title":"修改公式","data":a["data"],"revision":a["revision"]}).status_code==200
         assert len(client.get("/api/studio/"+a["id"]+"/versions").json())==2
+        assert client.get("/api/studio?kind=asset&category=formula").json()["total"]==1
+        assert client.get("/api/studio?kind=asset&category=image").json()["total"]==0
+        assert client.get("/api/studio?kind=asset&favorite=true").json()["total"]==0
         work=client.post("/api/studio",headers=origin,json={"kind":"work","title":"作品","data":{"category":"article","content":"正文"}}).json()
         assert client.post("/api/studio",headers=origin,json={"kind":"publication","title":"发布","data":{"platform":"xiaohongshu","work_id":work["id"],"state":"published"}}).status_code==422
         account=client.post("/api/studio",headers=origin,json={"kind":"account","title":"测试账户","data":{"platform":"qoder_cn"}}).json()

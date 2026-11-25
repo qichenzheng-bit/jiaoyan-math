@@ -19,11 +19,11 @@ class LocalConnection(http.client.HTTPConnection):
         self.sock.connect(SOCKET)
 
 def request(method,path,body=None):
-    connection=LocalConnection("localhost",timeout=48)
+    connection=LocalConnection("localhost",timeout=3 if method=="GET" else 48)
     try:
         connection.request(method,path,json.dumps(body,ensure_ascii=False).encode() if body is not None else None,{"Content-Type":"application/json"})
         response=connection.getresponse()
-        result=json.loads(response.read(262144))
+        result=json.loads(response.read(524288))
         if response.status!=200:
             raise HTTPException(response.status if response.status in (404,409,422,503,504) else 502, result.get("detail","Qoder调用失败"))
         return result
