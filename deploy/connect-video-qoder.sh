@@ -4,7 +4,10 @@ set -euo pipefail
 [[ $(id -u) == 0 ]] || { echo "Run as root"; exit 1; }
 base="$(getent passwd jiaoyan | cut -d: -f6)/jiaoyan-app"
 release="$(readlink -f "$base/current")"
-test -f "$release/deploy/video_qoder_adapter.py"
+if [ ! -f "$release/deploy/video_qoder_adapter.py" ] || ! grep -q '"busy": bool(chat_active' "$release/deploy/qoder_worker.py"; then
+  echo "QODER_ADAPTER_NOT_READY"
+  exit 1
+fi
 test -f "$release/deploy/qoder_worker.py"
 test -f /opt/jiaoyan-video/runtime-fec8a4f/SOURCE_REVISION
 systemctl is-active --quiet jiaoyan-video
@@ -43,6 +46,8 @@ systemctl restart jiaoyan-qoder
 systemctl restart jiaoyan-video
 for n in $(seq 1 20); do
   if curl -fsS --max-time 2 http://127.0.0.1:8766/health >/dev/null; then
+    # Check from the actual service account and group, without showing credentials.
+    runuser -u jiaoyan-video -g jiaoyan-video -G jiaoyan -- /opt/jiaoyan-video/venv/bin/python -c "import sys; sys.path.insert(0,'/opt/jiaoyan-video/runtime-fec8a4f'); from video_qoder_adapter import target; assert target('qoder_cli')['installed'], 'QODER_SOCKET_UNREACHABLE'"
     echo "VIDEO_QODER_READY"
     exit 0
   fi

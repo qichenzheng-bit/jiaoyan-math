@@ -47,3 +47,12 @@ def test_durable_job_snapshot(tmp_path,monkeypatch):
     assert worker.load_snapshot("../bad") is None
     worker.save_snapshot({"id":ident,"state":"running","answer":"","detail":""})
     assert worker.load_snapshot(ident)["state"]=="failed"
+
+
+def test_video_request_rejects_oversize_and_unsafe_parameters(monkeypatch):
+    monkeypatch.setattr(worker,"catalog",None)
+    ident="12345678-1234-1234-1234-123456789abc"
+    assert worker.chat_start({"id":ident,"model":"Auto","prompt":"题"*41000},video=True)[0]==422
+    assert worker.chat_start({"id":ident,"model":"Auto","prompt":"ok","timeout":901},video=True)[0]==422
+    assert worker.chat_start({"id":ident,"model":"Auto","prompt":"ok","effort":"--help"},video=True)[0]==422
+    assert worker.chat_start({"id":ident,"model":"Auto","prompt":"ok","system":"x"*4097},video=True)[0]==422

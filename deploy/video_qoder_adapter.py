@@ -51,7 +51,7 @@ def cancelled(chat_id):
     from weiguang_backend.ai.cli_probe import is_chat_cancelled
     from weiguang_backend.services.task_control import active_job, is_cancel_requested
     job = active_job()
-    return bool((job and is_cancel_requested(job)) or (chat_id and is_chat_cancelled(chat_id)))
+    return bool(is_cancel_requested(job) if job else (chat_id and is_chat_cancelled(chat_id)))
 
 
 def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt="",

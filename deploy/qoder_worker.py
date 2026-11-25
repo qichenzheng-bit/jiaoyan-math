@@ -211,7 +211,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 5, "video_inference": True, "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 5, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
