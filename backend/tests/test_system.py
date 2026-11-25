@@ -50,3 +50,6 @@ def test_intelligence_private():
 def test_task_refs_private():
     assert client.get("/api/tasks").status_code==401
     assert client.get("/api/chat/resource-search?q=Q").status_code==401
+
+def test_studio_private():
+    assert client.get("/api/studio?kind=asset").status_code==401

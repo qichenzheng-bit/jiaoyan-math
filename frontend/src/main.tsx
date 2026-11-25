@@ -20,3 +20,5 @@ import './doc-work.css'
 import './chat-refs.css'
 
 import './print-doc.css'
+
+import './studio.css'

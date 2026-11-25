@@ -198,3 +198,21 @@ class IntakeJob(Base):
     revision: Mapped[int]=mapped_column(Integer)
     created_at: Mapped[int]=mapped_column(BigInteger)
     updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class StudioItem(Base):
+    __tablename__="studio_items"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    kind: Mapped[str]=mapped_column(String(24),index=True)
+    title: Mapped[str]=mapped_column(String(200))
+    data: Mapped[dict]=mapped_column(JSON)
+    revision: Mapped[int]=mapped_column(Integer)
+    archived: Mapped[bool]=mapped_column(Boolean)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class StudioRevision(Base):
+    __tablename__="studio_revisions"
+    item_id: Mapped[str]=mapped_column(ForeignKey("studio_items.id",ondelete="RESTRICT"),primary_key=True)
+    revision: Mapped[int]=mapped_column(Integer,primary_key=True)
+    snapshot: Mapped[dict]=mapped_column(JSON)
+    created_at: Mapped[int]=mapped_column(BigInteger)

@@ -132,6 +132,17 @@ def test_migration_and_login(tmp_path, monkeypatch):
         converted=client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]})
         assert converted.status_code==200,converted.text
         assert client.get("/api/documents/"+converted.json()["document_id"]).json()["blocks"][0]["kind"]=="question"
+        asset=client.post("/api/studio",headers=origin,json={"kind":"asset","title":"常用公式","data":{"category":"formula","content":"x^2"}})
+        assert asset.status_code==200,asset.text
+        a=asset.json()
+        assert client.put("/api/studio/"+a["id"],headers=origin,json={"kind":"asset","title":"修改公式","data":a["data"],"revision":a["revision"]}).status_code==200
+        assert len(client.get("/api/studio/"+a["id"]+"/versions").json())==2
+        work=client.post("/api/studio",headers=origin,json={"kind":"work","title":"作品","data":{"category":"article","content":"正文"}}).json()
+        assert client.post("/api/studio",headers=origin,json={"kind":"publication","title":"发布","data":{"platform":"xiaohongshu","work_id":work["id"],"state":"published"}}).status_code==422
+        account=client.post("/api/studio",headers=origin,json={"kind":"account","title":"测试账户","data":{"platform":"qoder_cn"}}).json()
+        check={"kind":"checkin","title":"签到","data":{"account_id":account["id"],"day":"2026-11-25","state":"success","earned":2}}
+        assert client.post("/api/studio",headers=origin,json=check).status_code==200
+        assert client.post("/api/studio",headers=origin,json=check).status_code==409
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
