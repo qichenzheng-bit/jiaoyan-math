@@ -62,6 +62,7 @@ with sync_playwright() as p:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
         assert page.locator(".main-section-links").is_visible() or page.locator(".nav").count()==1
+        assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
         if name=="01-intake":
@@ -77,7 +78,7 @@ with sync_playwright() as p:
         if name=="17-intake-knowledge":
             assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
         if name=="05-chat":
-            assert page.locator(".intake-chat-prompts > *").count()==6
+            assert page.locator(".intake-chat-prompts > *").count()==4
             page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
             page.get_by_role("button",name="转录入",exact=True).click()
             page.wait_for_url("**/intelligence")
@@ -110,21 +111,26 @@ with sync_playwright() as p:
         if name=="00-home":
             assert page.get_by_label("输入消息").is_visible()
             assert page.get_by_text("今天想做什么？",exact=True).is_visible()
-            assert page.locator(".chat-history").is_hidden()
+            assert page.locator(".chat-history").count()==0
             assert page.locator(".workflow-step").count()==0
             assert page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).is_visible()
             page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).click()
             page.locator(".chat-intake-suggestion").wait_for()
-            page.locator(".clean-topbar").get_by_role("link",name="新建对话").click()
+            page.locator("#workspace-navigation").get_by_role("link",name="新建对话").click()
             page.get_by_text("今天想做什么？",exact=True).wait_for()
+            page.locator(".clean-recent").first.get_by_role("button",name="全部",exact=True).click()
+            page.locator("#workspace-navigation").get_by_label("搜索会话").wait_for()
+            page.locator("#workspace-navigation").get_by_label("会话范围").select_option("archived")
+            page.locator("#workspace-navigation").get_by_text("暂无已归档会话").wait_for()
+            assert page.locator(".chat-history").count()==0
+            page.locator(".clean-recent").first.get_by_role("button",name="收起",exact=True).click()
         if name=="29-overview":
             assert page.locator(".workflow-step").count()==5
             assert page.locator(".home-stat").count()==6
         if name=="12-create":
             assert page.locator(".hub-group").count()==3
-            page.locator(".clean-context-menu summary").click()
-            assert page.locator(".clean-context-menu").get_by_role("link",name="封面设计").is_visible()
-            page.locator(".clean-context-menu summary").click()
+            assert page.locator("#workspace-navigation").get_by_role("link",name="封面设计",exact=True).is_visible()
+            assert page.locator(".clean-context-menu").count()==0
         if name=="13-video":
             assert page.locator(".video-stage-track > div").count()==5
         if name=="02-bank":
@@ -220,7 +226,9 @@ with sync_playwright() as p:
     assert page.get_by_label("输入消息").is_visible()
     page.get_by_role("button",name="打开导航").click()
     assert page.locator(".nav.open").is_visible()
-    page.locator(".nav.open").get_by_role("link",name="资料录入",exact=True).click()
+    page.locator(".nav.open").get_by_role("button",name="资料录入",exact=True).click()
+    assert page.locator(".nav.open").get_by_role("link",name="整套资料录入",exact=True).is_visible()
+    page.locator(".nav.open").get_by_role("link",name="录入工作台",exact=True).click()
     page.locator(".intake-hub").wait_for()
     assert not page.locator(".nav.open").count()
     page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
