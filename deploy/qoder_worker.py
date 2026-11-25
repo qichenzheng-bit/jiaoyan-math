@@ -211,7 +211,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 4, "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 5, "video_inference": True, "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
@@ -307,7 +307,7 @@ def load_snapshot(ident):
         return None
     try:
         path = SNAPSHOT_DIR / (ident + ".json")
-        if path.stat().st_size > 512000:
+        if path.stat().st_size > 2_000_000:
             return None
         value = json.loads(path.read_text(encoding="utf-8"))
         if value.get("id") != ident or time.time()-value.get("saved_at",0)>SNAPSHOT_TTL:
@@ -328,19 +328,24 @@ def prune_snapshots():
         pass
 
 def chat_run(job, exe, model, prompt):
+    video = job.get("video", False)
+    output_limit = 300000 if video else 48000
     global chat_active
     proc = None
     failure = False
     try:
         with tempfile.TemporaryDirectory(prefix="qoder-chat-") as cwd:
             # Prompt is passed as one argv entry; bounded by API and worker.
-            proc = subprocess.Popen([exe,"-m",model,"--tools","","--no-session-persistence",
-                "--output-format","stream-json","-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
+            args = [exe,"-m",model,"--tools","","--no-session-persistence","--output-format","stream-json"]
+            if video:
+                if job["system"]: args += ["--system-prompt", job["system"]]
+                if job["effort"] != "default": args += ["--reasoning-effort",job["effort"]]
+            proc = subprocess.Popen(args+["-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
             with lock:
                 job["proc"] = proc
                 if job["cancel"]: stop_process(proc)
-            deadline = time.monotonic()+240
+            deadline = time.monotonic()+(job["timeout"] if video else 240)
             buffer = b""
             with selectors.DefaultSelector() as sel:
                 sel.register(proc.stdout,selectors.EVENT_READ)
@@ -363,8 +368,9 @@ def chat_run(job, exe, model, prompt):
                         delta,final,bad=chat_event(event)
                         failure=failure or bad
                         with lock:
-                            if final: job["answer"]=final[:48000]
-                            elif delta: job["answer"]=(job["answer"]+delta)[:48000]
+                            candidate = final or (job["answer"]+delta)
+                            if video and len(candidate)>output_limit: failure=True
+                            else: job["answer"]=candidate[:output_limit]
                         if failure: break
                     if failure: break
                 else:
@@ -374,8 +380,9 @@ def chat_run(job, exe, model, prompt):
                     delta,final,bad=chat_event(json.loads(buffer))
                     failure=failure or bad
                     with lock:
-                        if final: job["answer"]=final[:48000]
-                        elif delta: job["answer"]=(job["answer"]+delta)[:48000]
+                        candidate = final or (job["answer"]+delta)
+                        if video and len(candidate)>output_limit: failure=True
+                        else: job["answer"]=candidate[:output_limit]
                 except (ValueError,UnicodeError): pass
             if proc.poll() is None:
                 try: proc.wait(timeout=2)
@@ -402,12 +409,15 @@ def chat_run(job, exe, model, prompt):
                 pass
             chat_active=None
 
-def chat_start(data):
+def chat_start(data, video=False):
     global chat_active
     if not isinstance(data,dict): return 422,{"detail":"请求无效"}
     ident,model,prompt=data.get("id"),data.get("model"),data.get("prompt")
-    if not isinstance(ident,str) or not JOB_ID.fullmatch(ident) or not allowed_model(model) or not isinstance(prompt,str) or not 0<len(prompt.encode("utf-8"))<=100000:
-        return 422,{"detail":"模型或上下文无效"}
+    if not isinstance(ident,str) or not JOB_ID.fullmatch(ident) or not allowed_model(model) or not isinstance(prompt,str) or "\x00" in prompt or not 0<len(prompt.encode("utf-8"))<=(120000 if video else 100000):
+        return 422,{"detail":"模型或上下文无效；请检查模型及提示词长度"}
+    system,effort,timeout=data.get("system",""),data.get("effort","default"),data.get("timeout",900)
+    if video and (not isinstance(system,str) or "\x00" in system or len(system.encode("utf-8"))>4096 or effort not in ("default","low","medium","high","xhigh","max") or type(timeout) is not int or not 1<=timeout<=900):
+        return 422,{"detail":"视频模型参数无效"}
     exe=executable()
     if not exe: return 503,{"detail":"未安装 Qoder CN CLI"}
     with lock:
@@ -418,7 +428,7 @@ def chat_start(data):
         # Keep a bounded number of completed jobs for reconnecting clients.
         for old in list(chat_jobs)[:-31]:
             if chat_jobs[old]["state"]!="running": del chat_jobs[old]
-        job={"id":ident,"state":"running","answer":"","detail":"","proc":None,"cancel":False}
+        job={"id":ident,"state":"running","answer":"","detail":"","proc":None,"cancel":False,"video":video,"system":system,"effort":effort,"timeout":timeout}
         try: save_snapshot(job)
         except OSError: return 503,{"detail":"任务结果缓存不可写，请检查执行服务存储"}
         chat_jobs[ident]=job
@@ -461,13 +471,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
             return self.reply(*chat_state(self.path.split("/")[2], True))
-        if self.path == "/chat/start":
+        if self.path in ("/chat/start", "/video/start"):
             try:
                 n=int(self.headers.get("Content-Length","0"))
-                if not 0<n<=200000: raise ValueError()
+                if not 0<n<=(800000 if self.path == "/video/start" else 200000): raise ValueError()
                 data=json.loads(self.rfile.read(n))
             except (ValueError,UnicodeError): return self.reply(422,{"detail":"请求无效"})
-            return self.reply(*chat_start(data))
+            return self.reply(*chat_start(data, video=self.path == "/video/start"))
         if self.path == "/models/refresh":
             return self.reply(*refresh_models())
         if self.path == "/login/start":
