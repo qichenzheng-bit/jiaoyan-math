@@ -17,7 +17,7 @@ export default function Chat(){
  const [draft,setDraft]=useState(''),[files,setFiles]=useState<Attachment[]>([]),[model,setModel]=useState('Auto'),[options,setOptions]=useState<Catalog['models']>([])
  const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[history,setHistory]=useState(false),[edit,setEdit]=useState<string>(),[rename,setRename]=useState(false),[title,setTitle]=useState(''),[project,setProject]=useState('')
  const fileInput=useRef<HTMLInputElement>(null),scroll=useRef<HTMLDivElement>(null),nearBottom=useRef(true),activeId=useRef(''),polling=useRef(false)
- useEffect(()=>{const id=params.get('session');if(id){if(activeId.current!==id)void open(id);else setHistory(false)}else if(params.has('new'))resetChat();else if(params.has('history'))setHistory(true)},[params])
+ useEffect(()=>{const id=params.get('session');if(id){if(activeId.current!==id)void open(id);else setHistory(false)}else if(params.has('new'))resetChat();else if(params.has('history'))setHistory(true);else if(activeId.current)resetChat()},[params])
  useEffect(()=>{if(!picker||!search.trim()){setMatches([]);return}const controller=new AbortController();api<ResourceRef[]>('/chat/resource-search?q='+encodeURIComponent(search),{signal:controller.signal}).then(setMatches).catch(e=>{if(!controller.signal.aborted)setError(e.message)});return()=>controller.abort()},[picker,search])
  const running=Boolean(active?.messages.some(m=>m.state==='running'))
 useEffect(()=>{const reset=()=>fresh();window.addEventListener('wg-chat-new',reset);return()=>window.removeEventListener('wg-chat-new',reset)},[draft,busy,files,refs,running])

@@ -1,8 +1,6 @@
-name: CI
+name: Hosted CI (manual / PR)
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 permissions:
@@ -64,7 +62,7 @@ jobs:
       - run: npm run build
   deploy:
     needs: [backend, frontend, deployment-syntax]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.ENABLE_DEPLOY == 'true'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.ENABLE_DEPLOY == 'true'
     runs-on: [self-hosted, Linux, X64]
     env:
       GIT_CONFIG_COUNT: "1"

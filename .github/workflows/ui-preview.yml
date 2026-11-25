@@ -1,9 +1,6 @@
 name: UI Preview
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['frontend/**', '.github/workflows/ui-preview.yml', 'tests/ui_preview.py']
 permissions:
   contents: read
   statuses: write

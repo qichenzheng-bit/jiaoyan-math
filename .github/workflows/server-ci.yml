@@ -1,0 +1,49 @@
+name: Server CI and release
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: jiaoyan-production
+  cancel-in-progress: false
+jobs:
+  validate-and-release:
+    # Only trusted main commits can use the existing deployment runner.
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate shell scripts and pinned video source
+        run: |
+          set -euo pipefail
+          for f in deploy/*.sh; do bash -n "$f"; done
+          d=$(mktemp -d "$RUNNER_TEMP/jy-source.XXXXXX")
+          trap 'rm -rf -- "$d"' EXIT
+          bash deploy/unpack-video-source.sh "$d/source"
+      - name: Isolated PostgreSQL, frontend and browser validation
+        run: bash deploy/server-ci.sh
+      - name: Release only after successful checks
+        if: vars.ENABLE_DEPLOY == 'true'
+        run: bash deploy/release.sh
+      - name: Report release SHA
+        if: vars.ENABLE_DEPLOY == 'true'
+        run: |
+          test "$(cat "$HOME/jiaoyan-app/deployed-sha")" = "$GITHUB_SHA"
+          printf 'Verified deployed SHA: %s\n' "$GITHUB_SHA"
+      - name: Save test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: clean-workspace-screenshots
+          path: ui-screenshots/
+          if-no-files-found: ignore
+          retention-days: 3
