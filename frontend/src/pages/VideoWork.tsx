@@ -16,7 +16,8 @@ export default function VideoWork(){
  const [refresh,setRefresh]=useState(0)
  const row=detail?.id===selected?detail:projects.find(p=>p.id===selected)
  const running=row?.jobs?.some(j=>['running','queued','cancelling'].includes(j.status))??false
- const stage=row?.work_id?4:row?.lesson?.has_video?3:running?2:row?.engine_id?1:0
+ const activeJob=row?.jobs?.find(j=>['running','queued','cancelling'].includes(j.status))
+ const stage=row?.work_id?5:row?.lesson?.has_video?3:activeJob&&(activeJob.kind==='render'||/校验|渲染|render|validat/i.test(activeJob.phase??''))?2:row?.engine_id?1:0
  const jobNames:Record<string,string>={generate:'生成代码',render:'视频渲染',edit:'微调',edit_prepare:'微调准备',edit_reviewed:'微调渲染'}
  const jobStates:Record<string,string>={queued:'排队中',running:'执行中',cancelling:'正在取消',failed:'失败',cancelled:'已取消',done:'完成',success:'成功',completed:'完成'}
  useEffect(()=>{const c=new AbortController();api<Engine>('/video/status',{signal:c.signal}).then(setStatus).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});api<Project[]>('/video/projects',{signal:c.signal}).then(v=>{if(!c.signal.aborted)setProjects(Array.isArray(v)?v:[])}).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});return()=>c.abort()},[refresh])
