@@ -32,6 +32,7 @@ def test_video_model_syncs_both_groups(monkeypatch):
         if method=="PUT":
             for group in state.values():
                 group["model_id"]=body["model_id"]
+                group["reasoning_effort"]=body["reasoning_effort"]
             return {"configured":True,"model_id":body["model_id"]}
         return {"groups":state}
     monkeypatch.setattr(video_engine,"call",call)
@@ -41,3 +42,6 @@ def test_video_model_syncs_both_groups(monkeypatch):
     calls.clear()
     video_engine.configure_production_model("Fast")
     assert [m for m,p,b in calls]==["GET"]
+
+    video_engine.configure_production_model("Fast","high")
+    assert all(group["reasoning_effort"]=="high" for group in state.values())

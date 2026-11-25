@@ -19,7 +19,9 @@ def prepare_model(db):
     model=qoder.video_model_preference(db)
     if model not in {m['id'] for m in qoder.available_models()['models']}:
         raise HTTPException(422,'视频模型已不在可用清单，请重新配置')
-    engine.configure_production_model(model)
+    effort=qoder.stored_effort(db,qoder.VIDEO_EFFORT_KEY)
+    qoder.validate_effort(qoder.available_models(),model,effort,True)
+    engine.configure_production_model(model,effort)
 
 router = APIRouter(prefix="/video", dependencies=[Depends(current_user)])
 write = [Depends(require_origin)]

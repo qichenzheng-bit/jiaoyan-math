@@ -152,7 +152,7 @@ def turn(ident:str,body:Turn,db:Session=Depends(get_db),user:User=Depends(curren
     # Persist IDs before launching; a reconnect can query the exact job.
     db.commit()
     try:
-        qoder.request("POST","/chat/start",{"id":a.id,"model":body.model,"prompt":text})
+        qoder.request("POST","/chat/start",{"id":a.id,"model":body.model,"prompt":text,**qoder.assistant_effort(db,body.model)})
     except HTTPException as exc:
         # Transport failure may have occurred after the worker accepted the job.
         if exc.status_code not in (503,504):

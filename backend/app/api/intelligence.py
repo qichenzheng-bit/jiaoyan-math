@@ -122,7 +122,7 @@ def launch(db,user,body,provenance,retry_of=None):
     if provenance.get("kind")=="file_import":
         storage.link_file(db,provenance["file_id"],"intake_job",j.id)
     audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()
-    try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt})
+    try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt,**qoder.assistant_effort(db,j.model)})
     except HTTPException as e:
         # Ambiguous transport failures may occur after acceptance. Reconcile the original ID.
         if e.status_code not in (503,504):
@@ -306,7 +306,7 @@ def supplement_start(id:str,body:SupplementStart,db:Session=Depends(get_db),user
     s=IntakeSupplement(id=str(uuid4()),job_id=j.id,item_uid=body.item_uid,base_revision=j.revision,base_item=item,
         fields=body.fields,instruction=body.instruction,model=j.model,state="running",detail="",proposal={},accepted=[],created_at=now(),updated_at=now())
     db.add(s);audit(db,"intelligence.supplement.start",user.id);db.commit()
-    try:qoder.request("POST","/chat/start",{"id":s.id,"model":s.model,"prompt":prompt})
+    try:qoder.request("POST","/chat/start",{"id":s.id,"model":s.model,"prompt":prompt,**qoder.assistant_effort(db,s.model)})
     except HTTPException as e:
         if e.status_code not in (503,504):
             s=find_supplement(db,id,s.id);s.state="failed";s.detail=str(e.detail)[:400];s.updated_at=now();db.commit()

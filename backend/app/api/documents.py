@@ -330,7 +330,7 @@ def ai_edit_start(id:str,body:AiEditStart,db:Session=Depends(get_db),user:User=D
     e=DocumentAiEdit(id=str(uuid4()),document_id=id,base_revision=d.revision,base_blocks=blocks,fields=body.fields,
         instruction=body.instruction,model=model,state="running",detail="",changes=[],accepted=[],created_at=now(),updated_at=now())
     db.add(e);audit(db,"document.ai.start",user.id);db.commit()
-    try:qoder.request("POST","/chat/start",{"id":e.id,"model":e.model,"prompt":prompt})
+    try:qoder.request("POST","/chat/start",{"id":e.id,"model":e.model,"prompt":prompt,**qoder.assistant_effort(db,e.model)})
     except HTTPException as error:
         if error.status_code not in (503,504):
             row(db,id);e=ai_find(db,id,e.id);e.state="failed";e.detail=str(error.detail)[:400];e.updated_at=now();db.commit()
