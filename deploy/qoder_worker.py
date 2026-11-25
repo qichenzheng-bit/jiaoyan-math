@@ -53,6 +53,77 @@ login = {"state": "idle", "url": "", "detail": "尚未发起网页授权"}
 login_process = None
 verified_at = None
 
+# Model discovery follows the legacy CLI table parser, with strict identifiers.
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}")
+FALLBACK_MODELS = ("Auto", "Fast")
+catalog = None
+catalog_at = None
+
+def parse_models(output):
+    names = []
+    in_list = False
+    for raw in ANSI.sub("", output).splitlines():
+        text = raw.strip()
+        if not text:
+            continue
+        if not in_list:
+            if re.fullmatch(r"(?:available\s+)?models?(?:\s*\([^)]*\))?:?", text, re.I):
+                in_list = True
+                continue
+            if text.startswith(("- ", "* ")):
+                in_list = True
+            else:
+                continue
+        name = text.lstrip("- *").strip()
+        if MODEL_ID.fullmatch(name) and name.lower() not in {"model","models","warning","available","error","usage","id","name","description","none"}:
+            if name not in names:
+                names.append(name)
+    return names[:200]
+
+def model_catalog():
+    with lock:
+        names = list(FALLBACK_MODELS if catalog is None else catalog)
+        return {"models": [{"id": n, "label": n, "efforts": ["default"]} for n in names],
+                "source": "fallback" if catalog is None else "cli",
+                "updated_at": catalog_at}
+
+def refresh_models():
+    global catalog, catalog_at
+    with lock:
+        if login_process is not None:
+            return 409, {"detail": "请先完成或取消授权"}
+    exe = executable()
+    if not exe:
+        return 503, {"detail": "未安装 Qoder CN CLI"}
+    try:
+        with tempfile.TemporaryDirectory(prefix="qoder-models-") as work:
+            proc = subprocess.Popen([exe, "--list-models"], cwd=work, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+            try:
+                out, err = proc.communicate(timeout=35)
+            except subprocess.TimeoutExpired:
+                stop_process(proc)
+                proc.communicate()
+                return 504, {"detail": "模型清单读取超时，保留此前清单"}
+        output = out.decode("utf-8", "replace")
+        no_models = "no models available" in (output + err.decode("utf-8", "replace")).lower()
+        if proc.returncode != 0 and not no_models:
+            return 503, {"detail": "CLI 模型探测失败，保留此前清单"}
+        names = [] if no_models else parse_models(output)
+        if not names and not no_models:
+            return 503, {"detail": "无法解析 CLI 模型清单，保留此前清单"}
+        with lock:
+            catalog, catalog_at = names, int(time.time())
+        return 200, model_catalog()
+    except OSError:
+        return 503, {"detail": "无法启动模型探测"}
+
+def allowed_model(model):
+    if not isinstance(model, str) or not MODEL_ID.fullmatch(model):
+        return False
+    with lock:
+        return model in (FALLBACK_MODELS if catalog is None else catalog)
+
 def stop_process(proc):
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -102,7 +173,7 @@ def login_worker(proc):
                 login_process = None
 
 def start_login():
-    global login_process, verified_at
+    global login_process, verified_at, catalog, catalog_at
     with lock:
         if login_process is not None:
             return 200, dict(login)
@@ -120,6 +191,7 @@ def start_login():
             return 503, {"detail": "无法启动官方登录命令"}
         login_process = proc
         verified_at = None
+        catalog, catalog_at = None, None
         login.update(state="starting", url="", detail="正在获取官方授权链接")
         threading.Thread(target=login_worker, args=(proc,), daemon=True).start()
         return 200, dict(login)
@@ -135,7 +207,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 2}
 
 def invoke(model, prompt):
     global verified_at
@@ -186,8 +258,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/status":
             return self.reply(200, status())
+        if self.path == "/models":
+            return self.reply(200, model_catalog())
         return self.reply(404, {"detail": "Not found"})
     def do_POST(self):
+        if self.path == "/models/refresh":
+            return self.reply(*refresh_models())
         if self.path == "/login/start":
             return self.reply(*start_login())
         if self.path == "/login/cancel":
@@ -200,7 +276,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError()
             data = json.loads(self.rfile.read(n))
             model, prompt = data["model"], data["prompt"]
-            if model not in ("Auto", "Fast") or not isinstance(prompt, str) or not 0 < len(prompt.strip()) <= 12000:
+            if not allowed_model(model) or not isinstance(prompt, str) or not 0 < len(prompt.strip()) <= 12000:
                 raise ValueError()
         except (ValueError, KeyError, TypeError):
             return self.reply(422, {"detail": "参数不正确"})

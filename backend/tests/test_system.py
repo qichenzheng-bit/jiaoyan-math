@@ -21,3 +21,8 @@ def test_business_api_requires_login():
 def test_qoder_login_requires_admin():
     for action in ("start", "cancel"):
         assert client.post("/api/qoder/login/"+action).status_code == 401
+
+def test_model_config_is_private():
+    assert client.get("/api/qoder/models").status_code==401
+    assert client.get("/api/qoder/preferences").status_code==401
+    assert client.post("/api/qoder/models/refresh").status_code==401

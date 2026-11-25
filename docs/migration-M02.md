@@ -1,0 +1,2 @@
+# M02 AI 账号与模型
+参考旧仓库 login_ai.js、model_config.js、cli_auth/discovery_probes.py。三平台账号卡片、授权、模型配置修改/保存/取消、测试分离；Codex 和 agy 暂缓。Qoder 通过官方 CLI --list-models 获取模型，结果只在独立 worker 内缓存，失败保留旧清单并提示，未探测时仅兼容 Auto/Fast，空清单不回填。模型设置存于现有 settings 表，不需要迁移数据库。推理强度目前使用 CLI 默认，不伪造可选档位。积分需要官方可验证的额度数据，暂留官网入口；旧 PAT 与机器凭据读取逻辑不迁移。保留原有授权，worker version 2 需要人工更新 root-owned 文件并重启服务；网页发布不能写入独立 worker 安装目录。现有终端登录可验证，但手机跨设备授权、真实模型表格式和额度尚需实测。所有新 API 受现有登录保护，写操作验证 Origin。模型 ID 双层约束，禁止任意命令。

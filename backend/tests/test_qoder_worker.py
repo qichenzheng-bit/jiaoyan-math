@@ -16,3 +16,15 @@ def test_login_status_has_no_raw_credentials():
     assert result["login"]["state"]=="idle"
     assert result["verified_at"] is None
     assert "auth_ui" in result
+
+def test_model_catalog_parser():
+    assert worker.parse_models("Warning: start\nMODEL\nAuto\nFast\nQwen4-Max\n--unsafe\nQwen4-Max") == ["Auto","Fast","Qwen4-Max"]
+    assert worker.parse_models("Error: not authorized") == []
+
+def test_model_restricted_to_catalog(monkeypatch):
+    monkeypatch.setattr(worker,"catalog",["Qwen4-Max"])
+    assert worker.allowed_model("Qwen4-Max")
+    assert not worker.allowed_model("Auto")
+    assert not worker.allowed_model("--help")
+    monkeypatch.setattr(worker,"catalog",[])
+    assert not worker.allowed_model("Auto")

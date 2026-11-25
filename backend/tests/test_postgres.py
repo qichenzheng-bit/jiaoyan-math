@@ -53,6 +53,13 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/resources/"+rid+"/archive",headers=origin).status_code==200
         assert client.get("/api/resources?kind=question").json()["total"]==0
         assert client.post("/api/resources/"+rid+"/restore",headers=origin).status_code==200
+        from app.api import qoder
+        monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
+        assert client.get("/api/qoder/preferences").json()=={"model":"Auto"}
+        assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Qwen4-Max"}).status_code==200
+        assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max"}
+        assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Unknown"}).status_code==422
+        assert client.put("/api/qoder/preferences",json={"model":"Auto"}).status_code==403
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
