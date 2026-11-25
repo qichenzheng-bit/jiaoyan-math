@@ -11,8 +11,8 @@ const sections:Record<string,{lead:string;action:string;actionPath:string;groups
 export default function ModuleHub({path}:{path:string}){
  const section=sectionFor(path),data=sections[path]
  if(!section||!data)return null
- return <div className="module-hub"><header className="hub-heading"><div><p className="workspace-kicker">微光数学 · {section.name}</p><h1>{section.name}</h1><p className="muted">{data.lead}</p></div><Link className="button-link primary" to={data.actionPath}>{data.action}<Icon name="arrow" size={16}/></Link></header>
- {data.groups.map(group=><section className="hub-group" key={group.name}><div className="home-panel-head"><h2>{group.name}</h2><span className="muted">{group.note}</span></div><div className="hub-grid">{group.paths.map(p=>{const m=modules.find(m=>m.path===p);return m?<Link className="panel hub-card" key={p} to={p}><span className="soft-icon"><Icon name={m.icon} size={23}/></span><div><h3>{m.name}</h3><p className="muted">{m.desc}</p></div><span className="hub-card-arrow"><Icon name="arrow" size={17}/></span></Link>:null})}</div></section>)}
- {data.pending.length>0&&<section className="hub-planned"><div><Icon name="clock" size={19}/><h2>后续功能</h2></div><p className="muted">尚未开发，当前不可操作。</p><div className="planned-list">{data.pending.map(name=><span key={name}>{name}</span>)}</div></section>}
+ return <div className="module-hub"><header className="hub-heading"><div><h1>{section.name}</h1><p className="muted">{data.lead}</p></div><Link className="button-link primary" to={data.actionPath}>{data.action}<Icon name="arrow" size={16}/></Link></header>
+ {data.groups.map(group=><section className="hub-group" key={group.name}><div className="home-panel-head"><h2>{group.name}</h2><span className="muted">{group.note}</span></div><div className="hub-grid">{group.paths.map(p=>{const m=modules.find(m=>m.path===p);return m?<Link className="hub-card clean-tool-row" key={p} to={p}><Icon name={m.icon} size={20}/><div><h3>{m.name}</h3><p className="muted">{m.desc}</p></div><span className="hub-card-arrow"><Icon name="arrow" size={17}/></span></Link>:null})}</div></section>)}
+ {data.pending.length>0&&<details className="hub-planned"><summary>尚未接入的功能</summary><p className="muted">尚未开发，当前不可操作。</p><div className="planned-list">{data.pending.map(name=><span key={name}>{name}</span>)}</div></details>}
  </div>
 }

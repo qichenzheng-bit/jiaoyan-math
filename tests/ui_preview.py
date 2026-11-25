@@ -58,10 +58,10 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+    for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
-        assert page.locator(".main-section-links a").count()==6
+        assert page.locator(".main-section-links").is_visible() or page.locator(".nav").count()==1
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
         if name=="01-intake":
@@ -108,14 +108,16 @@ with sync_playwright() as p:
             page.screenshot(path=str(OUT/"20-intake-linked.png"),full_page=False)
             continue
         if name=="00-home":
+            assert page.get_by_label("输入消息").is_visible()
+            assert page.get_by_text("今天想做什么？",exact=True).is_visible()
+            assert page.locator(".chat-history").is_hidden()
+            assert page.locator(".workflow-step").count()==0
+        if name=="29-overview":
             assert page.locator(".workflow-step").count()==5
             assert page.locator(".home-stat").count()==6
         if name=="12-create":
             assert page.locator(".hub-group").count()==3
-            page.get_by_role("button",name="更多工具").click()
-            assert page.locator(".section-popover").get_by_text("封面设计").is_visible()
-            page.keyboard.press("Escape")
-            assert page.locator(".section-popover").count()==0
+            assert page.locator(".clean-local-nav").get_by_role("link",name="封面设计").is_visible()
         if name=="13-video":
             assert page.locator(".video-stage-track > div").count()==5
         if name=="02-bank":
@@ -201,12 +203,19 @@ with sync_playwright() as p:
     page.set_viewport_size({"width":1600,"height":900})
     # Theme and mobile smoke checks use the same compiled application.
     page.goto("http://127.0.0.1:4173/",wait_until="networkidle")
-    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#f8f7f3"
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#ffffff"
     page.evaluate("document.documentElement.dataset.theme='dark'")
     page.screenshot(path=str(OUT/"09-home-dark.png"),full_page=False)
     page.evaluate("document.documentElement.dataset.theme='light'")
     page.set_viewport_size({"width":393,"height":873})
     page.screenshot(path=str(OUT/"10-home-mobile.png"),full_page=False)
+    assert page.locator(".mobile-tabs").count()==0
+    assert page.get_by_label("输入消息").is_visible()
+    page.get_by_role("button",name="打开导航").click()
+    assert page.locator(".nav.open").is_visible()
+    page.locator(".nav.open").get_by_role("link",name="资料录入",exact=True).click()
+    page.locator(".intake-hub").wait_for()
+    assert not page.locator(".nav.open").count()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")

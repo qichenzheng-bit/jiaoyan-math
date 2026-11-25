@@ -8,7 +8,7 @@ export const groups=[
  {id:'tools',label:'系统工具'},
 ]
 export const modules:Module[]=[
- {path:'/',name:'首页',desc:'数学教研与内容创作总览',icon:'home',group:'overview',ready:true},
+ {path:'/',name:'首页',desc:'数学答疑与教研工作入口',icon:'home',group:'overview',ready:true},
  {path:'/library',name:'教学资源',desc:'题库、知识库、资料与素材',icon:'resources',group:'resources',ready:true},
  {path:'/create',name:'内容创作',desc:'视频、讲义、试卷及教学内容',icon:'research',group:'production',ready:true},
  {path:'/products',name:'作品与商品',desc:'成品与商品化管理',icon:'works',group:'production',ready:true},
