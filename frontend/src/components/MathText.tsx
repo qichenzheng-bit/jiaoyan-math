@@ -44,7 +44,7 @@ function nodes(content:string,compact:boolean):ReactNode[]{return mathTokens(con
  if(t.kind==='pre')return compact?<code key={i}>{t.value}</code>:<pre key={i}><code>{t.value}</code></pre>
  return <span key={i}>{textNodes(t.value,compact)}</span>
 })}
-export function MathText({content,compact=false}:{content:string;compact?:boolean}){
+export function MathText({content,compact=false}:{content?:string|null;compact?:boolean}){
  return compact?<span className="math-text-inline">{nodes(content??'',true)}</span>:<div className="chat-rich math-text-block">{nodes(content??'',false)}</div>
 }
 // Native option elements cannot display KaTeX HTML. Use this controlled picker for mathematical names.
