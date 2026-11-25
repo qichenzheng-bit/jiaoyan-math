@@ -22,3 +22,22 @@ def test_snapshot_preserves_math_and_rejects_missing_solution():
     assert out["problem"]==r.content and out["fps"]==60
     r.solution=""
     with pytest.raises(HTTPException): snapshot(r)
+
+
+def test_video_model_syncs_both_groups(monkeypatch):
+    state={"other":{"configured":True,"mode":"qoder_cli","model_id":"Auto"},"edit":{"configured":True,"mode":"qoder_cli","model_id":"Fast"}}
+    calls=[]
+    def call(method,path,body=None):
+        calls.append((method,path,body))
+        if method=="PUT":
+            for group in state.values():
+                group["model_id"]=body["model_id"]
+            return {"configured":True,"model_id":body["model_id"]}
+        return {"groups":state}
+    monkeypatch.setattr(video_engine,"call",call)
+    video_engine.configure_production_model("Fast")
+    assert state["other"]["model_id"]==state["edit"]["model_id"]=="Fast"
+    assert [p for m,p,b in calls if m=="PUT"]==["/ai/global"]
+    calls.clear()
+    video_engine.configure_production_model("Fast")
+    assert [m for m,p,b in calls]==["GET"]

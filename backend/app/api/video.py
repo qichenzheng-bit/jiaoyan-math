@@ -11,6 +11,15 @@ from app.models import TeachingResource, VideoProject, StudioItem, User
 from app.api.resources import admin_lock
 from app.api.studio import save_version
 from app.services import video_engine as engine
+from app.api import qoder
+import threading
+production_model_lock=threading.Lock()
+
+def prepare_model(db):
+    model=qoder.video_model_preference(db)
+    if model not in {m['id'] for m in qoder.available_models()['models']}:
+        raise HTTPException(422,'视频模型已不在可用清单，请重新配置')
+    engine.configure_production_model(model)
 
 router = APIRouter(prefix="/video", dependencies=[Depends(current_user)])
 write = [Depends(require_origin)]
@@ -102,14 +111,22 @@ def produce(ident: str, action: Literal["generate","render"], db: Session = Depe
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可修改")
-    return engine.call("POST", f"/lessons/{remote(row)}/{action}", {})
+    rid=remote(row)
+    if action=="generate":
+        with production_model_lock:
+            prepare_model(db)
+            return engine.call("POST", f"/lessons/{rid}/{action}", {})
+    return engine.call("POST", f"/lessons/{rid}/{action}", {})
 
 @router.post("/projects/{ident}/edit/submit", dependencies=write)
 def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可微调")
-    return engine.call("POST", f"/videos/{remote(row)}/edits", {"instruction":body.instruction, "images":[]})
+    rid=remote(row)
+    with production_model_lock:
+        prepare_model(db)
+        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction, "images":[]})
 
 @router.get("/projects/{ident}/edits/history")
 def history(ident: str, db: Session = Depends(get_db)):

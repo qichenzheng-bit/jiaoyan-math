@@ -77,3 +77,18 @@ def media(ident, download=False, range_header=None):
         finally:
             response.close()
     return StreamingResponse(chunks(), status_code=response.status, media_type="video/mp4", headers=headers)
+
+
+def configure_production_model(model):
+    """The pinned upstream has separate groups; set them together, not just the UI."""
+    groups=call("GET","/ai/groups").get("groups",{})
+    def matches(group):
+        return group.get("configured") and group.get("mode")=="qoder_cli" and group.get("model_id")==model
+    if all(matches(groups.get(key,{})) for key in ("other","edit")):
+        return
+    result=call("PUT","/ai/global",{"mode":"qoder_cli","model_id":model,"reasoning_effort":"default","speed":"default","timeout_seconds":900})
+    if not result.get("configured") or result.get("model_id")!=model:
+        raise HTTPException(502,"视频引擎未确认模型配置")
+    groups=call("GET","/ai/groups").get("groups",{})
+    if not all(matches(groups.get(key,{})) for key in ("other","edit")):
+        raise HTTPException(502,"视频制作与微调模型尚未同步")

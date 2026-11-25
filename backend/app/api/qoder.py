@@ -64,6 +64,7 @@ def login_cancel():
     return request("POST", "/login/cancel", {})
 
 MODEL_KEY = "ai.qoder.model"
+VIDEO_MODEL_KEY = "ai.qoder.video_model"
 def fallback():
     return {"models":[{"id":m,"label":m,"efforts":["default"]} for m in ("Auto","Fast")],"source":"fallback","updated_at":None}
 
@@ -135,17 +136,25 @@ def models_refresh():
 
 class ModelPreference(BaseModel):
     model: str=Field(min_length=1,max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+    video_model: str|None=Field(default=None,min_length=1,max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+
+def video_model_preference(db):
+    row=db.get(Setting,VIDEO_MODEL_KEY)
+    return row.value if row else "Auto"
 
 @router.get("/preferences")
 def model_preference(db:Session=Depends(get_db)):
     row=db.get(Setting,MODEL_KEY)
-    return {"model":row.value if row else "Auto"}
+    return {"model":row.value if row else "Auto","video_model":video_model_preference(db)}
 
 @router.put("/preferences",dependencies=[Depends(require_origin)])
 def set_model(body:ModelPreference,db:Session=Depends(get_db),user:User=Depends(current_user)):
-    if body.model not in {m["id"] for m in available_models()["models"]}:
+    options={m["id"] for m in available_models()["models"]}
+    if body.model not in options or (body.video_model is not None and body.video_model not in options):
         raise HTTPException(422,"该模型不在当前可用清单中")
     db.merge(Setting(key=MODEL_KEY,value=body.model))
+    if body.video_model is not None:
+        db.merge(Setting(key=VIDEO_MODEL_KEY,value=body.video_model))
     audit(db,"qoder.model.update",user.id)
     db.commit()
-    return body.model_dump()
+    return model_preference(db)

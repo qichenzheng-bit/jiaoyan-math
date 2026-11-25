@@ -9,7 +9,7 @@ const date=(s:number)=>new Date(s*1000).toLocaleString()
 function officialUrl(value?:string){try{const u=new URL(value??'');return u.protocol==='https:'&&!u.username&&!u.password&&['qoder.cn','qoder.com.cn','qoder.com','aliyun.com','alibabacloud.com'].some(d=>u.hostname===d||u.hostname.endsWith('.'+d))?u.href:''}catch{return ''}}
 
 export default function Qoder(){
- const [status,setStatus]=useState<Status>(),[catalog,setCatalog]=useState<Catalog>(),[saved,setSaved]=useState('Auto'),[draft,setDraft]=useState('Auto'),[editing,setEditing]=useState(false)
+ const [status,setStatus]=useState<Status>(),[catalog,setCatalog]=useState<Catalog>(),[saved,setSaved]=useState('Auto'),[draft,setDraft]=useState('Auto'),[editing,setEditing]=useState(false),[videoSaved,setVideoSaved]=useState('Auto'),[videoDraft,setVideoDraft]=useState('Auto')
  const [prompt,setPrompt]=useState(''),[answer,setAnswer]=useState(''),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(''),[tab,setTab]=useState<'accounts'|'models'|'test'>('accounts')
  const alive=useRef(true), pending=useRef(false), loginRevision=useRef(0), autoDiscovered=useRef(false), authInput=useRef<HTMLInputElement>(null)
  const authUrl=officialUrl(status?.login?.url)
@@ -19,7 +19,7 @@ export default function Qoder(){
  const selected=options.find(m=>m.id===saved)
  const connected=status?.verified_at?'已验证':waiting?'等待授权':status?.login?.state==='finished'?'授权完成':status?.available?'尚未验证':status?'未连接':'检测中'
  async function refresh(){if(pending.current)return;pending.current=true;const revision=loginRevision.current;try{const r=await api<Status>('/qoder/status',{signal:AbortSignal.timeout(10000)});if(alive.current&&revision===loginRevision.current)setStatus(r)}catch(e){if(alive.current&&revision===loginRevision.current)setError(e instanceof Error?e.message:'连接失败')}finally{pending.current=false}}
- useEffect(()=>{alive.current=true;const c=new AbortController();const revision=loginRevision.current;void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){if(revision===loginRevision.current)setCatalog(m);setSaved(p.model);setDraft(p.model)}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort()}},[])
+ useEffect(()=>{alive.current=true;const c=new AbortController();const revision=loginRevision.current;void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string;video_model?:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){if(revision===loginRevision.current)setCatalog(m);setSaved(p.model);setDraft(p.model);setVideoSaved(p.video_model??'Auto');setVideoDraft(p.video_model??'Auto')}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort()}},[])
  useEffect(()=>{if(!waiting)return;const t=window.setInterval(()=>void refresh(),2000);return()=>window.clearInterval(t)},[waiting])
  useEffect(()=>{
    if(busy||waiting)return
@@ -67,7 +67,7 @@ export default function Qoder(){
      const r=await api<Catalog>('/qoder/models/refresh',{method:'POST',signal:AbortSignal.timeout(55000)})
      if(r.source!=='cli'||!Array.isArray(r.models))throw new Error('未取得 CLI 实际模型清单')
      setCatalog(r)
-     if(!r.models.some(m=>m.id===draft))setDraft(r.models[0]?.id??'')
+     if(!r.models.some(m=>m.id===draft))setDraft(r.models[0]?.id??'');if(!r.models.some(m=>m.id===videoDraft))setVideoDraft(r.models[0]?.id??'')
      setMessage(r.models.length?'最新模型清单已更新（'+r.models.length+' 个）'+(r.models.some(m=>m.id===saved)?'':'，原默认模型已不可用，请重新选择。'):'授权完成，但 CLI 当前未返回可用模型。')
    }catch(e){setMessage('');throw new Error((automatic?'授权已完成，自动拉取模型失败：':'拉取模型失败：')+(e instanceof Error?e.message:'未知错误')+'。可点击刷新模型重试。')}
  })}
@@ -79,7 +79,7 @@ export default function Qoder(){
      void discover(true)
    }
  },[busy,status?.available,status?.model_discovery,status?.login?.state,catalog])
- async function save(e:FormEvent){e.preventDefault();await action('save',async()=>{const r=await api<{model:string}>('/qoder/preferences',{method:'PUT',body:JSON.stringify({model:draft})});setSaved(r.model);setEditing(false);setMessage('模型设置已保存')})}
+ async function save(e:FormEvent){e.preventDefault();await action('save',async()=>{const r=await api<{model:string;video_model:string}>('/qoder/preferences',{method:'PUT',body:JSON.stringify({model:draft,video_model:videoDraft})});setSaved(r.model);setVideoSaved(r.video_model);setEditing(false);setMessage('模型设置已保存')})}
  async function run(text:string,verify=false){await action(verify?'verify':'test',async()=>{if(!verify)setAnswer('');try{const r=await api<{answer:string}>('/qoder/test',{method:'POST',body:JSON.stringify({model:saved,prompt:text})});if(verify)setMessage('模型连接验证成功');else setAnswer(r.answer)}finally{await refresh()}})}
  function send(e:FormEvent){e.preventDefault();void run(prompt)}
  const disabled=Boolean(busy||waiting||!status?.available)
@@ -97,14 +97,14 @@ export default function Qoder(){
     </section>
 
    </div>
-   <section className="panel model-summary"><span>当前已验证平台：{status?.verified_at?'1':'0'} / 1</span><span>可用模型：{catalog?.source==='cli'?options.length:'待探测'}</span><span>当前模型：{saved}</span><span>自动更新：每 24 小时</span><span>上次成功更新：{catalog?.source==='cli'&&catalog.updated_at?date(catalog.updated_at):'尚未更新'}</span></section>
+   <section className="panel model-summary"><span>当前已验证平台：{status?.verified_at?'1':'0'} / 1</span><span>可用模型：{catalog?.source==='cli'?options.length:'待探测'}</span><span>AI 助手：{saved}</span><span>视频制作与微调：{videoSaved}</span><span>自动更新：每 24 小时</span><span>上次成功更新：{catalog?.source==='cli'&&catalog.updated_at?date(catalog.updated_at):'尚未更新'}</span></section>
    <section className="panel model-quota"><h2>用量与积分</h2><p className="muted">当前未接入已验证的积分接口，不显示估算余额。可在官方 Qoder CN 账户中查看真实用量。</p><a className="text-link" href="https://qoder.com.cn/" target="_blank" rel="noopener noreferrer">打开 Qoder CN 官网 <Icon name="arrow" size={15}/></a></section>
   </>}
-  {tab==='models'&&<section className="panel model-config"><div className="panel-heading"><div><h2>教研默认模型</h2><p>模型清单来源：{catalog?.source==='cli'?'CLI 实际探测':catalog?.source==='pending'?'等待授权后探测':'兼容档位（尚未探测）'}</p></div><button disabled={disabled||!status?.model_discovery} onClick={()=>void discover()}>{busy==='models'?'正在探测…':'刷新模型'}</button></div>
+  {tab==='models'&&<section className="panel model-config"><div className="panel-heading"><div><h2>按用途配置模型</h2><p>模型清单来源：{catalog?.source==='cli'?'CLI 实际探测':catalog?.source==='pending'?'等待授权后探测':'兼容档位（尚未探测）'}</p></div><button disabled={disabled||!status?.model_discovery} onClick={()=>void discover()}>{busy==='models'?'正在探测…':'刷新模型'}</button></div>
    {catalog?.updated_at&&<p className="muted">上次成功更新：{date(catalog.updated_at)}</p>}
    {!selected&&catalog&&<p className="inline-error">当前保存的模型已不在清单中，请重新选择。</p>}
-   <form className="model-config-form resource-form" onSubmit={save}><label>平台<input value="Qoder CN" readOnly/></label><label>模型<select value={editing?draft:saved} disabled={!editing||Boolean(busy)} onChange={e=>setDraft(e.target.value)}>{!options.some(m=>m.id===(editing?draft:saved))&&<option value={editing?draft:saved}>{editing?draft:saved}（待确认）</option>}{options.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>推理强度<input value="模型默认" readOnly/></label><div className="button-row">{editing?<><button type="button" onClick={()=>{setDraft(saved);setEditing(false)}}>取消</button><button className="primary" disabled={Boolean(busy)||!options.some(m=>m.id===draft)}>保存</button></>:<button type="button" disabled={Boolean(busy)||!options.length} onClick={()=>{setDraft(saved);setEditing(true)}}>修改</button>}</div></form><p className="muted">模型选择保存在服务器。推理强度仅在当前 CLI 能可靠报告该模型支持的档位后开放。</p>
+   <form className="model-config-form resource-form" onSubmit={save}><label>平台<input value="Qoder CN" readOnly/></label><label>AI 助手模型<select aria-label="AI 助手模型" value={editing?draft:saved} disabled={!editing||Boolean(busy)} onChange={e=>setDraft(e.target.value)}>{!options.some(m=>m.id===(editing?draft:saved))&&<option value={editing?draft:saved}>{editing?draft:saved}（待确认）</option>}{options.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>视频制作与微调模型<select aria-label="视频制作与微调模型" value={editing?videoDraft:videoSaved} disabled={!editing||Boolean(busy)} onChange={e=>setVideoDraft(e.target.value)}>{!options.some(m=>m.id===(editing?videoDraft:videoSaved))&&<option value={editing?videoDraft:videoSaved}>{editing?videoDraft:videoSaved}（待确认）</option>}{options.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>推理强度<input value="模型默认" readOnly/></label><div className="button-row">{editing?<><button type="button" onClick={()=>{setDraft(saved);setVideoDraft(videoSaved);setEditing(false)}}>取消</button><button className="primary" disabled={Boolean(busy)||!options.some(m=>m.id===draft)||!options.some(m=>m.id===videoDraft)}>保存</button></>:<button type="button" disabled={Boolean(busy)||!options.length} onClick={()=>{setDraft(saved);setVideoDraft(videoSaved);setEditing(true)}}>修改</button>}</div></form><p className="muted">两项配置独立保存在服务器。AI 助手模型同时作为 AI 录入的默认模型；视频生成代码与微调在提交任务时同步同一个视频模型。渲染本身不调用模型。</p>
   </section>}
-  {tab==='test'&&<><form className="panel resource-form" onSubmit={send}><div className="panel-heading"><h2>模型连接测试</h2><span className="provider-state">{saved}</span></div><label>数学题目或教研要求<textarea rows={6} required maxLength={12000} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="输入一道数学题，观察 Qoder CN 的回答质量"/></label><button className="primary" disabled={disabled||!selected}>{busy==='test'?'调用中…':'发送测试'}</button><p className="muted">本页面仅进行单轮测试，不执行模型生成的代码。日常数学教研请使用首页 AI 助手。</p></form>{answer&&<section className="panel"><h2>模型回答</h2><MathText content={answer}/></section>}</>}
+  {tab==='test'&&<><form className="panel resource-form" onSubmit={send}><div className="panel-heading"><h2>模型连接测试</h2><span className="provider-state">{saved}</span></div><label>数学题目或教研要求<textarea rows={6} required maxLength={12000} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="输入一道数学题，观察 Qoder CN 的回答质量"/></label><button className="primary" disabled={disabled||!selected}>{busy==='test'?'调用中…':'发送测试'}</button><p className="muted">本页面仅进行单轮测试，不执行模型生成的代码。日常数学教研请使用 AI 助手。</p></form>{answer&&<section className="panel"><h2>模型回答</h2><MathText content={answer}/></section>}</>}
  </div>
 }

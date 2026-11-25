@@ -400,7 +400,8 @@ with sync_playwright() as p:
     assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected popup during authorization polling"
     page.get_by_role("button",name="模型配置",exact=True).click()
     page.get_by_role("button",name="修改",exact=True).click()
-    page.locator(".model-config-form select option[value='preview-new-model']").wait_for(state="attached")
-    assert page.locator(".model-config-form select").evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
+    page.get_by_label("AI 助手模型",exact=True).locator("option[value='preview-new-model']").wait_for(state="attached")
+    assert page.get_by_label("AI 助手模型",exact=True).evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
+    assert page.get_by_label("视频制作与微调模型",exact=True).evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")
