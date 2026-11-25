@@ -124,7 +124,10 @@ with sync_playwright() as p:
             assert page.locator(".chat-home-recent").is_visible()
             assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
             page.locator(".mode-switch").get_by_role("link",name="工作").click()
-            page.locator(".workflow-board").wait_for()
+            page.get_by_role("heading",name="资料录入",exact=True).wait_for()
+            assert page.get_by_label("选择资料文件").is_visible()
+            assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
+            assert page.locator(".workflow-board").count()==0
             page.locator(".mode-switch").get_by_role("link",name="聊天").click()
             page.locator(".chat-home-recent").wait_for()
             assert page.locator(".chat-history").count()==0

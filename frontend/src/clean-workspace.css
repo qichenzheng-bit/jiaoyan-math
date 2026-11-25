@@ -71,3 +71,11 @@
  .mode-topbar .chat-session-actions{gap:0}.legacy-shell.clean-workspace .mode-topbar .chat-session-actions button{font-size:11px;padding:4px;min-width:0}
  .mode-topbar .health{display:none}
 }
+
+/* Work mode is exclusively for source intake; upload is the first action. */
+.clean-workspace.mode-home .intelligence-workspace{max-width:1050px;margin:auto}
+.clean-workspace.mode-home .intelligence-workspace .bank-heading{margin-bottom:12px}
+.clean-workspace.mode-home .intelligence-workspace .material-import{border:1px dashed var(--line);border-radius:16px;padding:16px;background:var(--surface)}
+.clean-workspace.mode-home .intelligence-workspace .material-import input[type=file]{min-height:44px;width:100%;max-width:100%}
+.clean-workspace.mode-home .intelligence-workspace .intelligence-columns>.resource-form>button.primary{min-height:44px;border-radius:24px}
+@media(max-width:760px){.clean-workspace.mode-home .intelligence-workspace .bank-heading h1{font-size:22px}.clean-workspace.mode-home .intelligence-workspace .material-import{padding:12px}.clean-workspace.mode-home .intelligence-workspace .bank-heading .button-row{margin:0;gap:6px}.clean-workspace.mode-home .intelligence-workspace .intelligence-stages{margin-bottom:10px}}

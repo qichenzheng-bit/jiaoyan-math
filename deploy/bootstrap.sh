@@ -10,7 +10,7 @@ home_dir=$(getent passwd jiaoyan | cut -d: -f6)
 base="$home_dir/jiaoyan-app"
 [[ ! -e "$base/config/app.env" ]] || { echo "Existing configuration: refusing to overwrite"; exit 1; }
 apt-get update
-apt-get install -y postgresql postgresql-client python3 python3-venv nginx curl rsync
+apt-get install -y postgresql postgresql-client python3 python3-venv nginx curl rsync poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng util-linux
 systemctl enable --now postgresql
 runuser -u postgres -- psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname='jiaoyan'" | grep -qx 1 || runuser -u postgres -- createuser --no-superuser --no-createdb --no-createrole jiaoyan
 runuser -u postgres -- psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname='jiaoyan'" | grep -qx 1 || runuser -u postgres -- createdb -O jiaoyan jiaoyan
