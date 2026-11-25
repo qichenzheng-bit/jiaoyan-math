@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text
-from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference
+from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference
 from app.services import storage
 
 router=APIRouter(prefix="/resources",tags=["resources"],dependencies=[Depends(current_user)])
@@ -168,6 +168,8 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
 def set_archived(db,row,value,user):
     if row.archived==value: return view(row)
     if value and row.kind=="source":
+        if db.scalar(select(DocumentResourceReference.document_id).where(DocumentResourceReference.resource_id==row.id).limit(1)):
+            raise HTTPException(409,"来源已被文档引用，请先解除绑定")
         if db.scalar(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==row.id).limit(1)):
             raise HTTPException(409,"来源仍被资源引用，请先解除关联")
     row.archived=value;row.revision+=1;row.updated_at=now();snapshot(db,row)

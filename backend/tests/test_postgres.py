@@ -109,6 +109,29 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert reply.json()["messages"][-1]["content"]=="2"
         assert client.patch("/api/chat/sessions/"+chat_id,headers=origin,json={"pinned":True}).json()["pinned"]
         assert client.get("/api/chat/sessions").json()[0]["id"]==chat_id
+        paper=client.post("/api/documents",headers=origin,json={"title":"试卷测试","kind":"paper","blocks":[{"uid":"q","kind":"reference","resource_id":rid,"score":10}]} )
+        assert paper.status_code==200,paper.text
+        paper=paper.json()
+        assert paper["blocks"][0]["score"]==10
+        promoted=client.post("/api/documents/"+paper["id"]+"/promote",headers=origin,json={"revision":paper["revision"]})
+        assert promoted.status_code==200,promoted.text
+        assert promoted.json()["source_id"]
+        assert client.get("/api/resources/"+rid).json()["source_id"]==source["id"]
+        assert client.get("/api/chat/resource-search?q="+created.json()["code"]).json()[0]["id"]==rid
+        assert client.get("/api/tasks").status_code==200
+        from app.api import intelligence
+        def fake_ingest(method,path,body=None):
+            if path=="/status":return {"chat_available":True}
+            if path=="/chat/start":return {"state":"running"}
+            return {"state":"done","answer":'[{"kind":"question","title":"测试提取","content":"求极限"}]'}
+        monkeypatch.setattr(qoder,"request",fake_ingest)
+        job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"提取测试","text":"求极限","subject":"高数"})
+        assert job.status_code==200,job.text
+        j=client.get("/api/intelligence/jobs/"+job.json()["id"]).json()
+        assert j["state"]=="review"
+        converted=client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]})
+        assert converted.status_code==200,converted.text
+        assert client.get("/api/documents/"+converted.json()["document_id"]).json()["blocks"][0]["kind"]=="question"
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

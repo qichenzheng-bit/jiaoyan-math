@@ -28,6 +28,7 @@ class Block(BaseModel):
     resource_id:str|None=Field(default=None,max_length=36)
     file_id:str|None=Field(default=None,max_length=36)
     width:int=Field(default=100,ge=20,le=100)
+    score:float=Field(default=0,ge=0,le=1000)
 class Draft(BaseModel):
     title:str=Field(min_length=1,max_length=200)
     kind:Literal["intake","handout","paper"]="intake"
@@ -123,7 +124,19 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
     r=Resource(id=str(uuid4()),code=bank.new_code(db,draft.kind),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(r);db.flush()
     if primary:bank.change_primary(db,r,primary)
-    replacement=Block(uid=uid,kind="reference",resource_id=r.id).model_dump()
+    replacement=Block(uid=uid,kind="reference",resource_id=r.id,score=block.get("score",0)).model_dump()
     replacement["snapshot"]=bank.view(r)
     d.blocks=[replacement if b["uid"]==uid else b for b in d.blocks]
     d.revision+=1;d.updated_at=now();references(db,d);audit(db,"resource.create",user.id);audit(db,"document.register",user.id);db.commit();return public(d)
+
+@router.post("/{id}/promote",dependencies=[Depends(require_origin)])
+def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.archived or d.revision!=body.revision or d.kind not in ("paper","handout") or not d.blocks:raise HTTPException(409,"文档不可转正或版本冲突")
+    if d.source_id:return public(d)
+    text="自编"+("试卷" if d.kind=="paper" else "讲义")+"；对应文档编号 "+d.id
+    data=bank.clean(bank.Draft(kind="source",title=d.title,subject=d.subject,content=text,source_type="exam" if d.kind=="paper" else "handout",authority_tier="internal_handout"),db)
+    r=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+    db.add(r);db.flush();bank.snapshot(db,r)
+    d.source_id=r.id;d.revision+=1;d.updated_at=now();references(db,d)
+    audit(db,"document.promote",user.id);db.commit();return public(d)
