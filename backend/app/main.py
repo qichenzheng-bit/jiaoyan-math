@@ -1,4 +1,6 @@
 import logging
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -9,7 +11,7 @@ from app.api.files import router as files_router
 from app.api.settings import router as settings_router
 from app.core.config import settings
 from app.api.resources import router as resource_router
-from app.api.qoder import router as qoder_router
+from app.api.qoder import router as qoder_router, model_refresh_loop
 from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.documents import router as document_router
@@ -20,9 +22,19 @@ from app.api.video import router as video_router
 
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(model_refresh_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.version,
-                  docs_url=None, redoc_url=None, openapi_url=None)
+                  docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.include_router(system_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(files_router, prefix="/api")

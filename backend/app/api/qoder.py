@@ -2,6 +2,10 @@
 import http.client
 import json
 import socket
+import asyncio
+import logging
+import threading
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -12,6 +16,11 @@ from app.core.security import current_user, require_origin
 
 router = APIRouter(prefix="/qoder",tags=["qoder"],dependencies=[Depends(current_user)])
 SOCKET = "/run/jiaoyan-qoder/worker.sock"
+MODEL_REFRESH_INTERVAL = 24 * 3600
+MODEL_REFRESH_CHECK = 300
+model_refresh_lock = threading.Lock()
+last_refresh_success = 0.0
+logger = logging.getLogger(__name__)
 class LocalConnection(http.client.HTTPConnection):
     def connect(self):
         self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
@@ -70,9 +79,59 @@ def available_models():
 def models():
     return available_models()
 
+def _refresh_catalog():
+    """Caller holds model_refresh_lock; worker remains the source of truth."""
+    global last_refresh_success
+    result = request("POST", "/models/refresh", {})
+    if result.get("source") != "cli" or not isinstance(result.get("models"), list):
+        raise HTTPException(503, "未取得 CLI 实际模型清单")
+    last_refresh_success = time.monotonic()
+    return result
+
+def refresh_if_due(now=None):
+    """Refresh on startup or once the worker's actual catalog is 24 hours old."""
+    if not model_refresh_lock.acquire(blocking=False):
+        return "busy"
+    try:
+        status = request("GET", "/status")
+        if not status.get("available") or not status.get("model_discovery"):
+            return "unavailable"
+        if status.get("busy") or (status.get("login") or {}).get("state") in ("starting", "waiting"):
+            return "busy"
+        catalog = request("GET", "/models")
+        updated = catalog.get("updated_at")
+        current = time.time() if now is None else now
+        if catalog.get("source") == "cli" and isinstance(updated, (int, float)) and 0 <= current - updated < MODEL_REFRESH_INTERVAL:
+            return "fresh"
+        _refresh_catalog()
+        return "updated"
+    except HTTPException as exc:
+        # Do not log account data or raw CLI output. Retry at the next check.
+        logger.info("Qoder scheduled catalog refresh deferred (HTTP %s)", exc.status_code)
+        return "retry"
+    finally:
+        model_refresh_lock.release()
+
+async def model_refresh_loop():
+    # Delay the first check slightly so application startup is never blocked.
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await asyncio.to_thread(refresh_if_due)
+        except Exception:
+            logger.warning("Qoder scheduled catalog refresh failed")
+        await asyncio.sleep(MODEL_REFRESH_CHECK)
+
 @router.post("/models/refresh",dependencies=[Depends(require_origin)])
 def models_refresh():
-    return request("POST","/models/refresh",{})
+    requested = time.monotonic()
+    with model_refresh_lock:
+        # Coalesce a manual refresh with a successful overlapping scheduled one.
+        if last_refresh_success >= requested:
+            result = request("GET", "/models")
+            if result.get("source") == "cli":
+                return result
+        return _refresh_catalog()
 
 class ModelPreference(BaseModel):
     model: str=Field(min_length=1,max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")

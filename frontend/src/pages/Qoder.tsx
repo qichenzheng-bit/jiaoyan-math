@@ -20,6 +20,14 @@ export default function Qoder(){
  async function refresh(){if(pending.current)return;pending.current=true;const revision=loginRevision.current;try{const r=await api<Status>('/qoder/status',{signal:AbortSignal.timeout(10000)});if(alive.current&&revision===loginRevision.current)setStatus(r)}catch(e){if(alive.current&&revision===loginRevision.current)setError(e instanceof Error?e.message:'连接失败')}finally{pending.current=false}}
  useEffect(()=>{alive.current=true;const c=new AbortController();const revision=loginRevision.current;void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){if(revision===loginRevision.current)setCatalog(m);setSaved(p.model);setDraft(p.model)}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort();closePendingWindow()}},[])
  useEffect(()=>{if(!waiting)return;const t=window.setInterval(()=>void refresh(),2000);return()=>window.clearInterval(t)},[waiting])
+ useEffect(()=>{
+   if(busy||waiting)return
+   let cancelled=false
+   const sync=()=>{const revision=loginRevision.current;api<Catalog>('/qoder/models',{signal:AbortSignal.timeout(10000)}).then(m=>{if(!cancelled&&revision===loginRevision.current&&m.source==='cli')setCatalog(m)}).catch(()=>{})}
+   const timer=window.setInterval(sync,60000)
+   window.addEventListener('focus',sync)
+   return()=>{cancelled=true;window.clearInterval(timer);window.removeEventListener('focus',sync)}
+ },[busy,waiting])
  function closePendingWindow(){const w=authWindow.current;authWindow.current=null;try{w?.close()}catch{/* browser may already have closed it */}}
  useEffect(()=>{
    if(authUrl&&waiting&&authWindow.current){const w=authWindow.current;authWindow.current=null;try{if(!w.closed){w.location.replace(authUrl);setMessage('已打开官方授权页，请完成登录后返回此页面。')}}catch{setMessage('请点击下方打开授权页。')}}
@@ -85,11 +93,11 @@ export default function Qoder(){
     </section>
 
    </div>
-   <section className="panel model-summary"><span>当前已验证平台：{status?.verified_at?'1':'0'} / 1</span><span>可用模型：{catalog?.source==='cli'?options.length:'待探测'}</span><span>当前模型：{saved}</span></section>
+   <section className="panel model-summary"><span>当前已验证平台：{status?.verified_at?'1':'0'} / 1</span><span>可用模型：{catalog?.source==='cli'?options.length:'待探测'}</span><span>当前模型：{saved}</span><span>自动更新：每 24 小时</span><span>上次成功更新：{catalog?.source==='cli'&&catalog.updated_at?date(catalog.updated_at):'尚未更新'}</span></section>
    <section className="panel model-quota"><h2>用量与积分</h2><p className="muted">当前未接入已验证的积分接口，不显示估算余额。可在官方 Qoder CN 账户中查看真实用量。</p><a className="text-link" href="https://qoder.com.cn/" target="_blank" rel="noopener noreferrer">打开 Qoder CN 官网 <Icon name="arrow" size={15}/></a></section>
   </>}
   {tab==='models'&&<section className="panel model-config"><div className="panel-heading"><div><h2>教研默认模型</h2><p>模型清单来源：{catalog?.source==='cli'?'CLI 实际探测':catalog?.source==='pending'?'等待授权后探测':'兼容档位（尚未探测）'}</p></div><button disabled={disabled||!status?.model_discovery} onClick={()=>void discover()}>{busy==='models'?'正在探测…':'刷新模型'}</button></div>
-   {catalog?.updated_at&&<p className="muted">上次探测：{date(catalog.updated_at)}</p>}
+   {catalog?.updated_at&&<p className="muted">上次成功更新：{date(catalog.updated_at)}</p>}
    {!selected&&catalog&&<p className="inline-error">当前保存的模型已不在清单中，请重新选择。</p>}
    <form className="model-config-form resource-form" onSubmit={save}><label>平台<input value="Qoder CN" readOnly/></label><label>模型<select value={editing?draft:saved} disabled={!editing||Boolean(busy)} onChange={e=>setDraft(e.target.value)}>{!options.some(m=>m.id===(editing?draft:saved))&&<option value={editing?draft:saved}>{editing?draft:saved}（待确认）</option>}{options.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>推理强度<input value="模型默认" readOnly/></label><div className="button-row">{editing?<><button type="button" onClick={()=>{setDraft(saved);setEditing(false)}}>取消</button><button className="primary" disabled={Boolean(busy)||!options.some(m=>m.id===draft)}>保存</button></>:<button type="button" disabled={Boolean(busy)||!options.length} onClick={()=>{setDraft(saved);setEditing(true)}}>修改</button>}</div></form><p className="muted">模型选择保存在服务器。推理强度仅在当前 CLI 能可靠报告该模型支持的档位后开放。</p>
   </section>}
