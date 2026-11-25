@@ -4,12 +4,14 @@ from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, or_
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
-from app.core.solution_methods import normalize_subject
-from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit
+from app.core.solution_methods import normalize_subject, parse_methods, format_methods
+from app.core.content_normalization import canonical_text, question_fingerprint
+from difflib import SequenceMatcher
+from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink
 from app.services import storage
 from app.api import resources as bank, qoder
 
@@ -333,3 +335,193 @@ def ai_edit_discard(id:str,ident:str,db:Session=Depends(get_db),user:User=Depend
     elif e.state!="review":raise HTTPException(409,"此建议已处理")
     e.state="discarded";e.updated_at=now();audit(db,"document.ai.discard",user.id);db.commit()
     return ai_view(e,True)
+
+
+# Review is read-only; commit is atomic and revision-checked.
+class ReviewBatch(BaseModel):
+    revision:int=Field(ge=1)
+    block_ids:list[str]=Field(min_length=1,max_length=20)
+class ReviewDecision(BaseModel):
+    uid:str=Field(min_length=1,max_length=36)
+    action:Literal["create","reuse","append"]
+    resource_id:str|None=Field(default=None,max_length=36)
+    resource_revision:int|None=Field(default=None,ge=1)
+    reason:str=Field(default="",max_length=200)
+    chapter:str=Field(default="",max_length=120)
+    knowledge_ids:list[str]=Field(default_factory=list,max_length=20)
+class CommitBatch(BaseModel):
+    revision:int=Field(ge=1)
+    bind_source:bool=True
+    items:list[ReviewDecision]=Field(min_length=1,max_length=20)
+
+def registration_values(db,d,b,bind=False,reason="",chapter=None):
+    source=bank.active_source(db,d.source_id) if bind and d.source_id else None
+    return bank.clean(bank.Draft(kind=b["kind"],title=b["title"],subject=d.subject,exam_type=source.exam_type if source else "",
+        content=b["content"],answer=b.get("answer",""),solution=b.get("solution",""),analysis=b.get("analysis",""),proof=b.get("proof",""),
+        chapter=b.get("chapter","") if chapter is None else chapter,question_type=b.get("question_type",""),unit_type=b.get("unit_type",""),
+        source_id=source.id if source else None,dedup_override=bool(reason.strip()),dedup_reason=reason),db)
+
+def review_blocks(d,revision,ids):
+    if d.archived or revision!=d.revision:raise HTTPException(409,"文档已归档或版本变化，请重新加载")
+    if len(set(ids))!=len(ids):raise HTTPException(422,"条目重复")
+    by_id={b["uid"]:b for b in d.blocks}
+    result=[]
+    for uid in ids:
+        b=by_id.get(uid)
+        if not b or b["kind"] not in ("question","knowledge") or not b["title"].strip() or not b["content"].strip():
+            raise HTTPException(422,"只能审核标题与正文完整的待入库条目")
+        result.append(b)
+    return result
+
+def strict_candidates(db,values):
+    criteria=[Resource.fingerprint==values["fingerprint"]]
+    if values["kind"]=="question":criteria.append(Resource.stem_key==values["stem_key"])
+    return list(db.scalars(select(Resource).where(Resource.kind==values["kind"],or_(*criteria)).order_by(Resource.archived,Resource.updated_at.desc(),Resource.id).limit(12)))
+
+def match_kind(r,values):
+    if r.fingerprint==values["fingerprint"]:return "exact"
+    if values["kind"]=="question" and r.stem_key==values["stem_key"]:return "same_stem"
+    return "similar"
+
+def answer_conflict(r,b):
+    return bool(r.answer.strip() and b.get("answer","").strip() and canonical_text(r.answer)!=canonical_text(b["answer"]))
+
+def candidate(r,values,b,similarity=None):
+    return {"id":r.id,"code":r.code,"title":r.title,"revision":r.revision,"archived":r.archived,"kind":match_kind(r,values),
+        "content":r.content[:1200],"answer":r.answer[:600],"solution":r.solution[:1600],"similarity":similarity,
+        "answer_conflict":answer_conflict(r,b),"solution_differs":canonical_text(r.solution)!=canonical_text(b.get("solution","")),
+        "appendable":r.kind=="question" and not r.archived and match_kind(r,values) in ("same_stem","exact") and not answer_conflict(r,b) and bool(parse_methods(b.get("solution","")))}
+
+def catalog_suggestions(db,subject,block):
+    from app.api.knowledge import norm
+    if not subject:return [],""
+    # Name/alias matching is a suggestion, not mathematical classification.
+    rows=db.execute(select(KnowledgePointCatalog,KnowledgeAlias.alias).outerjoin(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id)
+        .where(KnowledgePointCatalog.status=="active",KnowledgePointCatalog.subject==subject))
+    text=norm(" ".join(block.get(k,"") for k in ("title","content","chapter","analysis","solution","proof")))
+    found={}
+    for point,alias in rows:
+        hits=[term for term in (point.name,alias) if term and len(norm(term))>=2 and norm(term) in text]
+        if hits:
+            key=max(hits,key=len)
+            score=len(norm(key))+(20 if norm(key) in norm(block.get("title","")) else 0)
+            if point.id not in found or score>found[point.id][0]:found[point.id]=(score,{"id":point.id,"name":point.name,"code":point.code,"chapter":point.chapter,"matched":key})
+    result=[v[1] for v in sorted(found.values(),key=lambda x:(-x[0],x[1]["name"]))[:10]]
+    chapters={x["chapter"] for x in result if x["chapter"]}
+    return result,next(iter(chapters)) if len(chapters)==1 else ""
+
+@router.post("/{id}/registration-preview",dependencies=[Depends(require_origin)])
+def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
+    d=row(db,id);blocks=review_blocks(d,body.revision,body.block_ids)
+    data=[registration_values(db,d,b) for b in blocks]
+    recent={k:list(db.scalars(select(Resource).where(Resource.kind==k,Resource.archived==False).order_by(Resource.updated_at.desc(),Resource.id).limit(300))) for k in {b["kind"] for b in blocks}}
+    results=[]
+    for i,(b,v) in enumerate(zip(blocks,data)):
+        strict=strict_candidates(db,v);seen={r.id for r in strict}
+        query=canonical_text(v["content"])[:3000]
+        similar=[]
+        for r in recent[b["kind"]]:
+            if r.id in seen:continue
+            score=SequenceMatcher(None,query,canonical_text(r.content)[:3000]).ratio()
+            if score>=.75:similar.append((score,r))
+        candidates=[candidate(r,v,b) for r in strict]+[candidate(r,v,b,round(s,3)) for s,r in sorted(similar,key=lambda x:-x[0])[:5]]
+        points,chapter=catalog_suggestions(db,d.subject,b)
+        peers=[blocks[j]["uid"] for j,w in enumerate(data) if j!=i and w["kind"]==v["kind"] and (w["fingerprint"]==v["fingerprint"] or v["kind"]=="question" and w["stem_key"]==v["stem_key"])]
+        results.append({"uid":b["uid"],"candidates":candidates,"knowledge":points,"chapter_suggestion":chapter,"peer_ids":peers,
+                        "missing":[k for k in ("answer","solution") if b["kind"]=="question" and not b.get(k,"").strip()]})
+    return {"revision":d.revision,"items":results,"similar_scan_limit":300,"exact_scope":"indexed_full_library"}
+
+def append_methods(old,new):
+    existing=parse_methods(old);seen={canonical_text(m["body"]) for m in existing}
+    added=[]
+    for m in parse_methods(new):
+        key=canonical_text(m["body"])
+        if key and key not in seen:
+            added.append({"body":m["body"],"recommended":False});seen.add(key)
+    if not added:return old
+    result=format_methods(existing+added)
+    if len(result)>50000:raise HTTPException(422,"合并后解析过长")
+    return result
+
+def attach_review_source(db,r,source):
+    if not source:return False
+    if any(l.source_id==source for l in bank.links(db,r)):return False
+    if not r.source_id:
+        bank.change_primary(db,r,source)
+    else:
+        db.add(ResourceSourceLink(resource_id=r.id,source_id=source,provenance_role="reproduced",original_question_number="",chapter="",note="文档审核入库关联，来源角色待核实",is_primary=False,role_verified=False,page_start=None,page_end=None))
+        r.sources_revision+=1
+    return True
+
+def attach_review_knowledge(db,r,ids):
+    if len(set(ids))!=len(ids):raise HTTPException(422,"知识点重复")
+    known={x.knowledge_id for x in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==r.id))}
+    changed=False
+    for ident in ids:
+        p=db.get(KnowledgePointCatalog,ident)
+        if not p or p.status!="active":raise HTTPException(422,"知识点不存在或已停用")
+        if p.subject!=r.subject:raise HTTPException(422,"知识点与资源学科不一致")
+        if ident not in known:
+            db.add(ResourceKnowledgeLink(resource_id=r.id,knowledge_id=ident,role="related"));changed=True
+    return changed
+
+@router.post("/{id}/registration-commit",dependencies=[Depends(require_origin)])
+def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    blocks=review_blocks(d,body.revision,[x.uid for x in body.items])
+    if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):
+        raise HTTPException(409,"请先处理当前AI编辑建议")
+    replacements={};history=[]
+    for b,decision in zip(blocks,body.items):
+        values=registration_values(db,d,b,body.bind_source,decision.reason,decision.chapter)
+        source=values.pop("source_id")
+        before=None
+        if decision.action=="create":
+            if decision.resource_id:raise HTTPException(422,"新建操作不能指定已有资源")
+            if strict_candidates(db,values) and not decision.reason.strip():
+                raise HTTPException(409,"发现完全重复或同题候选，选择复用、追加解法或填写保留原因")
+            bank.guard_duplicate(db,values)
+            r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+            db.add(r);db.flush()
+            attach_review_source(db,r,source);attach_review_knowledge(db,r,decision.knowledge_ids)
+            audit(db,"resource.create",user.id)
+        else:
+            if not decision.resource_id or decision.resource_revision is None:raise HTTPException(422,"请选择已有资源及版本")
+            r=bank.existing(db,decision.resource_id,True)
+            if r.archived or r.kind!=b["kind"] or r.revision!=decision.resource_revision:
+                raise HTTPException(409,"候选资源已修改或归档，请重新审核")
+            if match_kind(r,values)=="similar":raise HTTPException(422,"疑似相似题不能直接合并，请核对后单独保留")
+            before=bank.view(r);changed=False
+            if decision.action=="append":
+                if r.kind!="question" or answer_conflict(r,b):raise HTTPException(422,"答案冲突或不是题目，不能追加解法")
+                updated=append_methods(r.solution,b.get("solution",""))
+                if not updated or updated==r.solution:raise HTTPException(422,"没有可追加的新解法")
+                if r.subject!=values["subject"]:raise HTTPException(422,"学科不同，不能追加解法")
+                r.solution=updated
+                if not r.answer.strip():r.answer=b.get("answer","")
+                r.fingerprint=question_fingerprint(r.content,r.solution,r.answer);changed=True
+                audit(db,"resource.methods.append",user.id)
+            elif (match_kind(r,values)!="exact" or r.subject!=values["subject"] or answer_conflict(r,b) or canonical_text(r.analysis)!=canonical_text(b.get("analysis","")) or canonical_text(r.proof)!=canonical_text(b.get("proof",""))) and not decision.reason.strip():
+                raise HTTPException(422,"复用会保留已有资源内容，请填写确认原因；草稿保存在入库历史")
+            changed=attach_review_source(db,r,source) or changed
+            changed=attach_review_knowledge(db,r,decision.knowledge_ids) or changed
+            if changed:r.revision+=1;r.updated_at=now()
+        db.flush()
+        replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
+        replacement["snapshot"]=bank.view(r);replacements[b["uid"]]=replacement
+        history.append({"uid":b["uid"],"action":decision.action,"reason":decision.reason,"input":b,"before":before,"after":bank.view(r),"knowledge_ids":decision.knowledge_ids,"source_id":source})
+    d.blocks=[replacements.get(b["uid"],b) for b in d.blocks];d.revision+=1;d.updated_at=now();references(db,d)
+    record=DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=body.revision,result_revision=d.revision,entries=history,created_at=now())
+    db.add(record);audit(db,"document.registration.batch",user.id);db.commit()
+    return public(d)
+
+@router.get("/{id}/registration-history")
+def registration_history(id:str,db:Session=Depends(get_db)):
+    if not db.get(Doc,id):raise HTTPException(404,"文档不存在")
+    return [{"id":r.id,"base_revision":r.base_revision,"result_revision":r.result_revision,"created_at":r.created_at,"count":len(r.entries)} for r in db.scalars(select(DocumentRegistration).where(DocumentRegistration.document_id==id).order_by(DocumentRegistration.result_revision.desc()).limit(50))]
+
+@router.get("/{id}/registration-history/{ident}")
+def registration_detail(id:str,ident:str,db:Session=Depends(get_db)):
+    r=db.get(DocumentRegistration,ident)
+    if not r or r.document_id!=id:raise HTTPException(404,"入库记录不存在")
+    return {"id":r.id,"base_revision":r.base_revision,"result_revision":r.result_revision,"entries":r.entries,"created_at":r.created_at}

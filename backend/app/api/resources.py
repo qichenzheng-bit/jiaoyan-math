@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
-from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text
+from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
 from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob
 from app.services import storage
 
@@ -64,6 +64,7 @@ def clean(body,db):
         src=db.get(TeachingResource,body.source_id)
         if not src or src.kind!="source" or src.archived: raise HTTPException(422,"来源资料不存在或已归档")
     d["fingerprint"]=question_fingerprint(d["content"],d["solution"],d["answer"]) if body.kind=="question" else unit_fingerprint(d["title"],d["content"])
+    d["stem_key"]=question_stem_key(d["content"]) if body.kind=="question" else ""
     d["dedup_reason"]=d["dedup_reason"].strip() if d["dedup_override"] else ""
     return d
 

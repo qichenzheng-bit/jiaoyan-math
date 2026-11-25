@@ -209,3 +209,8 @@ def unit_fingerprint(name, content) -> str:
     """知识单元的完全重复指纹：名称 + 正文都一致。"""
     canonical = canonical_text(name) + "\x1e" + canonical_text(content)
     return _digest(canonical)
+
+
+def question_stem_key(problem):
+    """Candidate index only, not a proof of mathematical equivalence."""
+    return _digest("stem\x1e"+canonical_text(problem))

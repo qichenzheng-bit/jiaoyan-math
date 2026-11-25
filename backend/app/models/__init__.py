@@ -60,6 +60,7 @@ class TeachingResource(Base):
     tags: Mapped[list] = mapped_column(JSON)
     source_id: Mapped[str | None] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    stem_key: Mapped[str] = mapped_column(String(64), index=True, default="", server_default="")
     code: Mapped[str] = mapped_column(String(16), unique=True)
     exam_type: Mapped[str] = mapped_column(String(80), default="", server_default="")
     chapter: Mapped[str] = mapped_column(String(120), default="", server_default="")
@@ -179,6 +180,15 @@ class TeachingDocument(Base):
     archived: Mapped[bool]=mapped_column(Boolean)
     created_at: Mapped[int]=mapped_column(BigInteger)
     updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class DocumentRegistration(Base):
+    __tablename__="document_registrations"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    document_id: Mapped[str]=mapped_column(ForeignKey("teaching_documents.id",ondelete="RESTRICT"),index=True)
+    base_revision: Mapped[int]=mapped_column(Integer)
+    result_revision: Mapped[int]=mapped_column(Integer)
+    entries: Mapped[list]=mapped_column(JSON)
+    created_at: Mapped[int]=mapped_column(BigInteger)
 
 class DocumentAiEdit(Base):
     __tablename__="document_ai_edits"

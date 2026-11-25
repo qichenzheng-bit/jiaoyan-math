@@ -104,6 +104,33 @@ def test_migration_and_login(tmp_path, monkeypatch):
         updated=client.put("/api/documents/"+d["id"],headers=origin,json={**rd,"title":"修订标题"})
         assert updated.status_code==200,updated.text
         assert updated.json()["blocks"][0]["snapshot"]==rd["blocks"][0]["snapshot"]
+        # Full-library stem matching and transactional registration.
+        batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[
+            {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法"},
+            {"uid":"new","kind":"question","title":"新问题","content":"计算新的定积分","answer":"2"}]}).json()
+        base="/api/documents/"+batch["id"]
+        review=client.post(base+"/registration-preview",headers=origin,json={"revision":batch["revision"],"block_ids":["same","new"]})
+        assert review.status_code==200,review.text
+        match=next(x for x in review.json()["items"][0]["candidates"] if x["id"]==rid)
+        assert match["kind"]=="same_stem" and match["appendable"]
+        assert any(p["id"]==k["id"] for p in review.json()["items"][0]["knowledge"])
+        choices=[{"uid":"new","action":"create"},{"uid":"same","action":"append","resource_id":rid,"resource_revision":match["revision"],"knowledge_ids":["missing"]}]
+        count=client.get("/api/resources?kind=question").json()["total"]
+        failure=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices})
+        assert failure.status_code==422,failure.text
+        assert client.get("/api/resources?kind=question").json()["total"]==count
+        assert client.get(base).json()["revision"]==batch["revision"]
+        choices[1]["knowledge_ids"]=[k["id"]]
+        committed=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices})
+        assert committed.status_code==200,committed.text
+        assert all(x["kind"]=="reference" for x in committed.json()["blocks"])
+        assert "另一种解法" in client.get("/api/resources/"+rid).json()["solution"]
+        assert "方法" in client.get("/api/resources/"+rid).json()["solution"]
+        history=client.get(base+"/registration-history").json()
+        assert history[0]["count"]==2
+        record=client.get(base+"/registration-history/"+history[0]["id"]).json()
+        assert record["entries"][1]["input"]["solution"]=="另一种解法"
+        assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices}).status_code==409
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto"}
