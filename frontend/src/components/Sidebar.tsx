@@ -3,49 +3,39 @@ import {Link,useLocation} from 'react-router-dom'
 import {BrandMark,Icon} from './Icon'
 import {MathText} from './MathText'
 import {api} from '../auth'
-import {modules,mainSections,sectionFor} from '../navigation'
+import {workspaceGroups,type WorkspaceEntry,type WorkspaceGroup} from '../navigation'
 type Props={user:string;displayName:string;open:boolean;collapsed:boolean;onClose:()=>void;onToggle:()=>void;onLogout:()=>void}
 type Session={id:string;title:string;project?:string;pinned:boolean;archived:boolean}
 type Doc={id:string;title:string}
-type Entry={path:string;name:string;icon:string}
-const intakeEntries:Entry[]=[
- {path:'/intake',name:'录入工作台',icon:'intake'},
- {path:'/intelligence',name:'AI 智能录入',icon:'spark'},
- {path:'/intake?mode=document',name:'整套资料录入',icon:'files'},
- {path:'/intake-single?kind=question',name:'单道题目录入',icon:'resources'},
- {path:'/intake-single?kind=knowledge',name:'知识单元录入',icon:'book'},
- {path:'/intake-single?kind=source',name:'登记来源资料',icon:'files'},
-]
+type Entry=WorkspaceEntry
 export default function Sidebar({user,displayName,open,collapsed,onClose,onToggle,onLogout}:Props){
  const [account,setAccount]=useState(false),[sessions,setSessions]=useState<Session[]>([]),[docs,setDocs]=useState<Doc[]>([]),[refresh,setRefresh]=useState(0),[expanded,setExpanded]=useState<string[]>([])
  const [allHistory,setAllHistory]=useState(false),[historyQuery,setHistoryQuery]=useState(''),[archived,setArchived]=useState(false),[historyError,setHistoryError]=useState(false)
  const dock=useRef<HTMLDivElement>(null)
- const location=useLocation(),section=sectionFor(location.pathname),params=new URLSearchParams(location.search)
+ const location=useLocation(),params=new URLSearchParams(location.search)
  const chat=location.pathname==='/'||location.pathname==='/chat',activeSession=params.get('session'),docId=params.get('doc')
- const isIntake=['/intake','/intelligence','/intake-single'].includes(location.pathname)
  const compact=collapsed&&!open
  useEffect(()=>{setAccount(false)},[location.pathname,open,collapsed])
  useEffect(()=>{if(params.has('history')&&chat)setAllHistory(true)},[location.pathname,location.search])
  useEffect(()=>{const c=new AbortController();setHistoryError(false);const timer=window.setTimeout(()=>{api<Session[]>('/chat/sessions?'+new URLSearchParams({archived:String(allHistory&&archived),q:allHistory?historyQuery:''}),{signal:c.signal}).then(r=>{if(!c.signal.aborted)setSessions(r.filter(x=>x.archived===Boolean(allHistory&&archived)))}).catch(()=>{if(!c.signal.aborted){setSessions([]);setHistoryError(true)}})},allHistory?180:0);return()=>{clearTimeout(timer);c.abort()}},[location.pathname,location.search,refresh,allHistory,historyQuery,archived])
  useEffect(()=>{const c=new AbortController();api<{items:Doc[]}>('/documents?kind=intake&limit=5',{signal:c.signal}).then(r=>{if(!c.signal.aborted)setDocs(r.items.slice(0,5))}).catch(()=>{});return()=>c.abort()},[location.pathname,location.search,refresh])
  useEffect(()=>{const sync=()=>setRefresh(v=>v+1);window.addEventListener('wg-recent-changed',sync);return()=>window.removeEventListener('wg-recent-changed',sync)},[])
- const group=isIntake?'/intake':section?.path
- useEffect(()=>{if(group&&['/intake','/library','/create','/products','/operations'].includes(group))setExpanded(old=>old.includes(group)?old:[...old,group])},[group])
+ const activeGroup=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path.split('?')[0]===location.pathname)))
+ const activeSection=activeGroup?.sections.find(s=>s.entries.some(e=>e.path.split('?')[0]===location.pathname))
+ useEffect(()=>{if(activeGroup&&activeSection)setExpanded(old=>Array.from(new Set([...old,activeGroup.id,activeSection.id])))},[activeGroup?.id,activeSection?.id])
  useEffect(()=>{if(!account)return;function outside(e:PointerEvent){if(!dock.current?.contains(e.target as Node))setAccount(false)}function escape(e:KeyboardEvent){if(e.key==='Escape')setAccount(false)}document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape)}},[account])
  function allowNavigation(path:string){return !chat||window.dispatchEvent(new CustomEvent('wg-chat-navigation',{cancelable:true,detail:{path}}))}
  function link(m:Entry,active=false,child=false){return <Link key={m.path} to={m.path} onClick={e=>{if(!allowNavigation(m.path)){e.preventDefault();return}onClose()}} title={m.name} aria-current={active?'page':undefined} className={(active?'active ':'')+(child?'nav-child':'')}><Icon name={m.icon} size={18}/><span className="nav-text">{m.name}</span></Link>}
  function toggle(path:string){if(compact){onToggle();setExpanded(old=>old.includes(path)?old:[...old,path])}else setExpanded(old=>old.includes(path)?old.filter(x=>x!==path):[...old,path])}
  function matches(path:string){const [pathname,search]=path.split('?');if(pathname!==location.pathname)return false;if(!search)return pathname!=='/intake'||(!params.has('mode')&&!docId);return new URLSearchParams(search).toString()===params.toString()}
- function groupMenu(path:string,name:string,icon:string,children:Entry[]){const unfolded=expanded.includes(path);return <div className="clean-nav-group" key={path}><button type="button" className={'clean-group-toggle'+(group===path?' current':'')} title={name} aria-expanded={unfolded&&!compact} aria-label={name} onClick={()=>toggle(path)}><Icon name={icon} size={18}/><span className="nav-text">{name}</span><span className="clean-group-chevron"><Icon name="chevron" size={13}/></span></button>{unfolded&&<div className="clean-nav-children">{children.map(m=>link(m,matches(m.path),true))}</div>}</div>}
+ function groupMenu(g:WorkspaceGroup){const unfolded=expanded.includes(g.id);const simple=g.sections.length===1;return <div className="clean-nav-group" data-nav-group={g.id} key={g.id}><button type="button" className={'clean-group-toggle'+(activeGroup?.id===g.id?' current':'')} title={g.name} aria-expanded={unfolded&&!compact} aria-label={g.name} onClick={()=>toggle(g.id)}><Icon name={g.icon} size={18}/><span className="nav-text">{g.name}</span><span className="clean-group-chevron"><Icon name="chevron" size={13}/></span></button>{unfolded&&<div className="clean-nav-children">{g.sections.map(s=>simple?<div key={s.id}>{s.entries.map(m=>link(m,matches(m.path),true))}</div>:<div className="clean-subgroup" key={s.id}><button type="button" className="clean-subgroup-toggle" aria-expanded={expanded.includes(s.id)} onClick={()=>toggle(s.id)}>{s.name}<Icon name="chevron" size={12}/></button>{expanded.includes(s.id)&&<div className="clean-subgroup-items">{s.entries.map(m=>link(m,matches(m.path),true))}</div>}</div>)}</div>}</div>}
  const recent=allHistory?sessions:sessions.slice(0,12)
  return <aside id="workspace-navigation" className={'nav'+(open?' open':'')} aria-label="工作空间侧栏">
  <div className="side-head"><Link className="brand" to="/" aria-label="微光数学首页" onClick={e=>{if(!allowNavigation('/')){e.preventDefault();return}onClose()}}><BrandMark/>{displayName!=='微光数学'&&<span className="custom-brand-name">{displayName}</span>}</Link><button className="side-toggle icon-button" onClick={onToggle} aria-label={collapsed?'展开侧边栏':'收起侧边栏'} title={collapsed?'展开侧边栏':'收起侧边栏'}><Icon name="sidebar" size={19}/></button><button className="side-mobile-close icon-button" onClick={onClose} aria-label="关闭导航"><Icon name="close"/></button></div>
  <nav className="nav-scroll clean-nav-scroll" aria-label="主导航"><section className="nav-group main-section-links">
  {link({path:'/',name:'首页',icon:'home'},location.pathname==='/')}
  <Link to="/chat?new=1" title="新建对话" onClick={e=>{if(chat){e.preventDefault();window.dispatchEvent(new Event('wg-chat-new'))}onClose()}}><Icon name="plus" size={19}/><span className="nav-text">新建对话</span></Link>
- {link({path:'/resources',name:'搜索资源',icon:'search'},location.pathname==='/resources')}
- {groupMenu('/intake','资料录入','intake',intakeEntries)}
- {mainSections.filter(s=>['/library','/create','/products','/operations'].includes(s.path)).map(s=>groupMenu(s.path,s.name,s.icon,[{path:s.path,name:s.name+'总览',icon:s.icon},...s.children.flatMap(path=>{const m=modules.find(x=>x.path===path);return m?[m]:[]})]))}
+ {workspaceGroups.map(groupMenu)}
  </section>
  <section className="nav-group clean-recent"><div className="clean-recent-heading"><span>{allHistory?'全部对话':'最近对话'}</span><button type="button" className="clean-history-switch" onClick={()=>{setAllHistory(v=>!v);setHistoryQuery('');setArchived(false)}}>{allHistory?'收起':'全部'}</button></div>
  {allHistory&&<div className="clean-history-filter"><input aria-label="搜索会话" placeholder="搜索会话" value={historyQuery} onChange={e=>setHistoryQuery(e.target.value)}/><select aria-label="会话范围" value={archived?'archived':'active'} onChange={e=>setArchived(e.target.value==='archived')}><option value="active">未归档</option><option value="archived">已归档</option></select></div>}

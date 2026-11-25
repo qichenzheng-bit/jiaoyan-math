@@ -129,7 +129,17 @@ with sync_playwright() as p:
             assert page.locator(".home-stat").count()==6
         if name=="12-create":
             assert page.locator(".hub-group").count()==3
-            assert page.locator("#workspace-navigation").get_by_role("link",name="封面设计",exact=True).is_visible()
+            assert page.locator('[data-nav-group="teaching"]').get_by_role("link",name="视频制作",exact=True).is_visible()
+            assert page.locator('[data-nav-group="teaching"]').get_by_role("link",name="教学作品",exact=True).is_visible()
+            assert page.locator('[data-nav-group="teaching"]').get_by_role("link",name="封面设计",exact=True).count()==0
+            page.locator("#workspace-navigation").get_by_role("button",name="内容发布",exact=True).click()
+            assert page.locator('[data-nav-group="publishing"]').get_by_role("link",name="封面设计",exact=True).is_visible()
+            page.locator("#workspace-navigation").get_by_role("button",name="商品售卖",exact=True).click()
+            assert page.locator('[data-nav-group="sales"]').get_by_role("link",name="商品售卖总览",exact=True).is_visible()
+            page.locator('[data-nav-group="sales"]').get_by_role("link",name="商品售卖总览",exact=True).click()
+            page.get_by_text("商品上架",exact=True).wait_for()
+            assert page.locator(".module-hub").get_by_role("link",name="教学作品",exact=True).count()==0
+            page.goto("http://127.0.0.1:4173/create",wait_until="networkidle")
             assert page.locator(".clean-context-menu").count()==0
         if name=="13-video":
             assert page.locator(".video-stage-track > div").count()==5
@@ -157,7 +167,7 @@ with sync_playwright() as p:
             assert page.locator(".doc-outline-item").count()==4
             page.get_by_role("button",name="待入库",exact=True).click()
             assert page.locator(".doc-outline-item").count()==0
-            page.get_by_role("button",name="全部",exact=True).click()
+            page.locator(".doc-outline").get_by_role("button",name="全部",exact=True).click()
             page.locator(".doc-outline-item").first.click()
             assert page.locator(".doc-block.selected").count()==1
             page.get_by_role("button",name="原文",exact=True).click()
@@ -226,6 +236,7 @@ with sync_playwright() as p:
     assert page.get_by_label("输入消息").is_visible()
     page.get_by_role("button",name="打开导航").click()
     assert page.locator(".nav.open").is_visible()
+    page.locator(".nav.open").get_by_role("button",name="教学教研",exact=True).click()
     page.locator(".nav.open").get_by_role("button",name="资料录入",exact=True).click()
     assert page.locator(".nav.open").get_by_role("link",name="整套资料录入",exact=True).is_visible()
     page.locator(".nav.open").get_by_role("link",name="录入工作台",exact=True).click()

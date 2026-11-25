@@ -11,8 +11,8 @@ export const modules:Module[]=[
  {path:'/',name:'首页',desc:'数学答疑与教研工作入口',icon:'home',group:'overview',ready:true},
  {path:'/library',name:'教学资源',desc:'题库、知识库、资料与素材',icon:'resources',group:'resources',ready:true},
  {path:'/create',name:'内容创作',desc:'视频、讲义、试卷及教学内容',icon:'research',group:'production',ready:true},
- {path:'/products',name:'作品与商品',desc:'成品与商品化管理',icon:'works',group:'production',ready:true},
- {path:'/operations',name:'运营中心',desc:'内容发布及经营数据',icon:'chart',group:'publishing',ready:true},
+ {path:'/products',name:'商品售卖',desc:'课程与资料商品、订单及收入（待接入）',icon:'works',group:'production',ready:true},
+ {path:'/operations',name:'内容发布',desc:'平台发布、封面设计及运营数据',icon:'chart',group:'publishing',ready:true},
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
@@ -44,9 +44,31 @@ export const mainSections=[
  {path:'/',name:'首页',icon:'home',children:[]},
  {path:'/chat',name:'AI 助手',icon:'spark',children:['/chat','/intelligence','/intake','/intake-single']},
  {path:'/library',name:'教学资源',icon:'resources',children:['/resources','/knowledge-library','/graph','/sources','/assets','/files']},
- {path:'/create',name:'内容创作',icon:'research',children:['/videos','/handouts','/papers','/research','/drawing','/covers','/media','/slides','/formulas']},
- {path:'/products',name:'作品与商品',icon:'works',children:['/works']},
- {path:'/operations',name:'运营中心',icon:'chart',children:['/publishing','/analytics']},
+ {path:'/create',name:'内容创作',icon:'research',children:['/videos','/handouts','/papers','/research','/drawing','/media','/slides','/formulas','/works']},
+ {path:'/products',name:'商品售卖',icon:'works',children:[]},
+ {path:'/operations',name:'内容发布',icon:'publishing',children:['/covers','/publishing','/analytics']},
 ]
 export const utilitySection={path:'/settings',name:'系统设置',icon:'settings',children:['/settings','/qoder','/checkin']}
 export function sectionFor(path:string){return [...mainSections,utilitySection].find(s=>s.path===path||s.children.includes(path))}
+
+export type WorkspaceEntry={path:string;name:string;icon:string}
+export type WorkspaceGroup={id:string;name:string;icon:string;sections:{id:string;name:string;entries:WorkspaceEntry[]}[]}
+function entry(path:string,name?:string):WorkspaceEntry{
+ const m=modules.find(m=>m.path===path)
+ if(!m)throw new Error('Unknown navigation route: '+path)
+ return {path,name:name??m.name,icon:m.icon}
+}
+// Global sidebar is organized by work purpose, not implementation module.
+export const workspaceGroups:WorkspaceGroup[]=[
+ {id:'teaching',name:'教学教研',icon:'book',sections:[
+  {id:'intake',name:'资料录入',entries:[entry('/intake'),entry('/intelligence'),{path:'/intake?mode=document',name:'整套资料录入',icon:'files'},{path:'/intake-single?kind=question',name:'单道题目录入',icon:'resources'},{path:'/intake-single?kind=knowledge',name:'知识单元录入',icon:'book'},{path:'/intake-single?kind=source',name:'登记来源资料',icon:'files'}]},
+  {id:'resources',name:'教学资源',entries:[entry('/library','资源总览'),entry('/resources'),entry('/knowledge-library'),entry('/graph'),entry('/sources'),entry('/assets')]},
+  {id:'creation',name:'教学制作',entries:[entry('/create','制作总览'),entry('/videos'),entry('/handouts'),entry('/papers'),entry('/research'),entry('/drawing'),entry('/formulas'),entry('/media'),entry('/slides'),entry('/works')]},
+ ]},
+ {id:'publishing',name:'内容发布',icon:'publishing',sections:[
+  {id:'release',name:'发布运营',entries:[entry('/operations','发布总览'),entry('/covers'),entry('/publishing'),entry('/analytics')]},
+ ]},
+ {id:'sales',name:'商品售卖',icon:'works',sections:[
+  {id:'store',name:'商品与交易',entries:[entry('/products','商品售卖总览')]},
+ ]},
+]
