@@ -11,11 +11,11 @@ const examples = [
 export default function FormulaLab() {
   const [latex, setLatex] = useState(examples[0].latex)
   const [display, setDisplay] = useState(true)
-  return <><h1>数学公式预览</h1><p className="muted">公共 LaTeX 渲染组件测试，原始公式保留在输入框中。</p>
+  return <><div className="page-heading"><div className="eyebrow">基础工具 / LATEX</div><h1>数学公式工作台</h1><p className="muted">输入 LaTeX，实时预览规范的数学公式。</p></div><div className="formula-grid"><section className="panel"><div className="panel-heading"><h2>公式编辑</h2></div>
     <div className="button-row">{examples.map(e => <button key={e.name} onClick={()=>setLatex(e.latex)}>{e.name}</button>)}</div>
     <label className="field">LaTeX 源码<textarea rows={5} value={latex} maxLength={12000} onChange={e=>setLatex(e.target.value)} spellCheck={false}/></label>
     <label><input type="checkbox" checked={display} onChange={e=>setDisplay(e.target.checked)}/> 独立公式（取消后为行内公式）</label>
-    <section className="notice"><MathFormula latex={latex} display={display}/></section>
-    <button onClick={async()=>{try{await navigator.clipboard.writeText(latex)}catch{window.alert('复制失败，请手动选择源码复制。')}}}>复制 LaTeX</button>
+    
+    <div className="button-row"><button className="primary" onClick={async()=>{try{await navigator.clipboard.writeText(latex)}catch{window.alert('复制失败，请手动选择源码复制。')}}}>复制 LaTeX</button></div></section><section className="panel"><div className="panel-heading"><div><h2>实时预览</h2><p>{display?"独立公式":"行内公式"}</p></div></div><div className="formula-preview"><MathFormula latex={latex} display={display}/></div></section></div>
   </>
 }

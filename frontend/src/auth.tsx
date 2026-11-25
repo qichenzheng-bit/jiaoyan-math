@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { BrandMark,Icon } from './components/Icon'
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch('/api' + path, {
@@ -25,13 +26,12 @@ export function Login({ onLogin }: { onLogin: (username: string) => void }) {
     } catch (e) { setError(e instanceof Error ? e.message : '登录失败') }
     finally { setBusy(false) }
   }
-  return <div className="login-page"><form className="login-card" onSubmit={submit}>
-    <h1>微光数学</h1><p>个人教研工作台</p>
+  return <div className="login-page"><div className="login-layout"><div className="login-editorial"><div className="login-brand"><BrandMark/><div>微光数学<small> MATH STUDIO</small></div></div><div><div className="eyebrow">PERSONAL TEACHING WORKSPACE</div><h1>让知识，<br/>有自己的秩序。</h1><p>从数学教研到内容创作，<br/>在一个专注的空间里完成。</p></div><div className="login-note"><Icon name="shield" size={17}/> 个人工作空间 · 安全访问</div></div><form className="login-card login-form" onSubmit={submit}><div className="login-mobile-brand"><BrandMark/><strong>微光数学</strong></div><div className="eyebrow">WELCOME BACK</div><h1>登录工作台</h1><p className="muted">使用管理员账号继续。</p>
     <label>用户名<input autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required maxLength={80}/></label>
     <label>密码<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required maxLength={128}/></label>
     {error && <p role="alert">{error}</p>}
     <button disabled={busy} type="submit">{busy ? '登录中…' : '登录'}</button>
-  </form></div>
+  </form></div></div>
 }
 
 export function PasswordSettings() {
