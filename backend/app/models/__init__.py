@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
@@ -47,3 +47,19 @@ class FileReference(Base):
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), primary_key=True)
     owner_type: Mapped[str] = mapped_column(String(80), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+
+class TeachingResource(Base):
+    __tablename__ = "teaching_resources"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(40), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    solution: Mapped[str] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSON)
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"), nullable=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)

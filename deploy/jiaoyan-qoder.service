@@ -1,0 +1,23 @@
+[Unit]
+Description=Jiaoyan isolated Qoder CN worker
+After=network-online.target
+[Service]
+Type=simple
+User=jiaoyan-qoder
+Group=jiaoyan
+StateDirectory=jiaoyan-qoder
+StateDirectoryMode=0700
+RuntimeDirectory=jiaoyan-qoder
+RuntimeDirectoryMode=0750
+Environment=HOME=/var/lib/jiaoyan-qoder
+Environment=PATH=/var/lib/jiaoyan-qoder/.local/bin:/var/lib/jiaoyan-qoder/.qoder-cn/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/var/lib/jiaoyan-qoder
+ExecStart=/usr/bin/python3 /opt/jiaoyan-qoder/qoder_worker.py
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+[Install]
+WantedBy=multi-user.target

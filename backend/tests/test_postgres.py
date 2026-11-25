@@ -20,7 +20,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
     assert settings.database_url.startswith("postgresql+psycopg://")
     assert engine().url.database == "jiaoyan_ci", "Use a dedicated CI database"
     command.upgrade(Config("alembic.ini"), "head")
-    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "alembic_version"} <= set(inspect(engine()).get_table_names())
+    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "alembic_version"} <= set(inspect(engine()).get_table_names())
     with TestClient(create_app(), base_url="https://testserver") as client:
         assert client.get("/api/ready").status_code == 503
         assert client.get("/api/system").status_code == 401
@@ -43,6 +43,16 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/files/" + item["id"] + "/archive", headers=origin).status_code == 200
         assert client.get("/api/files?archived=true").json()["total"] == 1
         assert client.post("/api/files/" + item["id"] + "/restore", headers=origin).status_code == 200
+        draft={"kind":"question","title":"极限","subject":"高数","content":"求极限","solution":"方法"}
+        created=client.post("/api/resources",headers=origin,json=draft)
+        assert created.status_code==200,created.text
+        rid=created.json()["id"]
+        assert created.json()["subject"]=="高等数学"
+        assert client.post("/api/resources/duplicates",headers=origin,json=draft).json()[0]["id"]==rid
+        assert client.get("/api/resources?kind=question").json()["total"]==1
+        assert client.post("/api/resources/"+rid+"/archive",headers=origin).status_code==200
+        assert client.get("/api/resources?kind=question").json()["total"]==0
+        assert client.post("/api/resources/"+rid+"/restore",headers=origin).status_code==200
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

@@ -4,6 +4,8 @@ import { api, Login } from './auth'
 import Settings, {defaults,type Preferences} from './pages/Settings'
 import Files from './pages/Files'
 import FormulaLab from './pages/FormulaLab'
+import Resources from './pages/Resources'
+import Qoder from './pages/Qoder'
 import { Icon, BrandMark } from './components/Icon'
 import { MathFormula } from './components/MathFormula'
 
@@ -17,6 +19,7 @@ const modules = [
  {path:'/publishing',name:'自媒体运营',desc:'平台适配、发布管理及运营数据',icon:'publishing',group:'production'},
  {path:'/files',name:'文件管理',desc:'上传、预览、下载与归档',icon:'files',group:'tools'},
  {path:'/formulas',name:'公式预览',desc:'LaTeX 公式实时显示',icon:'formulas',group:'tools'},
+ {path:'/qoder',name:'Qoder CN',desc:'模型连接与数学任务测试',icon:'spark',group:'tools'},
  {path:'/settings',name:'系统设置',desc:'账号、主题、存储及系统信息',icon:'settings',group:'tools'},
 ] as const
 const groups=[{id:'overview',label:'总览'},{id:'research',label:'教研空间'},{id:'production',label:'创作与运营'},{id:'tools',label:'基础工具'}]
@@ -80,8 +83,8 @@ export default function App(){
    <div className="nav-footer"><span className="avatar">{user.slice(0,1).toUpperCase()}</span><div className="account"><strong>{user}</strong><small>个人教研空间</small></div><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={logout}><Icon name="logout" size={19}/></button></div>
   </nav>
   <header className="topbar"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} onClick={()=>{setMenu(!menu);setAssistant(false)}}><Icon name="menu"/></button><div className="breadcrumb"><span>教研空间</span><Icon name="chevron" size={15}/><strong>{current?.name??'页面'}</strong></div><div className="topbar-actions"><span className="health" role="status"><span className={'status-dot '+(health==='服务已连接'?'':'offline')}/><span>{health}</span></span><button className="assistant-trigger" aria-expanded={assistant} onClick={()=>{setAssistant(!assistant);setMenu(false)}}><Icon name="spark" size={18}/> AI 助手</button></div></header>
-  <main className="main-content">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes><Route path="/" element={<Home/>}/>{modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<PlannedPage module={m}/>}/>)}<Route path="*" element={<section className="panel planned"><h1>页面不存在</h1><Link className="text-link" to="/">返回工作台</Link></section>}/></Routes><footer className="main-footer"><span>微光数学 · 教研工作台</span><span>基础工程 · 01</span></footer></main>
-  {assistant&&<><button className="assistant-backdrop" aria-label="关闭 AI 助手" onClick={()=>setAssistant(false)}/><aside className="assistant-panel" aria-label="AI 助手"><div className="panel-heading"><h2><Icon name="spark"/> AI 助手</h2><button className="icon-button" aria-label="关闭 AI 助手" onClick={()=>setAssistant(false)}><Icon name="close"/></button></div><div className="empty-state"><span className="soft-icon"><Icon name="spark" size={30}/></span><strong>AI 教研空间</strong><p>模型接入将在后续阶段完成。</p></div></aside></>}
+  <main className="main-content">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes><Route path="/" element={<Home/>}/>{modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/intake'?<Resources key="intake" intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<PlannedPage module={m}/>}/>)}<Route path="*" element={<section className="panel planned"><h1>页面不存在</h1><Link className="text-link" to="/">返回工作台</Link></section>}/></Routes><footer className="main-footer"><span>微光数学 · 教研工作台</span><span>基础工程 · 01</span></footer></main>
+  {assistant&&<><button className="assistant-backdrop" aria-label="关闭 AI 助手" onClick={()=>setAssistant(false)}/><aside className="assistant-panel" aria-label="AI 助手"><div className="panel-heading"><h2><Icon name="spark"/> AI 助手</h2><button className="icon-button" aria-label="关闭 AI 助手" onClick={()=>setAssistant(false)}><Icon name="close"/></button></div><div className="empty-state"><span className="soft-icon"><Icon name="spark" size={30}/></span><strong>AI 教研空间</strong><Link className="button-link primary" to="/qoder" onClick={()=>setAssistant(false)}>测试 Qoder CN</Link></div></aside></>}
   <div className="mobile-tabs" role="navigation" aria-label="常用入口">{modules.filter(m=>['/','/resources','/research','/files'].includes(m.path)).map(m=><NavLink key={m.path} to={m.path} end={m.path==='/'}><Icon name={m.icon} size={21}/><span>{m.path==='/resources'?'资源':m.path==='/research'?'创作':m.path==='/files'?'文件':'工作台'}</span></NavLink>)}<button onClick={()=>{setMenu(true);setAssistant(false)}}><Icon name="menu" size={21}/><span>更多</span></button></div>
  </div>
 }
