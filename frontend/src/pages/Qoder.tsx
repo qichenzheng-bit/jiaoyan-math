@@ -6,20 +6,47 @@ type Login={state:string;url:string;detail:string}
 type Status={available:boolean;detail:string;verified_at?:number|null;login?:Login;auth_ui?:boolean;model_discovery?:boolean;worker_version?:number}
 type Catalog={models:{id:string;label:string;efforts:string[]}[];source:string;updated_at?:number|null}
 const date=(s:number)=>new Date(s*1000).toLocaleString()
+function officialUrl(value?:string){try{const u=new URL(value??'');return u.protocol==='https:'&&!u.username&&!u.password&&['qoder.com.cn','qoder.com','aliyun.com','alibabacloud.com'].some(d=>u.hostname===d||u.hostname.endsWith('.'+d))?u.href:''}catch{return ''}}
 
 export default function Qoder(){
  const [status,setStatus]=useState<Status>(),[catalog,setCatalog]=useState<Catalog>(),[saved,setSaved]=useState('Auto'),[draft,setDraft]=useState('Auto'),[editing,setEditing]=useState(false)
  const [prompt,setPrompt]=useState(''),[answer,setAnswer]=useState(''),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(''),[tab,setTab]=useState<'accounts'|'models'|'test'>('accounts')
- const alive=useRef(true), pending=useRef(false)
+ const alive=useRef(true), pending=useRef(false), loginRevision=useRef(0), authWindow=useRef<Window|null>(null)
+ const authUrl=officialUrl(status?.login?.url)
  const waiting=status?.login?.state==='starting'||status?.login?.state==='waiting'
  const options=catalog?.models??[]
  const selected=options.find(m=>m.id===saved)
  const connected=status?.verified_at?'已验证':waiting?'等待授权':status?.available?'尚未验证':status?'未连接':'检测中'
- async function refresh(){if(pending.current)return;pending.current=true;try{const r=await api<Status>('/qoder/status');if(alive.current)setStatus(r)}catch(e){if(alive.current)setError(e instanceof Error?e.message:'连接失败')}finally{pending.current=false}}
- useEffect(()=>{alive.current=true;const c=new AbortController();void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){setCatalog(m);setSaved(p.model);setDraft(p.model)}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort()}},[])
+ async function refresh(){if(pending.current)return;pending.current=true;const revision=loginRevision.current;try{const r=await api<Status>('/qoder/status',{signal:AbortSignal.timeout(10000)});if(alive.current&&revision===loginRevision.current)setStatus(r)}catch(e){if(alive.current&&revision===loginRevision.current)setError(e instanceof Error?e.message:'连接失败')}finally{pending.current=false}}
+ useEffect(()=>{alive.current=true;const c=new AbortController();void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){setCatalog(m);setSaved(p.model);setDraft(p.model)}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort();closePendingWindow()}},[])
  useEffect(()=>{if(!waiting)return;const t=window.setInterval(()=>void refresh(),2000);return()=>window.clearInterval(t)},[waiting])
+ function closePendingWindow(){const w=authWindow.current;authWindow.current=null;try{w?.close()}catch{/* browser may already have closed it */}}
+ useEffect(()=>{
+   if(authUrl&&waiting&&authWindow.current){const w=authWindow.current;authWindow.current=null;try{if(!w.closed){w.location.replace(authUrl);setMessage('已打开官方授权页，请完成登录后返回此页面。')}}catch{setMessage('请点击下方打开授权页。')}}
+   if(status?.login&&!waiting)closePendingWindow()
+ },[authUrl,waiting,status?.login?.state])
  async function action(key:string,fn:()=>Promise<void>){if(busy)return;setBusy(key);setError('');setMessage('');try{await fn()}catch(e){setError(e instanceof Error?e.message:'操作失败')}finally{setBusy('')}}
- async function authorize(kind:'start'|'cancel'){await action(kind,async()=>{await api('/qoder/login/'+kind,{method:'POST'});await refresh()})}
+ async function authorize(kind:'start'|'cancel'){
+  if(busy)return
+  if(kind==='start'){
+    if(!status){setError('正在检测 Qoder CN 执行服务，请刷新状态后重试。');void refresh();return}
+    if(!status.available){setError('Qoder CN 暂不可用：'+status.detail+'。请检查服务器独立执行服务和 CLI 是否已安装、启动。');void refresh();return}
+    if(!status.auth_ui){setError('服务器 Qoder CN 执行服务版本过旧，尚不支持网页授权，请升级并重启独立执行服务。');return}
+    try{const w=window.open('about:blank','_blank');if(w){authWindow.current=w;w.opener=null;w.document.title='正在获取 Qoder CN 授权链接';w.document.body.textContent='正在获取官方授权链接，请稍候；如未跳转，请返回微光数学查看授权状态。'}}catch{/* Explicit link remains available if the browser blocks a new tab. */}
+  }
+  await action(kind,async()=>{
+    loginRevision.current++
+    setMessage(kind==='start'?'正在发起官方授权，请稍候…':'正在取消授权…')
+    try{
+      const login=await api<Login>('/qoder/login/'+kind,{method:'POST',signal:AbortSignal.timeout(15000)})
+      if(!login||typeof login.state!=='string')throw new Error('授权接口未返回有效状态，请检查服务器执行服务。')
+      setStatus(prev=>prev?{...prev,login,verified_at:kind==='start'?null:prev.verified_at}:prev)
+      setMessage(kind==='cancel'?'已取消本次授权':login.detail||'已发起授权，正在获取链接')
+      if(kind==='cancel'||!['starting','waiting'].includes(login.state))closePendingWindow()
+      await refresh()
+    }catch(e){closePendingWindow();setMessage('');throw e}
+  })
+ }
  async function discover(){await action('models',async()=>{const r=await api<Catalog>('/qoder/models/refresh',{method:'POST'});setCatalog(r);setMessage('模型清单已更新');if(!r.models.some(m=>m.id===draft))setDraft(r.models[0]?.id??'')})}
  async function save(e:FormEvent){e.preventDefault();await action('save',async()=>{const r=await api<{model:string}>('/qoder/preferences',{method:'PUT',body:JSON.stringify({model:draft})});setSaved(r.model);setEditing(false);setMessage('模型设置已保存')})}
  async function run(text:string,verify=false){await action(verify?'verify':'test',async()=>{if(!verify)setAnswer('');try{const r=await api<{answer:string}>('/qoder/test',{method:'POST',body:JSON.stringify({model:saved,prompt:text})});if(verify)setMessage('模型连接验证成功');else setAnswer(r.answer)}finally{await refresh()}})}
@@ -33,9 +60,9 @@ export default function Qoder(){
    <div className="model-account-grid">
     <section className="panel provider-card"><div className="provider-head"><span className="provider-icon" style={{background:'var(--ink)',color:'var(--surface)'}}>Q</span><strong>Qoder CN</strong><span className={'provider-state '+(status?.verified_at?'is-verified':'')}>{connected}</span></div><dl><div><dt>用途</dt><dd>AI 教研与智能录入</dd></div><div><dt>授权方式</dt><dd>阿里云 / 官方浏览器授权</dd></div><div><dt>执行服务</dt><dd>{status?.detail??'正在检测'}</dd></div><div><dt>最近验证</dt><dd>{status?.verified_at?date(status.verified_at):'—'}</dd></div></dl>
      {status?.available&&!status.model_discovery&&<p className="muted">独立执行服务需要升级，以支持动态模型探测。</p>}
-     {status?.login&&status.login.state!=='idle'&&<p className="muted">{status.login.detail}</p>}
-     {waiting&&<div className="provider-authorization"><strong>1. 获取官方授权链接</strong>{status?.login?.url?<><a className="auth-url" href={status.login.url} target="_blank" rel="noopener noreferrer">{status.login.url}</a><div className="button-row"><button onClick={()=>void navigator.clipboard.writeText(status.login!.url).catch(()=>setError('复制失败，请直接打开链接'))}>复制授权链接</button><a className="button-link primary" href={status.login.url} target="_blank" rel="noopener noreferrer">打开授权页</a></div></>:<p className="muted">正在等待 CLI 输出授权地址…</p>}<strong>2. 完成授权后验证连接</strong><button disabled={Boolean(busy)} onClick={()=>void authorize('cancel')}>取消本次授权</button></div>}
-     <div className="provider-actions"><button className="primary" disabled={disabled||!status?.auth_ui} onClick={()=>void authorize('start')}>{busy==='start'?'正在启动…':status?.verified_at?'重新授权':'登录账号'}</button><button disabled={Boolean(busy)} onClick={()=>void refresh()}>刷新状态</button></div><button disabled={disabled||!selected} onClick={()=>void run('请直接回答：1+1等于多少？',true)}>{busy==='verify'?'验证中…':'验证模型连接'}</button>
+     {status&&!status.available&&<p className="inline-error" role="status">Qoder CN 暂不可用：{status.detail}。点击登录账号可查看处理提示。</p>}{status?.available&&!status.auth_ui&&<p className="inline-error" role="status">服务器执行服务版本过旧，不支持网页授权。</p>}{status?.login&&status.login.state!=='idle'&&<p role="status" className={['failed','expired'].includes(status.login.state)?'inline-error':'muted'}>{status.login.detail}</p>}
+     {waiting&&<div className="provider-authorization"><strong>1. 获取官方授权链接</strong>{authUrl?<><a className="auth-url" href={authUrl} target="_blank" rel="noopener noreferrer">{authUrl}</a><div className="button-row"><button onClick={()=>{if(!navigator.clipboard){setError('当前浏览器不支持复制，请直接打开链接');return}void navigator.clipboard.writeText(authUrl).catch(()=>setError('复制失败，请直接打开链接'))}}>复制授权链接</button><a className="button-link primary" href={authUrl} target="_blank" rel="noopener noreferrer">打开授权页</a></div></>:<p className="muted">正在等待 CLI 输出授权地址… 如未自动跳转，链接出现后可手动打开。</p>}<strong>2. 完成授权后验证连接</strong><button disabled={Boolean(busy)} onClick={()=>void authorize('cancel')}>取消本次授权</button></div>}
+     <div className="provider-actions"><button className="primary" disabled={Boolean(busy||waiting)} onClick={()=>void authorize('start')}>{busy==='start'?'正在启动…':status?.verified_at?'重新授权':'登录账号'}</button><button disabled={Boolean(busy)} onClick={()=>void refresh()}>刷新状态</button></div><button disabled={disabled||!selected} onClick={()=>void run('请直接回答：1+1等于多少？',true)}>{busy==='verify'?'验证中…':'验证模型连接'}</button>
     </section>
 
    </div>
