@@ -38,6 +38,10 @@ export default function App(){
  const location=useLocation(),mainRef=useRef<HTMLElement>(null)
  const current=modules.find(m=>m.path===location.pathname)
  const isChat=location.pathname==='/'||location.pathname==='/chat'
+ const isWork=location.pathname==='/overview', modeHome=isChat||isWork
+ const lastChat=useRef('/')
+ useEffect(()=>{if(isChat)lastChat.current=location.pathname+location.search},[isChat,location.pathname,location.search])
+ function allowMode(path:string){return window.dispatchEvent(new CustomEvent('wg-chat-navigation',{cancelable:true,detail:{path}}))}
  const isDoc=(location.pathname==='/intake'&&new URLSearchParams(location.search).has('doc'))||['/research','/papers','/handouts'].includes(location.pathname)
  useEffect(()=>{const history=location.pathname==='/chat'&&new URLSearchParams(location.search).has('history');setMenu(history&&window.matchMedia('(max-width: 760px)').matches);if(history)setCollapsed(false);mainRef.current?.scrollTo(0,0)},[location.pathname,location.search])
  useEffect(()=>{const close=(e:KeyboardEvent)=>{if(e.key==='Escape')setMenu(false)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[])
@@ -48,11 +52,11 @@ export default function App(){
  async function logout(){try{await api('/auth/logout',{method:'POST'});setUser(null);try{for(const k of Object.keys(sessionStorage))if(k.startsWith('wg-doc-recovery:'))sessionStorage.removeItem(k)}catch{}setPreferences(defaults);setMenu(false);setError('')}catch(e){setError(e instanceof Error?e.message:'退出失败')}}
  if(user===undefined)return <div className="login-page"><div className="loading-brand"><BrandMark/><p>正在连接教研工作台…</p></div></div>
  if(user===null)return <><Login onLogin={name=>{setUser(name);setError('')}}/>{error&&<p className="auth-error" role="alert">{error}</p>}</>
- return <div className={'shell legacy-shell'+(collapsed?' is-collapsed':'')+' clean-workspace'+(isChat?' chat-route':'')+(isDoc?' doc-route':'')}>
+ return <div className={'shell legacy-shell'+(collapsed?' is-collapsed':'')+' clean-workspace'+(isChat?' chat-route':'')+(modeHome?' mode-home':'')+(isDoc?' doc-route':'')}>
   {menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
   <Sidebar user={user} displayName={preferences.display_name} open={menu} collapsed={collapsed} onClose={()=>setMenu(false)} onToggle={()=>setCollapsed(c=>!c)} onLogout={()=>void logout()}/>
   <div className="workspace">
-   <header className="topbar clean-topbar"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}<div className="breadcrumb"><strong>{isChat?'微光数学':current?.name??(location.pathname==='/intake-single'?'单条录入':location.pathname==='/overview'?'工作总览':'工作空间')}</strong></div><div className="topbar-actions">{isChat&&<div id="chat-session-actions" className="chat-session-actions"/>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
+   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/overview" aria-current={isWork?'page':undefined} onClick={e=>{if(isChat&&!allowMode('/overview'))e.preventDefault()}}>工作</Link></nav>:<div className="breadcrumb"><strong>{current?.name??(location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{isChat&&<><div id="chat-session-actions" className="chat-session-actions"/><button className="icon-button mode-new" aria-label="新建对话" title="新建对话" onClick={()=>window.dispatchEvent(new Event('wg-chat-new'))}><Icon name="chat" size={23}/></button></>}{isWork&&<Link className="icon-button mode-new" aria-label="任务中心" title="任务中心" to="/tasks"><Icon name="clock" size={23}/></Link>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
    <main className="main-content" ref={mainRef}><div className="content-inner">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Chat key="home"/>}/>
     <Route path="/overview" element={<Home/>}/>

@@ -78,8 +78,10 @@ with sync_playwright() as p:
         if name=="17-intake-knowledge":
             assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
         if name=="05-chat":
-            assert page.locator(".intake-chat-prompts > *").count()==4
+            assert page.locator(".intake-chat-prompts").count()==0
+            assert page.locator(".chat-home-recent").is_visible()
             page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
+            page.get_by_role("button",name="添加与工具").click()
             page.get_by_role("button",name="转录入",exact=True).click()
             page.wait_for_url("**/intelligence")
             assert page.get_by_label("原文",exact=True).input_value().startswith("录入题目")
@@ -118,14 +120,20 @@ with sync_playwright() as p:
             assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
             assert page.locator(".clean-chat > .chat-composer > textarea").count()==1
             assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px' && getComputedStyle(el).boxShadow === 'none'")
-            assert page.get_by_text("今天想做什么？",exact=True).is_visible()
+            assert page.get_by_text("今天想做什么？",exact=True).count()==0
+            assert page.locator(".chat-home-recent").is_visible()
+            assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
+            page.locator(".mode-switch").get_by_role("link",name="工作").click()
+            page.locator(".workflow-board").wait_for()
+            page.locator(".mode-switch").get_by_role("link",name="聊天").click()
+            page.locator(".chat-home-recent").wait_for()
             assert page.locator(".chat-history").count()==0
             assert page.locator(".workflow-step").count()==0
             assert page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).is_visible()
             page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).click()
             page.locator(".chat-intake-suggestion").wait_for()
             page.locator("#workspace-navigation").get_by_role("link",name="新建对话").click()
-            page.get_by_text("今天想做什么？",exact=True).wait_for()
+            page.locator(".chat-home-recent").wait_for()
             page.locator(".clean-recent").first.get_by_role("button",name="全部",exact=True).click()
             page.locator("#workspace-navigation").get_by_label("搜索会话").wait_for()
             page.locator("#workspace-navigation").get_by_label("会话范围").select_option("archived")
@@ -242,7 +250,11 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT/"10-home-mobile.png"),full_page=False)
     assert page.locator(".mobile-tabs").count()==0
     assert page.get_by_label("输入消息").is_visible()
-    assert page.locator(".clean-chat > .chat-composer").is_visible()
+    assert page.locator(".clean-chat > .compact-composer").is_visible()
+    assert page.locator(".mode-switch").is_visible()
+    page.get_by_role("button",name="添加与工具").click()
+    assert page.get_by_role("group",name="聊天工具").is_visible()
+    page.get_by_role("button",name="添加与工具").click()
     assert page.locator(".workspace > header").count()==1
     assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
     assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
