@@ -1,0 +1,42 @@
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from app.core.db import Base
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+class LoginSession(Base):
+    __tablename__ = "sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+class Setting(Base):
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+class StoredFile(Base):
+    __tablename__ = "files"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    storage_key: Mapped[str] = mapped_column(String(255), unique=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    media_type: Mapped[str] = mapped_column(String(100))
+    generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, index=True)
