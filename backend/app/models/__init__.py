@@ -151,3 +151,16 @@ class ResourceKnowledgeLink(Base):
     knowledge_id: Mapped[str] = mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="RESTRICT"),primary_key=True)
     role: Mapped[str] = mapped_column(String(16))
     __table_args__=(CheckConstraint("role IN ('core','related')",name="ck_resource_kp_role"),)
+
+class KnowledgeAlias(Base):
+    __tablename__="knowledge_aliases"
+    knowledge_id: Mapped[str]=mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="CASCADE"),primary_key=True)
+    normalized: Mapped[str]=mapped_column(String(180),primary_key=True)
+    alias: Mapped[str]=mapped_column(String(180))
+
+class KnowledgeRelation(Base):
+    __tablename__="knowledge_relations"
+    source_id: Mapped[str]=mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="RESTRICT"),primary_key=True)
+    target_id: Mapped[str]=mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="RESTRICT"),primary_key=True)
+    relation_type: Mapped[str]=mapped_column(String(16),primary_key=True)
+    __table_args__=(CheckConstraint("source_id <> target_id",name="ck_knowledge_relation_not_self"),CheckConstraint("relation_type IN ('contains','related','prerequisite')",name="ck_knowledge_relation_type"))

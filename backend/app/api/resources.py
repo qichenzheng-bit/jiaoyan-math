@@ -108,11 +108,11 @@ def snapshot(db,row):
 def subjects(): return list(MATH_SUBJECTS)
 
 @router.get("")
-def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
     filters=[TeachingResource.archived==archived]
     if kind: filters.append(TeachingResource.kind==kind)
     if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
-    for key,value in (("chapter",chapter),("question_type",question_type),("exam_type",exam_type),("source_type",source_type),("authority_tier",authority_tier)):
+    for key,value in (("chapter",chapter),("question_type",question_type),("unit_type",unit_type),("exam_type",exam_type),("source_type",source_type),("authority_tier",authority_tier)):
         if value: filters.append(getattr(TeachingResource,key)==value)
     if q.strip():
         term=q.strip()

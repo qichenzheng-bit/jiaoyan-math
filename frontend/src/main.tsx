@@ -12,3 +12,5 @@ createRoot(document.getElementById('root')!).render(
 )
 
 import './chat.css'
+
+import './knowledge.css'

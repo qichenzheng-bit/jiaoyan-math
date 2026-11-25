@@ -65,6 +65,17 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.put("/api/resources/"+rid+"/sources",headers=origin,json={"revision":links["revision"],"items":[]}).status_code==409
         assert client.get("/api/resources/"+source["id"]+"/versions").json()[0]["version"]==1
         assert client.put("/api/resources/"+rid,headers=origin,json={**draft,"revision":1}).status_code==409
+        kp=client.post("/api/knowledge/points",headers=origin,json={"name":"极限","subject":"高等数学","aliases":["limit"]})
+        assert kp.status_code==200,kp.text
+        k=kp.json()
+        other=client.post("/api/knowledge/points",headers=origin,json={"name":"函数极限","subject":"高等数学"}).json()
+        edge={"source_id":k["id"],"target_id":other["id"],"relation_type":"contains"}
+        assert client.post("/api/knowledge/relations",headers=origin,json=edge).status_code==200
+        assert client.post("/api/knowledge/relations",headers=origin,json={**edge,"source_id":other["id"],"target_id":k["id"]}).status_code==409
+        assert client.get("/api/knowledge/points?q=limit").json()["total"]==1
+        link=client.get("/api/knowledge/resources/"+rid).json()
+        assert client.put("/api/knowledge/resources/"+rid,headers=origin,json={"revision":link["revision"],"items":[{"knowledge_id":k["id"],"role":"core"}]}).status_code==200
+        assert client.get("/api/knowledge/points/"+k["id"]+"/resources").json()[0]["id"]==rid
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto"}

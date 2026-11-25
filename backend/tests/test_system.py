@@ -35,3 +35,7 @@ def test_resource_detail_is_private():
     assert client.get("/api/resources/example").status_code==401
     assert client.get("/api/resources/example/sources").status_code==401
     assert client.get("/api/resources/example/versions").status_code==401
+
+def test_knowledge_private():
+    assert client.get("/api/knowledge/points").status_code==401
+    assert client.get("/api/knowledge/relations").status_code==401
