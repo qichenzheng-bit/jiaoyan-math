@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 const paths:Record<string,ReactNode>={
+ copy:<><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
+ check:<path d="m5 12 4 4L19 6"/>,
  more:<><circle cx="5" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.8" fill="currentColor" stroke="none"/></>,
  sidebar:<><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-4-3-4 3-4"/></>,
  chat:<><path d="M20 11a8 8 0 0 1-8 8H4l2-4a8 8 0 1 1 14-4Z"/></>,

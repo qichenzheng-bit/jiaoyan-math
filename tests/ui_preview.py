@@ -101,6 +101,8 @@ with sync_playwright() as p:
             assert page.get_by_text("已关联原文件：demo.tex").is_visible()
         if name=="19-intake-intent":
             page.locator(".chat-intake-suggestion").wait_for()
+            assert page.locator(".chat-message.user .chat-message-body").evaluate("(el)=>getComputedStyle(el).width !== getComputedStyle(el.parentElement).width")
+            assert page.locator(".chat-message-actions").get_by_role("button",name="复制",exact=True).first.is_visible()
             assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
             page.get_by_role("button",name="更多选项",exact=True).click()
             page.locator("#chat-session-actions").get_by_role("button",name="管理",exact=True).wait_for()
@@ -337,14 +339,15 @@ with sync_playwright() as p:
         route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture["login"],ensure_ascii=False))
     context.route("**/api/qoder/login/start",start_login)
     page.get_by_role("button",name="获取授权链接",exact=True).click()
-    link=page.get_by_role("link",name="打开授权页",exact=True)
-    link.wait_for()
-    assert link.get_attribute("href")=="https://qoder.com.cn/auth/login?state=preview"
+    page.locator(".auth-inline-row").wait_for()
+    assert page.locator(".auth-inline-row input").count()==1
+    assert page.locator(".auth-inline-row textarea").count()==0
     assert page.get_by_label("授权链接",exact=True).input_value()=="https://qoder.com.cn/auth/login?state=preview"
     # The URL must be visible, authorization must remain on the same page,
     # and no new browser tab/window may be opened by requesting the link.
     expect(page.get_by_role("button",name="复制授权链接",exact=True)).to_be_enabled()
-    expect(page.get_by_role("button",name="我已登录，检查状态",exact=True)).to_be_enabled()
+    expect(page.get_by_role("button",name="刷新状态",exact=True)).to_be_enabled()
+    expect(page.get_by_role("button",name="取消本次授权",exact=True)).to_be_enabled()
     assert page.url==authorization_origin, f"Unexpected navigation: {page.url}"
     assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected automatic authorization popup"
     assert page.get_by_text("等待授权",exact=True).is_visible()
