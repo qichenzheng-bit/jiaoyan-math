@@ -262,8 +262,15 @@ with sync_playwright() as p:
     assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
     assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    page.get_by_role("button",name="打开导航").click()
-    assert page.locator(".nav.open").is_visible()
+    menu=page.get_by_role("button",name="打开导航",exact=True)
+    menu.click()
+    # React commits the drawer state asynchronously; require the open state
+    # and visible, actionable navigation before continuing.
+    from playwright.sync_api import expect
+    expect(menu).to_have_attribute("aria-expanded","true")
+    drawer=page.locator("#workspace-navigation.nav.open")
+    expect(drawer).to_be_visible()
+    expect(drawer.get_by_role("button",name="教学教研",exact=True)).to_be_visible()
     page.locator(".nav.open").get_by_role("button",name="教学教研",exact=True).click()
     page.locator(".nav.open").get_by_role("button",name="资料录入",exact=True).click()
     assert page.locator(".nav.open").get_by_role("link",name="整套资料录入",exact=True).is_visible()
