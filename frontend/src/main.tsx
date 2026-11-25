@@ -22,3 +22,5 @@ import './chat-refs.css'
 import './print-doc.css'
 
 import './studio.css'
+
+import './cover.css'
