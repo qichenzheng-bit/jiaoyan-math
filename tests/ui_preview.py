@@ -13,6 +13,9 @@ items=[dict(id=f"q{i}",code=f"QDEMO{i:04}",kind="question",title=t,subject="高�
 doc={"id":"demo","title":"考研数学（一）示例试卷","kind":"intake","subject":"高等数学","source_id":source["id"],"revision":1,"archived":False,"blocks":[{"uid":q["id"],"kind":"reference","title":"","content":"","answer":"","solution":"","analysis":"","proof":"","chapter":"","question_type":"","unit_type":"","resource_id":q["id"],"file_id":None,"width":100,"snapshot":q} for q in items]}
 points=[dict(id=f"p{i}",code=f"KP{i}",name=n,subject="高等数学",chapter="微积分",description="示例知识点",aliases=[],status="active",revision=1) for i,n in enumerate(["微积分","一元函数微分学","一元函数积分学","重要极限","导数","微分中值定理","定积分","换元积分法","分部积分法"])]
 edges=[dict(source_id=f"p{a}",target_id=f"p{b}",relation_type="contains") for a,b in [(0,1),(0,2),(1,3),(1,4),(1,5),(2,6),(2,7),(2,8)]]
+demo_chat={"id":"chat-demo","title":"录入建议示例","project":"","pinned":False,"archived":False,"updated_at":1,
+ "messages":[{"id":"msg-user","role":"user","content":"请录入一道题：求 $x^2$ 的导数。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[]},
+ {"id":"msg-ai","role":"assistant","content":"可以整理为题目草稿，请确认。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[],"intake_intent":"question"}]}
 def answer(route):
     from urllib.parse import urlsplit,parse_qs
     u=urlsplit(route.request.url);p=u.path.removeprefix("/api");q=parse_qs(u.query)
@@ -20,7 +23,7 @@ def answer(route):
       "/auth/me":{"username":"预览管理员"},"/ready":{"status":"ok"},"/settings":{"display_name":"微光数学","theme":"light"},"/resources/subjects":subjects,
       "/knowledge/points":{"items":points,"total":len(points)},"/knowledge/relations":{"items":edges,"truncated":False},
       "/documents/demo":doc,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
-      "/intelligence/jobs":[],"/chat/sessions":[],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
+      "/intelligence/jobs":[],"/chat/sessions/chat-demo":demo_chat,"/intelligence/chat-source/msg-user":{"message_id":"msg-user","session_id":"chat-demo","role":"user","text":demo_chat["messages"][0]["content"],"title":demo_chat["title"],"has_attachments":False},"/chat/sessions":[],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
       "/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
@@ -36,7 +39,7 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
         assert page.locator(".main-section-links a").count()==6
@@ -55,6 +58,17 @@ with sync_playwright() as p:
             assert page.get_by_label("原文",exact=True).input_value().startswith("录入题目")
             assert page.get_by_text("已带入聊天正文").is_visible()
             page.goto("http://127.0.0.1:4173/chat",wait_until="networkidle")
+        if name=="19-intake-intent":
+            page.locator(".chat-intake-suggestion").wait_for()
+            page.screenshot(path=str(OUT/(name+".png")),full_page=False)
+            page.get_by_role("button",name="使用本次用户原文").click()
+            page.wait_for_url("**/intelligence?from=msg-user&intent=question")
+            page.get_by_label("原文",exact=True).wait_for()
+            page.get_by_text("已带入聊天正文").wait_for()
+            assert page.get_by_label("原文",exact=True).input_value()==demo_chat["messages"][0]["content"]
+            assert page.get_by_label("录入目标").input_value()=="question"
+            page.screenshot(path=str(OUT/"20-intake-linked.png"),full_page=False)
+            continue
         if name=="00-home":
             assert page.locator(".workflow-step").count()==5
             assert page.locator(".home-stat").count()==6

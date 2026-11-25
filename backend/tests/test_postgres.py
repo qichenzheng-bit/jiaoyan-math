@@ -151,6 +151,22 @@ def test_migration_and_login(tmp_path, monkeypatch):
         converted=client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]})
         assert converted.status_code==200,converted.text
         assert client.get("/api/documents/"+converted.json()["document_id"]).json()["blocks"][0]["kind"]=="question"
+        def failed_ingest(method,path,body=None):
+            if path=="/status":return {"chat_available":True}
+            if path=="/chat/start":return {"state":"running"}
+            return {"state":"failed","detail":"测试失败"}
+        monkeypatch.setattr(qoder,"request",failed_ingest)
+        failed=client.post("/api/intelligence/jobs",headers=origin,json={"title":"重试测试","text":"求导","source_message_id":user_message["id"]}).json()
+        failed=client.get("/api/intelligence/jobs/"+failed["id"]).json()
+        assert failed["state"]=="failed"
+        monkeypatch.setattr(qoder,"request",fake_ingest)
+        retry_url="/api/intelligence/jobs/"+failed["id"]+"/retry"
+        retry_body={"revision":failed["revision"]}
+        retried=client.post(retry_url,headers=origin,json=retry_body)
+        assert retried.status_code==200,retried.text
+        assert retried.json()["retry_of"]==failed["id"]
+        assert retried.json()["provenance"]==failed["provenance"]
+        assert client.post(retry_url,headers=origin,json=retry_body).json()["id"]==retried.json()["id"]
         asset=client.post("/api/studio",headers=origin,json={"kind":"asset","title":"常用公式","data":{"category":"formula","content":"x^2"}})
         assert asset.status_code==200,asset.text
         a=asset.json()
