@@ -1,0 +1,30 @@
+# Replace DOMAIN and certificate paths. Install only after a valid certificate exists.
+limit_req_zone $binary_remote_addr zone=jiaoyan_login:10m rate=5r/m;
+server {
+    listen 80;
+    server_name DOMAIN;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name DOMAIN;
+    ssl_certificate /etc/letsencrypt/live/DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN/privkey.pem;
+    client_max_body_size 20m;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy same-origin always;
+    location = /api/auth/login {
+        limit_req zone=jiaoyan_login burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8765;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
+}

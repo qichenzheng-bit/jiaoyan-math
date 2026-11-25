@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Route, Routes, Link } from 'react-router-dom'
-import { api, Login, PasswordSettings } from './auth'
+import { api, Login } from './auth'
+import Settings, {defaults,type Preferences} from './pages/Settings'
 import Files from './pages/Files'
 import FormulaLab from './pages/FormulaLab'
 
@@ -25,6 +26,7 @@ function Home() {
 }
 
 export default function App() {
+  const [preferences,setPreferences]=useState<Preferences>(defaults)
   const [menu, setMenu] = useState(false)
   const [assistant, setAssistant] = useState(false)
   const [health, setHealth] = useState('检查中')
@@ -40,15 +42,27 @@ export default function App() {
     fetch('/api/ready', {signal:controller.signal}).then(r=>setHealth(r.ok?'服务已连接':'服务未就绪')).catch(()=>{if(!controller.signal.aborted)setHealth('服务未连接')})
     return () => controller.abort()
   }, [])
+  useEffect(()=>{
+    if(!user)return
+    const c=new AbortController()
+    api<Preferences>('/settings',{signal:c.signal}).then(setPreferences).catch(()=>{})
+    return()=>c.abort()
+  },[user])
+  useEffect(()=>{
+    const media=window.matchMedia('(prefers-color-scheme: dark)')
+    const apply=()=>{document.documentElement.dataset.theme=preferences.theme==='system'?(media.matches?'dark':'light'):preferences.theme}
+    apply();media.addEventListener('change',apply)
+    return()=>media.removeEventListener('change',apply)
+  },[preferences.theme])
   async function logout() {
-    try { await api('/auth/logout',{method:'POST'}); setUser(null); setAssistant(false); setMenu(false); setError('') }
+    try { await api('/auth/logout',{method:'POST'}); setUser(null); setPreferences(defaults); setAssistant(false); setMenu(false); setError('') }
     catch(e) { setError(e instanceof Error?e.message:'退出失败') }
   }
   if (user === undefined) return <div className="login-page"><p>正在检查登录状态…</p></div>
   if (user === null) return <><Login onLogin={name=>{setUser(name);setError('')}}/>{error && <p className="auth-error" role="alert">{error}</p>}</>
   return <div className="shell">
     <header><button className="menu" aria-label="切换导航" aria-expanded={menu} onClick={() => setMenu(!menu)}>菜单</button>
-      <Link className="brand" to="/">微光数学 <small>教研工作台</small></Link>
+      <Link className="brand" to="/">{preferences.display_name} <small>教研工作台</small></Link>
       <span className="health" role="status">{health} · {user}</span>
       <button aria-expanded={assistant} onClick={() => setAssistant(!assistant)}>AI 助手</button>
       <button onClick={logout}>退出</button>
@@ -58,7 +72,7 @@ export default function App() {
     </nav>
     <main>{error && <p role="alert">{error}</p>}<Routes>
       <Route path="/" element={<Home/>}/>
-      {modules.slice(1).map(m => <Route key={m.path} path={m.path} element={m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:<><h1>{m.name}</h1><p>{m.desc}</p>{m.path==='/settings'?<PasswordSettings/>:<section className="notice">此模块将在对应开发阶段开放。</section>}</>}/>)}
+      {modules.slice(1).map(m => <Route key={m.path} path={m.path} element={m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:<><h1>{m.name}</h1><p>{m.desc}</p>{m.path==='/settings'?<Settings preferences={preferences} onChange={setPreferences}/>:<section className="notice">此模块将在对应开发阶段开放。</section>}</>}/>)}
       <Route path="*" element={<><h1>页面不存在</h1><Link to="/">返回首页</Link></>}/>
     </Routes></main>
     {assistant && <aside aria-label="AI 助手"><h2>AI 助手</h2><p>模型接入将在后续阶段完成。</p><button onClick={() => setAssistant(false)}>关闭</button></aside>}

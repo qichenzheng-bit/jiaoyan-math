@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.system import router as system_router
 from app.api.auth import router as auth_router
 from app.api.files import router as files_router
+from app.api.settings import router as settings_router
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
+    app.include_router(settings_router, prefix="/api")
 
     @app.middleware("http")
     async def no_cache(request: Request, call_next):
@@ -33,6 +35,8 @@ def create_app() -> FastAPI:
     async def database_error(request: Request, exc: SQLAlchemyError):
         logger.error("Database operation failed: %s", type(exc).__name__)
         return JSONResponse(status_code=503, content={"detail": "数据库暂不可用"})
+    from app.web import mount_web
+    mount_web(app)
     return app
 
 app = create_app()

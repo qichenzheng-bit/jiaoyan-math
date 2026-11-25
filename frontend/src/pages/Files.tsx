@@ -31,7 +31,7 @@ export default function Files() {
       const item=await response.json()
       if(!response.ok)throw new Error(typeof item.detail==='string'?item.detail:'上传失败')
       setMessage(item.duplicate?'已存在相同内容，复用原文件。':'上传成功')
-      setArchived(false);setPage(0);await refresh()
+      if(archived||page!==0){setArchived(false);setPage(0)}else{await refresh()}
     }catch(e){setMessage(e instanceof Error?e.message:'上传失败')}
     finally{setBusy(false);if(input.current)input.current.value=''}
   }
