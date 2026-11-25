@@ -23,3 +23,10 @@
 .legacy-shell.clean-workspace .clean-chat>.chat-composer>textarea{appearance:none;-webkit-appearance:none;display:block;border:0!important;border-radius:0;background:transparent;box-shadow:none!important;outline:none!important;padding:4px 3px;min-height:48px;resize:none}
 .legacy-shell.clean-workspace .clean-chat>.chat-composer:focus-within{border-color:var(--muted)}
 @media(max-width:760px){.legacy-shell.clean-workspace.chat-route .content-inner{padding:0 8px calc(6px + env(safe-area-inset-bottom))}.legacy-shell.clean-workspace .clean-chat>.chat-scroll{padding:6px 4px}.legacy-shell.clean-workspace .clean-chat>.chat-composer{padding:9px 10px;margin-bottom:0}.legacy-shell.clean-workspace .clean-chat>.chat-composer>textarea{font-size:16px;min-height:48px}}
+
+/* AI conversations share the application header; no second navigation row. */
+.clean-workspace .chat-session-actions{display:flex;align-items:center;gap:5px;min-width:0}
+.clean-workspace .chat-session-actions:empty{display:none}
+.clean-workspace .chat-session-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
+.legacy-shell.clean-workspace .chat-session-actions button{font-size:12px;padding:5px 8px;min-height:32px;border:0;background:transparent;white-space:nowrap}
+@media(max-width:760px){.clean-workspace .chat-session-name{display:none}.legacy-shell.clean-workspace .chat-session-actions button{padding:5px 6px}.clean-workspace .topbar-actions{gap:4px}}

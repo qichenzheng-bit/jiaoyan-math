@@ -99,6 +99,8 @@ with sync_playwright() as p:
             assert page.get_by_text("已关联原文件：demo.tex").is_visible()
         if name=="19-intake-intent":
             page.locator(".chat-intake-suggestion").wait_for()
+            assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
+            page.locator("#chat-session-actions").get_by_role("button",name="管理",exact=True).wait_for()
             page.screenshot(path=str(OUT/(name+".png")),full_page=False)
             page.get_by_role("button",name="使用本次用户原文").click()
             page.wait_for_url("**/intelligence?from=msg-user&intent=question")
@@ -112,6 +114,8 @@ with sync_playwright() as p:
             assert page.get_by_label("输入消息").is_visible()
             assert page.locator(".clean-chat.chat-main-area").count()==1
             assert page.locator(".clean-chat .chat-main-area").count()==0
+            assert page.locator(".workspace > header").count()==1
+            assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
             assert page.locator(".clean-chat > .chat-composer > textarea").count()==1
             assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px' && getComputedStyle(el).boxShadow === 'none'")
             assert page.get_by_text("今天想做什么？",exact=True).is_visible()
@@ -239,6 +243,8 @@ with sync_playwright() as p:
     assert page.locator(".mobile-tabs").count()==0
     assert page.get_by_label("输入消息").is_visible()
     assert page.locator(".clean-chat > .chat-composer").is_visible()
+    assert page.locator(".workspace > header").count()==1
+    assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
     assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.get_by_role("button",name="打开导航").click()
@@ -306,6 +312,7 @@ with sync_playwright() as p:
     assert page.get_by_text("可用模型：2",exact=True).is_visible()
     page.get_by_role("button",name="模型配置",exact=True).click()
     page.get_by_role("button",name="修改",exact=True).click()
-    assert page.get_by_label("模型",exact=True).locator("option[value='preview-new-model']").count()==1
+    page.locator(".model-config-form select option[value='preview-new-model']").wait_for(state="attached")
+    assert page.locator(".model-config-form select").evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")

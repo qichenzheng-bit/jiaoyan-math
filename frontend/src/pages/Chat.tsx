@@ -1,4 +1,5 @@
 import {MathText} from '../components/MathText'
+import {createPortal} from 'react-dom'
 import {useEffect,useRef,useState,type FormEvent} from 'react'
 import {Link,useNavigate,useSearchParams} from 'react-router-dom'
 import {api} from '../auth'
@@ -42,7 +43,9 @@ useEffect(()=>{const reset=()=>fresh();const guard=(event:Event)=>{const path=(e
  async function stop(){if(!active)return;setBusy(true);try{setActive(await api<Detail>('/chat/sessions/'+active.id+'/stop',{method:'POST'}))}catch(e){failure(e)}finally{setBusy(false)}}
  async function patch(values:Partial<Session>){if(!active)return;setBusy(true);try{const s=await api<Session>('/chat/sessions/'+active.id,{method:'PATCH',body:JSON.stringify(values)});setActive({...active,...s});setRename(false);list()}catch(e){failure(e)}finally{setBusy(false)}}
  async function upload(list:FileList|null){if(!list)return;setBusy(true);setError('');try{const added:Attachment[]=[];for(const f of Array.from(list).slice(0,4-files.length)){if(f.size>64000||!/\.(txt|tex|md|csv)$/i.test(f.name))throw new Error('当前仅支持64KB以内的文本附件');const response=await fetch('/api/files?name='+encodeURIComponent(f.name),{method:'POST',body:f,credentials:'same-origin'});if(!response.ok)throw new Error('附件上传失败');added.push(await response.json())}setFiles(prev=>[...prev,...added].filter((f,i,a)=>a.findIndex(x=>x.id===f.id)===i))}catch(e){failure(e)}finally{setBusy(false);if(fileInput.current)fileInput.current.value=''}}
- return <section className={'chat-workbench clean-chat chat-main-area'+(!active?.messages.length?' chat-empty':'')} aria-label="AI 对话"><header className="chat-top"><div className="chat-title"><strong><MathText compact content={active?.title??'Qoder CN'}/></strong>{active?.project&&<small>{active.project}</small>}</div>{active&&<><button disabled={busy||running} onClick={()=>{setTitle(active.title);setProject(active.project);setRename(!rename)}}>管理</button><button disabled={busy||running} onClick={()=>void patch({pinned:!active.pinned})}>{active.pinned?'取消置顶':'置顶'}</button></>}</header>
+ const toolbar=document.getElementById('chat-session-actions')
+ return <section className={'chat-workbench clean-chat chat-main-area'+(!active?.messages.length?' chat-empty':'')} aria-label="AI 对话">
+   {active&&toolbar&&createPortal(<><span className="chat-session-name" title={active.title}><MathText compact content={active.title}/></span><button disabled={busy||running} onClick={()=>{setTitle(active.title);setProject(active.project);setRename(!rename)}}>管理</button><button disabled={busy||running} onClick={()=>void patch({pinned:!active.pinned})}>{active.pinned?'取消置顶':'置顶'}</button></>,toolbar)}
    {rename&&active&&<form className="chat-rename" onSubmit={e=>{e.preventDefault();void patch({title,project})}}><input required maxLength={160} aria-label="会话名称" value={title} onChange={e=>setTitle(e.target.value)}/><input maxLength={100} aria-label="项目名称" placeholder="项目名称（可选）" value={project} onChange={e=>setProject(e.target.value)}/><button disabled={busy}>保存</button><button type="button" disabled={busy||running} onClick={()=>void patch({archived:!active.archived})}>{active.archived?'恢复会话':'归档会话'}</button></form>}
    {!ready&&<p className="chat-warning">Qoder 执行服务尚未就绪或需要升级。<Link to="/qoder" className="text-link">账号与模型</Link></p>}
    {error&&<p className="chat-warning inline-error" role="alert">{error}</p>}

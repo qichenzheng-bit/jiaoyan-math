@@ -16,6 +16,16 @@ jobs:
           persist-credentials: false
       - run: for f in deploy/*.sh; do bash -n "$f"; done
       - run: bash deploy/unpack-video-source.sh "$RUNNER_TEMP/video-source-check"
+      - name: Package exact source revision for deployment
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: git archive --format=tar.gz --output="$RUNNER_TEMP/release-source.tar.gz" "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: release-source-${{ github.sha }}
+          path: ${{ runner.temp }}/release-source.tar.gz
+          if-no-files-found: error
+          retention-days: 3
   backend:
     runs-on: ubuntu-latest
     strategy:
@@ -106,11 +116,23 @@ jobs:
       group: jiaoyan-production
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      # Avoid the production runner's unreliable GitHub git/TLS connection.
+      # Download only the exact archive from this trusted, gated workflow run.
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-source-${{ github.sha }}
+          path: ${{ runner.temp }}/release-download-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: bash deploy/release.sh
+      - name: Deploy validated source
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/jiaoyan-release.XXXXXX")
+          trap 'rm -rf "$work"' EXIT
+          tar -xzf "$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/release-source.tar.gz" -C "$work"
+          cd "$work"
+          bash deploy/release.sh
 
   report:
     # A separate hosted job publishes readable commit statuses for main deployments.
