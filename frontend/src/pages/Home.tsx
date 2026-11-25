@@ -25,8 +25,9 @@ export default function Home(){
  },[retry])
  const metrics=[{name:'题库题目',value:counts.question,icon:'resources',path:'/resources',hint:'当前题库资源'},{name:'知识单元',value:counts.knowledge,icon:'book',path:'/resources',hint:'定义、定理与方法'},{name:'来源资料',value:counts.source,icon:'files',path:'/sources',hint:'已录入的来源资料'},{name:'讲义文档 / 试卷',value:counts.documents,icon:'works',path:'/handouts',hint:'已保存讲义与试卷'}]
  return <div className="home-page">
-  <div className="home-heading"><div><h1>首页</h1><p className="muted">你的数学教学与内容创作总览</p></div><Link to="/intake" className="button-link primary"><Icon name="plus" size={18}/> 新建资源</Link></div>
+  <div className="home-heading"><div><h1>教研工作台</h1><p className="muted">管理教学资源，继续你的教研创作</p></div><Link to="/intake" className="button-link primary"><Icon name="plus" size={18}/> 新建资源</Link></div>
   {errors.length>0&&<div className="home-error" role="status"><span>部分数据读取失败：{errors.join('、')}</span><button onClick={()=>setRetry(n=>n+1)}>重试</button></div>}
+  <section className="home-quick"><h2>快速开始</h2><div>{[{name:'录入资料',path:'/intake',icon:'intake'},{name:'创建讲义',path:'/handouts',icon:'book'},{name:'AI 助手',path:'/chat',icon:'chat'},{name:'查询题库',path:'/resources',icon:'resources'}].map(m=><Link className="quick-link" to={m.path} key={m.path}><Icon name={m.icon} size={20}/><span>{m.name}</span><Icon name="chevron" size={15}/></Link>)}</div></section>
   <div className="home-stat-grid">{metrics.map(m=><Link className="home-stat" key={m.name} to={m.path}><div><span>{m.name}</span><Icon name={m.icon} size={18}/></div><strong>{m.value??'—'}</strong><small>{m.hint}</small></Link>)}</div>
   <div className="home-columns">
    <section className="panel home-activity"><div className="home-panel-head"><h2>工作动态</h2><div className="home-tabs"><button aria-pressed={tab==='recent'} onClick={()=>setTab('recent')}>最近资源</button><button aria-pressed={tab==='audit'} onClick={()=>setTab('audit')}>操作记录</button></div></div>
@@ -34,6 +35,5 @@ export default function Home(){
    </section>
    <section className="panel home-side"><div className="home-panel-head"><h2>工作空间</h2><Link className="text-link" to="/files">文件管理 <Icon name="chevron" size={14}/></Link></div><dl className="home-details"><div><dt>文件数量</dt><dd>{stats?.count??'—'}</dd></div><div><dt>内容占用</dt><dd>{stats?(stats.bytes/1048576).toFixed(1)+' MB':'—'}</dd></div><div><dt>单文件上限</dt><dd>{stats?(stats.max_file_bytes/1048576).toFixed(0)+' MB':'—'}</dd></div></dl><div className="home-ai"><Icon name="spark" size={21}/><div><strong>Qoder CN</strong><p>管理模型账号与验证连接</p></div><Link className="button-link" to="/qoder">管理</Link></div></section>
   </div>
-  <section className="home-quick"><h2>快速开始</h2><div>{[{name:'录入题目',path:'/intake',icon:'intake'},{name:'查询题库',path:'/resources',icon:'resources'},{name:'来源资料',path:'/sources',icon:'files'},{name:'数学公式',path:'/formulas',icon:'formulas'}].map(m=><Link className="quick-link" to={m.path} key={m.path}><Icon name={m.icon} size={20}/><span>{m.name}</span><Icon name="chevron" size={15}/></Link>)}</div></section>
  </div>
 }

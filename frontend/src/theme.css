@@ -1,0 +1,19 @@
+/* Shared Weiguang Math design tokens. UI theme only; exported artwork and document paper are independent. */
+:root{
+ color-scheme:light;
+ --bg:#F8F7F3;--sidebar:#FFFFFF;--surface:#FFFFFF;--subtle:#F6F3EC;--line:#E4DED0;
+ --ink:#343638;--muted:#706C65;--gold:#B39A62;--accent:#796333;--accent-ink:#FFFFFF;
+ --accent-soft:#F2EBDD;--selected:#F2EBDD;--hover:#F0EEE8;
+ --primary:#343638;--primary-ink:#FFFFFF;--shadow:none;
+ --danger:#A13C3C;--success:#316746;--success-soft:#E5F0E8;--warning:#8A5E20;--warning-soft:#F5E9D4;--info:#345D87;--info-soft:#E9F0F7;
+ --radius-control:6px;--radius-panel:10px;--space-page:24px;--space-panel:16px;
+}
+:root[data-theme="dark"]{
+ color-scheme:dark;
+ --bg:#20201E;--sidebar:#252522;--surface:#292926;--subtle:#31312D;--line:#45443C;
+ --ink:#E8E5DD;--muted:#B8B3A8;--gold:#C9AE76;--accent:#C9AE76;--accent-ink:#20201E;
+ --accent-soft:#40392C;--selected:#40392C;--hover:#35342F;
+ --primary:#B39A62;--primary-ink:#20201E;
+ --danger:#F1A4A4;--success:#A3D2AA;--success-soft:#2D4133;--warning:#E7C083;--warning-soft:#453827;--info:#A6C7EB;--info-soft:#303E50;
+}
+:root{font-family:Inter,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:14px}

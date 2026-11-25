@@ -1,11 +1,11 @@
 import {useEffect,useRef,useState} from 'react'
 import {Link,NavLink,useLocation} from 'react-router-dom'
 import {BrandMark,Icon} from './Icon'
-import {groups,modules} from '../navigation'
+import {modules} from '../navigation'
 type Props={user:string;displayName:string;open:boolean;collapsed:boolean;onClose:()=>void;onToggle:()=>void;onLogout:()=>void}
 export default function Sidebar({user,displayName,open,collapsed,onClose,onToggle,onLogout}:Props){
  const [account,setAccount]=useState(false),[more,setMore]=useState(false)
- const primaryGroups=[{label:'教学资源',paths:['/intake','/resources','/graph']},{label:'教研创作',paths:['/research','/handouts','/papers']},{label:'内容制作',paths:['/works','/publishing']},{label:'',paths:['/checkin','/chat','/settings']}]
+ const primaryGroups=[{label:'工作空间',paths:['/','/chat','/tasks']},{label:'教学资源',paths:['/intake','/resources','/graph']},{label:'教研创作',paths:['/research','/handouts','/papers']},{label:'内容制作',paths:['/works','/publishing']},{label:'',paths:['/checkin','/settings']}]
  const mainPaths=new Set(primaryGroups.flatMap(g=>g.paths))
  const link=(m:typeof modules[number])=><NavLink key={m.path} to={m.path} end={m.path==='/'} onClick={onClose} title={m.name} aria-label={m.name} className={({isActive})=>isActive?'active':''}><Icon name={m.icon} size={17}/><span className="nav-text">{m.name}</span></NavLink>
  const dock=useRef<HTMLDivElement>(null)

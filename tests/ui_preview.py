@@ -36,7 +36,7 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/intake","01-intake"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+    for path,name in [("/","00-home"),("/intake","01-intake"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
         page.evaluate("document.fonts.ready")
@@ -50,5 +50,14 @@ with sync_playwright() as p:
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
+    # Theme and mobile smoke checks use the same compiled application.
+    page.goto("http://127.0.0.1:4173/",wait_until="networkidle")
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#f8f7f3"
+    page.evaluate("document.documentElement.dataset.theme='dark'")
+    page.screenshot(path=str(OUT/"09-home-dark.png"),full_page=False)
+    page.evaluate("document.documentElement.dataset.theme='light'")
+    page.set_viewport_size({"width":393,"height":873})
+    page.screenshot(path=str(OUT/"10-home-mobile.png"),full_page=False)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")

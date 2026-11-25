@@ -1,0 +1,96 @@
+/* Shared components and layout: preserves existing selectors, APIs and routes. */
+button,.button-link{border-radius:var(--radius-control);transition:background .15s,border-color .15s,color .15s}
+button.primary,.button-link.primary,.legacy-shell button.primary,.legacy-shell .button-link.primary,.login-card button[type=submit],.legacy-shell .chat-compose-tools .primary{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
+button.primary:hover,.button-link.primary:hover{filter:brightness(.95)}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.legacy-shell h1{font-size:24px;font-weight:650;letter-spacing:-.02em}
+.legacy-shell h2{font-size:16px;font-weight:650}
+.legacy-shell .nav{width:280px;flex-basis:280px;padding:18px 14px 12px}
+.legacy-shell.is-collapsed .nav{width:64px;flex-basis:64px}
+.legacy-shell .side-head{padding-bottom:20px}
+.legacy-shell .side-head .brand-logo{width:156px}
+.legacy-shell.is-collapsed .side-head .brand-logo{width:146px}
+.legacy-shell .nav-group{margin-top:18px}
+.legacy-shell .nav-group:nth-child(4){border-top:0;padding-top:0}
+.legacy-shell .nav-label{font-size:12px;font-weight:550;letter-spacing:.025em}
+.legacy-shell .nav .nav-scroll a{position:relative;min-height:36px;border-radius:6px;font-size:14px}
+.legacy-shell .nav .nav-scroll a.active{background:var(--selected);color:var(--accent)}
+.legacy-shell .nav .nav-scroll a.active svg{color:var(--accent)}
+.legacy-shell .nav .nav-scroll a.active:before{content:"";position:absolute;left:0;width:3px;height:18px;border-radius:2px;background:var(--gold)}
+.legacy-shell .nav-more{border-radius:6px}
+.legacy-shell .nav-more:hover{background:var(--hover)}
+.legacy-account-dock a,.legacy-account-dock a+a{background:var(--subtle);color:var(--ink);border:1px solid var(--line)}
+.legacy-shell .topbar{min-height:48px;flex-basis:48px;background:var(--surface);border-bottom:1px solid var(--line);padding:0 24px}
+.legacy-shell .content-inner{padding:var(--space-page);max-width:none}
+.legacy-shell.doc-route .content-inner{padding:12px 16px}
+.legacy-shell .panel,.home-stat,.quick-link,.provider-card,.studio-item{border-radius:var(--radius-panel);box-shadow:none;border-color:var(--line)}
+.legacy-shell button,.legacy-shell .button-link{border-radius:var(--radius-control);min-height:34px;font-size:13px}
+.legacy-shell input:not([type=checkbox]):not([type=range]):not([type=file]),.legacy-shell textarea,.legacy-shell select{border-radius:var(--radius-control)}
+.legacy-shell .setup-types button[aria-pressed=true],.legacy-shell .setup-pills button[aria-pressed=true],.bank-tabs button[aria-pressed=true],.cover-platforms button[aria-pressed=true],.model-tabs button[aria-pressed=true],.home-tabs button[aria-pressed=true]{color:var(--accent);background:var(--selected);border-color:var(--gold)}
+.legacy-shell .bank-row.selected{color:var(--ink);background:var(--selected);border-left-color:var(--gold)!important}
+.legacy-shell .bank-section .chat-rich{line-height:1.85}
+.legacy-shell .bank-detail{border-radius:var(--radius-panel);min-width:0}
+.legacy-shell .bank-split{grid-template-columns:minmax(240px,32%) minmax(0,1fr);gap:var(--space-panel)}
+.legacy-shell .kp-tree-node button.active{background:var(--selected);color:var(--accent)}
+.legacy-shell .doc-outline,.legacy-shell .doc-side,.legacy-shell .doc-ribbon,.legacy-shell .doc-band,.legacy-shell .doc-ribbon-top{background:var(--surface);border-color:var(--line);color:var(--ink)}
+.legacy-shell .doc-canvas{background:var(--subtle)}
+/* A4 document is intentionally white even when the workspace is dark. */
+.legacy-shell .doc-sheet,.print-document{color-scheme:light;background:#fff;color:#222}
+.legacy-shell .doc-sheet .doc-block.selected{background:#fffaf0;border-color:#b39a62}
+.legacy-shell .doc-sheet .muted{color:#666}
+.legacy-shell .doc-sheet .chat-rich{color:#222}
+.legacy-shell .chat-composer{border-radius:12px;background:var(--surface);border-color:var(--line);box-shadow:none}
+.legacy-shell .chat-message.user .chat-message-body{background:var(--selected)}
+.legacy-shell .chat-prompts>*:hover{background:var(--hover)}
+.legacy-shell .chat-welcome .soft-icon{background:var(--accent-soft);color:var(--accent);border-color:var(--line)}
+.legacy-shell .cover-preview{background:radial-gradient(circle,var(--line) 1px,transparent 1.4px) 0 0/21px 21px,var(--subtle)}
+.legacy-shell .cover-canvas{box-shadow:none}
+.login-page{background:var(--bg)}
+.login-layout{grid-template-columns:1fr;max-width:430px;min-height:0;border-radius:12px;box-shadow:none}
+.login-editorial{display:none}
+.login-form{max-width:none;padding:32px 36px}
+.login-mobile-brand{display:flex;margin-bottom:14px}
+.login-mobile-brand .brand-logo{width:195px}
+.login-form h1{font-size:24px}
+.login-card input{background:var(--surface);border-radius:var(--radius-control)}
+.home-page{max-width:1280px;margin:0 auto}
+.home-heading{margin-bottom:20px}
+.home-heading h1{font-size:26px}
+.home-quick{margin:0 0 20px}
+.home-quick h2{margin-bottom:10px}
+.home-quick>div{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.quick-link{background:var(--surface);padding:14px 12px}
+.quick-link>svg:first-child{color:var(--accent)}
+.home-stat-grid{gap:12px;margin-bottom:20px}
+.home-stat{padding:16px;background:var(--surface)}
+.home-stat strong{font-size:28px;font-variant-numeric:tabular-nums}
+.home-columns{gap:16px}
+.home-tabs{background:var(--subtle);border-radius:6px}
+.home-ai{background:var(--subtle)}
+.home-ai>svg{color:var(--accent)}
+.home-page .soft-icon{color:var(--accent);background:var(--accent-soft)}
+.home-error{color:var(--danger)}
+.legacy-shell .math-text-block,.legacy-shell .math-live,.legacy-shell .chat-rich{min-width:0;overflow-wrap:break-word}
+.legacy-shell .katex-display{max-width:100%;overflow-x:auto;overflow-y:hidden;padding-block:2px}
+@media(max-width:1100px){
+ .legacy-shell .nav{width:235px;flex-basis:235px}
+ .legacy-shell .content-inner{padding:18px}
+ .home-quick>div{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+ .legacy-shell .nav,.legacy-shell.is-collapsed .nav{width:min(290px,86vw);flex-basis:auto;padding:16px 12px}
+ .legacy-shell.is-collapsed .side-head .brand-logo{width:146px}
+ .legacy-shell .nav .nav-scroll a{min-height:44px}
+ .legacy-shell .topbar{padding:0 12px;min-height:48px;flex-basis:48px}
+ .legacy-shell .content-inner,.legacy-shell.doc-route .content-inner{padding:12px}
+ .legacy-shell h1,.home-heading h1{font-size:22px}
+ .legacy-shell .panel{padding:13px}
+ .legacy-shell .bank-split{grid-template-columns:minmax(0,1fr);gap:12px}
+ .legacy-shell .home-stat{padding:12px}
+ .home-quick>div,.home-stat-grid{gap:8px}
+ .home-quick{margin-bottom:14px}
+ .quick-link{padding:10px}
+ .legacy-shell .mobile-tabs a{min-height:44px}
+ .login-form{padding:28px 24px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:0s!important;animation-duration:0s!important}}
