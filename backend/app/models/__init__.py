@@ -103,6 +103,7 @@ class ChatMessage(Base):
     model: Mapped[str] = mapped_column(String(80))
     attachments: Mapped[list] = mapped_column(JSON)
     resource_refs: Mapped[list] = mapped_column(JSON,default=list)
+    intake_intent: Mapped[str | None] = mapped_column(String(16),nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 class ResourceSourceLink(Base):
@@ -190,6 +191,8 @@ class IntakeJob(Base):
     title: Mapped[str]=mapped_column(String(200))
     subject: Mapped[str]=mapped_column(String(40))
     input_text: Mapped[str]=mapped_column(Text)
+    provenance: Mapped[dict | None]=mapped_column(JSON,nullable=True)
+    retry_of: Mapped[str | None]=mapped_column(ForeignKey("intake_jobs.id",ondelete="RESTRICT"),nullable=True,unique=True)
     model: Mapped[str]=mapped_column(String(80))
     state: Mapped[str]=mapped_column(String(16))
     detail: Mapped[str]=mapped_column(Text)

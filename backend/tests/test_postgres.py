@@ -128,14 +128,25 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/tasks/sync",headers=origin).status_code==200
         assert client.post("/api/intelligence/pdf-text",headers=origin,json={"file_id":item["id"]}).status_code==415
         from app.api import intelligence
+        # Source identity is resolved from saved messages, never from caller-supplied role.
+        saved_chat=client.get("/api/chat/sessions/"+chat_id).json()
+        user_message=next(m for m in saved_chat["messages"] if m["role"]=="user")
+        source_message=client.get("/api/intelligence/chat-source/"+user_message["id"])
+        assert source_message.status_code==200 and source_message.json()["role"]=="user"
+        assert client.get("/api/intelligence/chat-source/missing").status_code==404
         def fake_ingest(method,path,body=None):
             if path=="/status":return {"chat_available":True}
             if path=="/chat/start":return {"state":"running"}
             return {"state":"done","answer":'[{"kind":"question","title":"测试提取","content":"求极限"}]'}
         monkeypatch.setattr(qoder,"request",fake_ingest)
-        job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"提取测试","text":"求极限","subject":"高数"})
+        job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"提取测试","text":"求极限","subject":"高数","source_message_id":user_message["id"],"intent":"question"})
         assert job.status_code==200,job.text
         j=client.get("/api/intelligence/jobs/"+job.json()["id"]).json()
+        assert j["provenance"]["kind"]=="chat_user"
+        assert j["provenance"]["message_id"]==user_message["id"]
+        assert j["provenance"]["edited"] is True
+        assert j["provenance"]["intent"]=="question"
+        assert client.post("/api/intelligence/jobs/"+j["id"]+"/retry",headers=origin,json={"revision":j["revision"]}).status_code==409
         assert j["state"]=="review"
         converted=client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]})
         assert converted.status_code==200,converted.text

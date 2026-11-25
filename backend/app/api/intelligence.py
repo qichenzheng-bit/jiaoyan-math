@@ -1,5 +1,6 @@
 import json
 from uuid import uuid4
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user,require_origin,now,audit
 from app.core.solution_methods import normalize_subject
-from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User
+from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession
 from app.services.pdf_text import extract_pdf
 from app.api import qoder, documents as docs, resources as bank
 
@@ -17,6 +18,9 @@ class Start(BaseModel):
     subject:str=Field(default="",max_length=40)
     text:str=Field(min_length=1,max_length=24000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+    source_message_id:str|None=Field(default=None,max_length=36)
+    input_origin:Literal["manual","chat_draft"]="manual"
+    intent:Literal["mixed","question","knowledge","document"]="mixed"
 class Review(BaseModel):
     revision:int=Field(ge=1)
     items:list[docs.Block]=Field(max_length=100)
@@ -37,6 +41,7 @@ def parse_answer(text):
     return result
 def view(j,full=False):
     r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at")}
+    r.update(provenance=j.provenance or {},retry_of=j.retry_of)
     if full:r.update(items=j.items,input_text=j.input_text)
     return r
 def get_job(db,id):
@@ -63,18 +68,61 @@ def listing(db:Session=Depends(get_db)):
 @router.get("/jobs/{id}")
 def detail(id:str,db:Session=Depends(get_db)):
     j=get_job(db,id);sync(db,j);return view(j,True)
-@router.post("/jobs",dependencies=[Depends(require_origin)])
-def start(body:Start,db:Session=Depends(get_db),user:User=Depends(current_user)):
+def chat_source(db,ident):
+    message=db.get(ChatMessage,ident)
+    if not message or message.role not in ("user","assistant") or message.state!="done":
+        raise HTTPException(404,"已完成的来源消息不存在")
+    if not message.content.strip() or len(message.content)>24000:
+        raise HTTPException(422,"来源正文为空或超过24000字，请手动分批")
+    return message
+
+@router.get("/chat-source/{ident}")
+def read_chat_source(ident:str,db:Session=Depends(get_db)):
+    m=chat_source(db,ident)
+    session=db.get(ChatSession,m.session_id)
+    return {"message_id":m.id,"session_id":m.session_id,"role":m.role,"text":m.content,
+            "title":session.title if session else "聊天内容","has_attachments":bool(m.attachments or m.resource_refs)}
+
+def build_provenance(db,body):
+    if body.source_message_id:
+        m=chat_source(db,body.source_message_id)
+        return {"kind":"chat_"+m.role,"session_id":m.session_id,"message_id":m.id,
+                "edited":body.text!=m.content,"intent":body.intent}
+    return {"kind":body.input_origin,"intent":body.intent}
+
+def launch(db,user,body,provenance,retry_of=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。仅输出JSON数组，每项kind(question或knowledge),title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n学科："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    intent=provenance.get("intent","mixed")
+    focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
+    prompt+="\n【本次整理目标】"+focus
+    if provenance.get("kind")=="chat_assistant":prompt+="\n来源是AI生成回复，不是原始文献；只能整理为待核对草稿。"
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"原文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"独立Qoder执行服务需升级至V3")
-    j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,revision=1,created_at=now(),updated_at=now())
-    db.add(j);audit(db,"intelligence.start",user.id);db.commit()
+    j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,provenance=provenance,retry_of=retry_of,revision=1,created_at=now(),updated_at=now())
+    db.add(j);audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()
     try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt})
     except HTTPException as e:
-        j=get_job(db,j.id);j.state="failed";j.detail=str(e.detail)[:400];j.revision+=1;db.commit()
+        # Ambiguous transport failures may occur after acceptance. Reconcile the original ID.
+        if e.status_code not in (503,504):
+            j=get_job(db,j.id);j.state="failed";j.detail=str(e.detail)[:400];j.revision+=1;j.updated_at=now();db.commit()
     return view(j,True)
+
+@router.post("/jobs",dependencies=[Depends(require_origin)])
+def start(body:Start,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return launch(db,user,body,build_provenance(db,body))
+
+@router.post("/jobs/{id}/retry",dependencies=[Depends(require_origin)])
+def retry(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    j=get_job(db,id)
+    existing=db.scalar(select(Job).where(Job.retry_of==j.id))
+    if existing:return view(existing,True)
+    if j.state not in ("failed","stopped") or j.revision!=body.revision:
+        raise HTTPException(409,"仅失败或已停止任务可重试，请刷新任务状态")
+    provenance=j.provenance or {"kind":"manual","intent":"mixed"}
+    draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model)
+    return launch(db,user,draft,provenance,retry_of=j.id)
+
 @router.post("/jobs/{id}/stop",dependencies=[Depends(require_origin)])
 def stop(id:str,db:Session=Depends(get_db)):
     j=get_job(db,id)
