@@ -14,9 +14,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 40
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: http.version
+      GIT_CONFIG_VALUE_0: HTTP/1.1
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
         with:
+          fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
