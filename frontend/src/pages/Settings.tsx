@@ -17,15 +17,15 @@ export default function Settings({preferences,onChange}:{preferences:Preferences
     try{const p=await api<Preferences>('/settings',{method:'PUT',body:JSON.stringify(draft)});onChange(p);setMessage('已保存')}
     catch(e){setMessage(e instanceof Error?e.message:'保存失败')}finally{setBusy(false)}
   }
-  return <div className="settings-grid">
-    <form className="login-card" onSubmit={save}><h2>常规设置</h2>
+  return <div className="legacy-settings"><aside className="panel settings-side">{[['model','模型与 AI'],['appearance','外观与显示'],['account','账号安全'],['storage','数据与存储'],['audit','操作记录']].map(([id,t])=><a key={id} href={'#settings-'+id}>{t}</a>)}</aside><div className="settings-content">
+    <section className="panel" id="settings-model"><h2>模型与 AI</h2><p className="muted">当前使用 Qoder CN，其他平台尚未接入。</p><Link className="button-link" to="/qoder">账号授权 / 刷新模型</Link></section><form id="settings-appearance" className="login-card" onSubmit={save}><h2>常规设置</h2>
       <label>系统名称<input required maxLength={60} value={draft.display_name} onChange={e=>setDraft({...draft,display_name:e.target.value})}/></label>
       <label>主题<select value={draft.theme} onChange={e=>setDraft({...draft,theme:e.target.value as Preferences['theme']})}><option value="light">浅色</option><option value="dark">深色</option><option value="system">跟随系统</option></select></label>
       <button disabled={busy}>保存设置</button>{message&&<p role="status">{message}</p>}
     </form>
-    <PasswordSettings/>
-    <section className="login-card"><h2>系统信息</h2><p>版本：{status?.version??'读取中'}</p><p>提交：{status?.release.slice(0,12)??'—'}</p><p>磁盘剩余：{status?.disk?(status.disk.free/1073741824).toFixed(1)+' GiB':'未配置'}</p><p>备份与恢复由服务器管理员执行。</p></section>
-    <section className="login-card"><h2>模型设置</h2><p>管理 Qoder CN 账号授权与模型连接。</p><Link className="button-link" to="/qoder">AI 账号与模型</Link></section>
-    <section className="login-card"><h2>最近操作</h2>{logs.length===0?<p>暂无记录</p>:<ul className="audit-list">{logs.map(l=><li key={l.id}>{new Date(l.created_at*1000).toLocaleString()} · {l.action}</li>)}</ul>}</section>
-  </div>
+    <div id="settings-account"><PasswordSettings/></div>
+    <section className="login-card" id="settings-storage"><h2>系统信息</h2><p>版本：{status?.version??'读取中'}</p><p>提交：{status?.release.slice(0,12)??'—'}</p><p>磁盘剩余：{status?.disk?(status.disk.free/1073741824).toFixed(1)+' GiB':'未配置'}</p><p>备份与恢复由服务器管理员执行。</p></section>
+    
+    <section className="login-card" id="settings-audit"><h2>最近操作</h2>{logs.length===0?<p>暂无记录</p>:<ul className="audit-list">{logs.map(l=><li key={l.id}>{new Date(l.created_at*1000).toLocaleString()} · {l.action}</li>)}</ul>}</section>
+  </div></div>
 }

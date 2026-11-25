@@ -24,3 +24,5 @@ import './print-doc.css'
 import './studio.css'
 
 import './cover.css'
+
+import './legacy-ui.css'

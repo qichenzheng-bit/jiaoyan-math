@@ -1,3 +1,3 @@
 import {useState} from 'react'
 import Studio from './Studio'
-export default function Checkin(){const [tab,setTab]=useState<'account'|'checkin'>('account');return <><div className="button-row"><button aria-pressed={tab==='account'} onClick={()=>setTab('account')}>账号</button><button aria-pressed={tab==='checkin'} onClick={()=>setTab('checkin')}>签到与积分台账</button></div><Studio key={tab} kind={tab}/></>}
+export default function Checkin(){const [tab,setTab]=useState<'account'|'checkin'>('account');return <div className="legacy-checkin"><div className="legacy-title"><h1>签到助手</h1><span className="muted">手工积分台账 · 实时接口待接入</span></div><div className="button-row"><button aria-pressed={tab==='account'} onClick={()=>setTab('account')}>账号</button><button aria-pressed={tab==='checkin'} onClick={()=>setTab('checkin')}>签到与积分台账</button></div><Studio key={tab} kind={tab}/></div>}

@@ -140,3 +140,25 @@ def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(cu
     db.add(r);db.flush();bank.snapshot(db,r)
     d.source_id=r.id;d.revision+=1;d.updated_at=now();references(db,d)
     audit(db,"document.promote",user.id);db.commit();return public(d)
+
+class SetupRequest(BaseModel):
+    title:str=Field(min_length=1,max_length=200)
+    subject:str=Field(default="",max_length=40)
+    source_type:Literal["exam","textbook","handout"]
+    exam_type:str=Field(default="",max_length=80)
+    year:str=Field(default="",max_length=12)
+    nature:str=Field(default="",max_length=60)
+    note:str=Field(default="",max_length=1000)
+    intro:str=Field(default="",max_length=4000)
+
+@router.post("/setup",dependencies=[Depends(require_origin)])
+def setup(body:SetupRequest,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user)
+    text="\n".join(x for x in (body.nature,body.note,body.intro) if x.strip()) or body.title
+    data=bank.clean(bank.Draft(kind="source",title=body.title,subject=body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.nature),db)
+    bank.guard_duplicate(db,data)
+    s=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+    db.add(s);db.flush();bank.snapshot(db,s)
+    blocks=[Block(uid=str(uuid4()),kind="text",content=body.intro).model_dump()] if body.intro.strip() else []
+    d=Doc(id=str(uuid4()),title=body.title.strip(),kind="intake",subject=normalize_subject(body.subject),source_id=s.id,blocks=blocks,revision=1,archived=False,created_at=now(),updated_at=now())
+    db.add(d);db.flush();references(db,d);audit(db,"document.setup",user.id);db.commit();return public(d)
