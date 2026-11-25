@@ -1,0 +1,1 @@
+.chat-reference-picker{display:grid;gap:5px;max-height:230px;overflow:auto;background:var(--subtle);padding:8px;border-radius:8px}.chat-reference-picker button{justify-content:flex-start;text-align:left;white-space:normal}.chat-reference-picker label{display:grid;gap:5px;font-size:12px}

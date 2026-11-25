@@ -14,6 +14,7 @@ from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.documents import router as document_router
 from app.api.intelligence import router as intelligence_router
+from app.api.tasks import router as task_router
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(document_router, prefix="/api")
     app.include_router(intelligence_router, prefix="/api")
+    app.include_router(task_router, prefix="/api")
 
     @app.middleware("http")
     async def no_cache(request: Request, call_next):

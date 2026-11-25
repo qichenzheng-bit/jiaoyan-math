@@ -16,3 +16,5 @@ import './chat.css'
 import './knowledge.css'
 
 import './doc-work.css'
+
+import './chat-refs.css'

@@ -102,6 +102,7 @@ class ChatMessage(Base):
     detail: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(80))
     attachments: Mapped[list] = mapped_column(JSON)
+    resource_refs: Mapped[list] = mapped_column(JSON,default=list)
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 class ResourceSourceLink(Base):

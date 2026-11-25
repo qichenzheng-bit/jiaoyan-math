@@ -46,3 +46,7 @@ def test_document_private():
 
 def test_intelligence_private():
     assert client.get("/api/intelligence/jobs").status_code==401
+
+def test_task_refs_private():
+    assert client.get("/api/tasks").status_code==401
+    assert client.get("/api/chat/resource-search?q=Q").status_code==401
