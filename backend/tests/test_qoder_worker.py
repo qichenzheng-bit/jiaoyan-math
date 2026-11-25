@@ -33,3 +33,7 @@ def test_chat_events():
     assert worker.chat_event({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"数学"}}})==("数学","",False)
     assert worker.chat_event({"type":"assistant","message":{"content":[{"type":"text","text":"结果"},{"type":"tool_use","input":{"secret":1}}]}})==("","结果",False)
     assert worker.chat_event({"type":"result","is_error":True})==("","",True)
+
+
+def test_model_parser_rejects_option_like_rows():
+    assert worker.parse_models('MODEL\n--unsafe\n- Auto\n* Fast') == ['Auto','Fast']

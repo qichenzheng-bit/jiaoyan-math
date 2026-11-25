@@ -28,7 +28,7 @@ def sync(db,m):
     try:
         result=qoder.request("GET","/chat/"+m.id)
     except HTTPException as exc:
-        if exc.status_code==404 or now()-m.created_at>300:
+        if (exc.status_code==404 and now()-m.created_at>15) or now()-m.created_at>300:
             m.state="failed";m.detail="执行服务任务已丢失或超时，请重新提问"
         return
     state=result.get("state")
@@ -98,7 +98,9 @@ def turn(ident:str,body:Turn,db:Session=Depends(get_db),user:User=Depends(curren
     if s.archived: raise HTTPException(409,"会话已归档")
     rows=messages(db,s)
     for m in rows: sync(db,m)
-    if any(m.state=="running" for m in rows): raise HTTPException(409,"当前会话正在生成")
+    if any(m.state=="running" for m in rows):
+        db.commit()
+        raise HTTPException(409,"当前会话正在生成")
     if not body.content.strip(): raise HTTPException(422,"请输入内容")
     status=qoder.request("GET","/status")
     if not status.get("chat_available"): raise HTTPException(503,"独立 Qoder 执行服务需要升级至 M03")
@@ -136,8 +138,10 @@ def turn(ident:str,body:Turn,db:Session=Depends(get_db),user:User=Depends(curren
     try:
         qoder.request("POST","/chat/start",{"id":a.id,"model":body.model,"prompt":text})
     except HTTPException as exc:
-        a.state="failed";a.detail=str(exc.detail)[:400];db.commit()
-    return detail(db,s)
+        # Transport failure may have occurred after the worker accepted the job.
+        if exc.status_code not in (503,504):
+            a.state="failed";a.detail=str(exc.detail)[:400];db.commit()
+    return detail(db,session(db,s.id,True))
 @router.post("/sessions/{ident}/stop",dependencies=[Depends(require_origin)])
 def stop(ident:str,db:Session=Depends(get_db)):
     s=session(db,ident,True)

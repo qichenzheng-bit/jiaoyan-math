@@ -20,7 +20,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
     assert settings.database_url.startswith("postgresql+psycopg://")
     assert engine().url.database == "jiaoyan_ci", "Use a dedicated CI database"
     command.upgrade(Config("alembic.ini"), "head")
-    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "alembic_version"} <= set(inspect(engine()).get_table_names())
+    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "chat_sessions", "chat_messages", "alembic_version"} <= set(inspect(engine()).get_table_names())
     with TestClient(create_app(), base_url="https://testserver") as client:
         assert client.get("/api/ready").status_code == 503
         assert client.get("/api/system").status_code == 401

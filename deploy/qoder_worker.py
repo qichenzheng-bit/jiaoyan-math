@@ -74,7 +74,9 @@ def parse_models(output):
                 in_list = True
             else:
                 continue
-        name = text.lstrip("- *").strip()
+        if text.startswith("--"):
+            continue
+        name = text[2:].strip() if text.startswith(("- ", "* ")) else text
         if MODEL_ID.fullmatch(name) and name.lower() not in {"model","models","warning","available","error","usage","id","name","description","none"}:
             if name not in names:
                 names.append(name)
