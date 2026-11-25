@@ -1,5 +1,6 @@
 import { useEffect,useState,type FormEvent } from 'react'
 import { api,PasswordSettings } from '../auth'
+import {Link} from 'react-router-dom'
 export type Preferences={display_name:string;theme:'light'|'dark'|'system'}
 export const defaults:Preferences={display_name:'微光数学',theme:'light'}
 type Status={version:string;release:string;disk:{total:number;free:number}|null}
@@ -24,7 +25,7 @@ export default function Settings({preferences,onChange}:{preferences:Preferences
     </form>
     <PasswordSettings/>
     <section className="login-card"><h2>系统信息</h2><p>版本：{status?.version??'读取中'}</p><p>提交：{status?.release.slice(0,12)??'—'}</p><p>磁盘剩余：{status?.disk?(status.disk.free/1073741824).toFixed(1)+' GiB':'未配置'}</p><p>备份与恢复由服务器管理员执行。</p></section>
-    <section className="login-card"><h2>模型设置</h2><p>模型平台、认证及密钥管理将在 AI 助手阶段实现。</p></section>
+    <section className="login-card"><h2>模型设置</h2><p>管理 Qoder CN 账号授权与模型连接。</p><Link className="button-link" to="/qoder">AI 账号与模型</Link></section>
     <section className="login-card"><h2>最近操作</h2>{logs.length===0?<p>暂无记录</p>:<ul className="audit-list">{logs.map(l=><li key={l.id}>{new Date(l.created_at*1000).toLocaleString()} · {l.action}</li>)}</ul>}</section>
   </div>
 }
