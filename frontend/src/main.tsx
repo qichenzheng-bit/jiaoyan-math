@@ -26,3 +26,5 @@ import './studio.css'
 import './cover.css'
 
 import './legacy-ui.css'
+
+import './math-content.css'

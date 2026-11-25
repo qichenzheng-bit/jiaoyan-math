@@ -66,7 +66,7 @@ def detail(id:str,db:Session=Depends(get_db)):
 @router.post("/jobs",dependencies=[Depends(require_origin)])
 def start(body:Start,db:Session=Depends(get_db),user:User=Depends(current_user)):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
-    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。仅输出JSON数组，每项kind(question或knowledge),title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n学科："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。仅输出JSON数组，每项kind(question或knowledge),title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n学科："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"原文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"独立Qoder执行服务需升级至V3")
     j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,revision=1,created_at=now(),updated_at=now())

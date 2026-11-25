@@ -12,7 +12,8 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-router-dom": "7.5.3",
-    "katex": "0.16.22"
+    "katex": "0.16.22",
+    "html-to-image": "1.11.13"
   },
   "devDependencies": {
     "@types/react": "19.0.12",
