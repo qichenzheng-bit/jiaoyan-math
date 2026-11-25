@@ -1,7 +1,7 @@
 import {Link,useParams} from 'react-router-dom'
 import {Icon} from '../components/Icon'
 import {workspaceGroups,modules} from '../navigation'
-const intro:Record<string,string>={teaching:'录入资料、管理教学资源与制作教学内容。',publishing:'设计并导出教学内容封面。',sales:'管理课程与资料商品、订单和交付。'}
+const intro:Record<string,string>={intake:'AI 整理或手动录入来源；在卡片工作台编辑题目与知识单元。',teaching:'管理题库、知识库、知识图谱和原始来源。',creation:'制作视频、组卷、组讲义和组教材，完成后导出。',publishing:'设计并导出教学内容封面。',sales:'管理课程与资料商品、订单和交付。'}
 export default function ProjectHub(){
  const {id}=useParams(),group=workspaceGroups.find(g=>g.id===id)
  if(!group)return <section className="panel"><h1>项目不存在</h1><Link to="/">返回首页</Link></section>
