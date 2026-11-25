@@ -292,5 +292,20 @@ with sync_playwright() as p:
     assert link.get_attribute("href")=="https://qoder.com.cn/auth/login?state=preview"
     assert page.get_by_text("等待授权",exact=True).is_visible()
     page.screenshot(path=str(OUT/"31-qoder-auth-mobile.png"),full_page=False)
+    # Complete the simulated official login: the current account's actual
+    # catalog must be fetched automatically, not the compatibility defaults.
+    model_requests=[]
+    live_catalog={"models":[{"id":"Auto","label":"Auto","efforts":["default"]},{"id":"preview-new-model","label":"Preview New Model","efforts":["default"]}],"source":"cli","updated_at":1}
+    def latest_models(route):
+        model_requests.append(route.request.method)
+        route.fulfill(status=200,content_type="application/json",body=json.dumps(live_catalog))
+    context.route("**/api/qoder/models/refresh",latest_models)
+    login_fixture["login"]={"state":"finished","url":"","detail":"CLI 登录流程已结束"}
+    page.get_by_text("最新模型清单已更新（2 个）",exact=True).wait_for(timeout=15000)
+    assert model_requests==["POST"]
+    assert page.get_by_text("可用模型：2",exact=True).is_visible()
+    page.get_by_role("button",name="模型配置",exact=True).click()
+    page.get_by_role("button",name="修改",exact=True).click()
+    assert page.get_by_label("模型",exact=True).locator("option[value='preview-new-model']").count()==1
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")
