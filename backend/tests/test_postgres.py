@@ -119,6 +119,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/resources/"+rid).json()["source_id"]==source["id"]
         assert client.get("/api/chat/resource-search?q="+created.json()["code"]).json()[0]["id"]==rid
         assert client.get("/api/tasks").status_code==200
+        assert client.post("/api/tasks/sync",headers=origin).status_code==200
+        assert client.post("/api/intelligence/pdf-text",headers=origin,json={"file_id":item["id"]}).status_code==415
         from app.api import intelligence
         def fake_ingest(method,path,body=None):
             if path=="/status":return {"chat_available":True}

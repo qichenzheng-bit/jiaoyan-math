@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user,require_origin,now,audit
 from app.core.solution_methods import normalize_subject
-from app.models import IntakeJob as Job, TeachingDocument, User
+from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User
+from app.services.pdf_text import extract_pdf
 from app.api import qoder, documents as docs, resources as bank
 
 router=APIRouter(prefix="/intelligence",dependencies=[Depends(current_user)])
@@ -97,3 +98,14 @@ def convert(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(cur
     draft=docs.Draft(title=j.title,subject=j.subject,blocks=j.items)
     d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=None,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.convert",user.id);db.commit();return {"document_id":d.id}
+
+class PDFRequest(BaseModel):
+    file_id:str=Field(min_length=1,max_length=36)
+    start:int=Field(default=1,ge=1,le=10000)
+    end:int=Field(default=1,ge=1,le=10000)
+
+@router.post("/pdf-text",dependencies=[Depends(require_origin)])
+def pdf_text(body:PDFRequest,db:Session=Depends(get_db)):
+    f=db.get(StoredFile,body.file_id)
+    if not f:raise HTTPException(404,"文件不存在")
+    return {"text":extract_pdf(f,body.start,body.end),"file_id":f.id,"start":body.start,"end":body.end}

@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react'
 import {Link} from 'react-router-dom'
 import {api} from '../auth'
-import logo from '../assets/logo.svg'
+const logo = new URL('../assets/logo.svg', import.meta.url).href
 type Presets=Record<string,number[]>
 const names:Record<string,string>={bilibili:'B站',douyin:'抖音',xiaohongshu:'小红书',wechat_top:'公众号首图',wechat_sub:'公众号次条'}
 const palettes=[['#fbf7ee','#f1e9d6','#232220'],['#0d231d','#163a30','#ffffff'],['#ffffff','#f3f4f6','#232220'],['#122030','#1d364d','#ffffff']]

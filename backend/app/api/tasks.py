@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.db import get_db
@@ -17,9 +17,7 @@ def sync_running(db:Session=Depends(get_db)):
     # Do not issue unbounded socket requests if the worker is offline.
     from app.api import qoder
     try: status=qoder.request("GET","/status")
-    except Exception as exc:
-        from fastapi import HTTPException
-        if not isinstance(exc,HTTPException):raise
+    except HTTPException:
         return {"synced":0,"worker_available":False}
     if not status.get("chat_available"):return {"synced":0,"worker_available":False}
     chats=list(db.scalars(select(ChatMessage.id).where(ChatMessage.role=="assistant",ChatMessage.state=="running").order_by(ChatMessage.created_at).limit(4)))
