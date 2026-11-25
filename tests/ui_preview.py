@@ -16,6 +16,8 @@ edges=[dict(source_id=f"p{a}",target_id=f"p{b}",relation_type="contains") for a,
 demo_chat={"id":"chat-demo","title":"录入建议示例","project":"","pinned":False,"archived":False,"updated_at":1,
  "messages":[{"id":"msg-user","role":"user","content":"请录入一道题：求 $x^2$ 的导数。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[]},
  {"id":"msg-ai","role":"assistant","content":"可以整理为题目草稿，请确认。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[],"intake_intent":"question"}]}
+review_job={"id":"review-demo","title":"补充示例","state":"review","detail":"待人工核对","revision":1,"document_id":None,"input_text":"求导数","items":[{"uid":"review-item","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"","solution":"","analysis":"","proof":"","chapter":"","question_type":"","unit_type":""}]}
+review_suggestion={"id":"supplement-demo","job_id":"review-demo","item_uid":"review-item","base_revision":1,"fields":["answer","solution"],"state":"review","detail":"AI生成待确认","proposal":{"answer":"$2x$","solution":r"利用幂函数求导公式，$(x^2)'=2x$。"},"accepted":[],"model":"Auto"}
 def answer(route):
     from urllib.parse import urlsplit,parse_qs
     u=urlsplit(route.request.url);p=u.path.removeprefix("/api");q=parse_qs(u.query)
@@ -28,6 +30,8 @@ def answer(route):
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
       "/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if p=="/intelligence/jobs/review-demo":result=review_job
+    if p=="/intelligence/jobs/review-demo/supplements":result=[review_suggestion]
     if p=="/files" and route.request.method=="POST":
         result={"id":"file-demo","name":q.get("name",["demo.tex"])[0],"media_type":"text/plain","previewable":False}
     if p=="/intelligence/import" and route.request.method=="POST":
@@ -43,7 +47,7 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
         assert page.locator(".main-section-links a").count()==6
@@ -69,6 +73,11 @@ with sync_playwright() as p:
             assert page.get_by_label("原文",exact=True).input_value().startswith("录入题目")
             assert page.get_by_text("已带入聊天正文").is_visible()
             page.goto("http://127.0.0.1:4173/chat",wait_until="networkidle")
+        if name=="22-intake-supplement":
+            page.locator(".supplement-proposal .katex").first.wait_for()
+            assert page.get_by_role("button",name="确认生成录入文档").is_disabled()
+            assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
+            assert page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容").is_visible()
         if name=="18-intelligence":
             page.get_by_label("选择资料文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
             page.get_by_role("button",name="提取并预览").click()
