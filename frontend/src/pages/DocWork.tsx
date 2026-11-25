@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
-import {Link} from 'react-router-dom'
+import {Link,useSearchParams} from 'react-router-dom'
 import {api} from '../auth'
 import ChatText from './ChatText'
 type Kind='heading'|'text'|'question'|'knowledge'|'reference'|'image'|'pagebreak'
@@ -11,11 +11,13 @@ const names:Record<Kind,string>={heading:'章节标题',text:'正文',question:'
 const make=(kind:Kind):Block=>({uid:crypto.randomUUID(),kind,title:'',content:'',answer:'',solution:'',analysis:'',proof:'',chapter:'',question_type:'',unit_type:'',resource_id:null,file_id:null,width:100})
 const empty={title:'未命名教研文档',kind:'intake' as const,subject:'高等数学',source_id:null,blocks:[]}
 export default function DocWork({intake=false}:{intake?:boolean}){
+ const [params]=useSearchParams()
  const [docs,setDocs]=useState<Summary[]>([]),[total,setTotal]=useState(0),[page,setPage]=useState(0),[doc,setDoc]=useState<Doc>(),[selected,setSelected]=useState(''),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[archived,setArchived]=useState(false)
  const [tab,setTab]=useState<'start'|'insert'|'view'>('start'),[right,setRight]=useState<'resource'|'dedup'|'edit'>('edit'),[showOutline,setShowOutline]=useState(true),[showRight,setShowRight]=useState(true),[zoom,setZoom]=useState(100),[stemOnly,setStemOnly]=useState(false),[q,setQ]=useState(''),[results,setResults]=useState<R[]>([]),[sources,setSources]=useState<R[]>([]),[sourceQ,setSourceQ]=useState(''),[subjects,setSubjects]=useState<string[]>([]),[dedup,setDedup]=useState<{r:R;score:number}[]>([])
  const upload=useRef<HTMLInputElement>(null)
  const block=doc?.blocks.find(b=>b.uid===selected)
  const queryKind= intake?'intake':''
+ useEffect(()=>{const id=params.get('doc');if(id)void open(id)},[params])
  async function refresh(){const r=await api<{items:Summary[];total:number}>('/documents?'+new URLSearchParams({archived:String(archived),limit:'30',offset:String(page*30),...(queryKind?{kind:queryKind}:{})}));setDocs(r.items);setTotal(r.total)}
  useEffect(()=>{void refresh().catch(e=>setMessage(e.message))},[archived,page,queryKind])
  useEffect(()=>{const c=new AbortController();api<string[]>('/resources/subjects',{signal:c.signal}).then(setSubjects).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});return()=>c.abort()},[])
@@ -37,7 +39,7 @@ export default function DocWork({intake=false}:{intake?:boolean}){
  const pages:Block[][]=[[]];for(const b of doc?.blocks??[]){if(b.kind==='pagebreak'){pages[pages.length-1].push(b);pages.push([])}else pages[pages.length-1].push(b)}
  const locked=busy||Boolean(doc?.archived)
  return <div className="doc-work"><div className="page-heading"><h1>{intake?'内容录入 · 文档工作台':'Word 工作台'}</h1><p className="muted">文档编排、题库引用与手动录入</p></div>
- <div className="doc-selector"><button className="primary" disabled={busy} onClick={()=>void fresh()}>新建文档</button><select aria-label="打开文档" value={doc?.id??''} disabled={busy} onChange={e=>{if(e.target.value)void open(e.target.value)}}><option value="">选择文档</option>{doc&&!docs.some(d=>d.id===doc.id)&&<option value={doc.id}>{doc.title}</option>}{docs.map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</select><button disabled={page===0||busy} onClick={()=>setPage(p=>p-1)}>上一批</button><button disabled={(page+1)*30>=total||busy} onClick={()=>setPage(p=>p+1)}>下一批</button><label><input type="checkbox" checked={archived} onChange={e=>{setArchived(e.target.checked);setPage(0)}}/> 已归档</label>{intake&&<Link className="button-link" to="/intake-single">单条录入</Link>}</div>
+ <div className="doc-selector"><button className="primary" disabled={busy} onClick={()=>void fresh()}>新建文档</button><select aria-label="打开文档" value={doc?.id??''} disabled={busy} onChange={e=>{if(e.target.value)void open(e.target.value)}}><option value="">选择文档</option>{doc&&!docs.some(d=>d.id===doc.id)&&<option value={doc.id}>{doc.title}</option>}{docs.map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</select><button disabled={page===0||busy} onClick={()=>setPage(p=>p-1)}>上一批</button><button disabled={(page+1)*30>=total||busy} onClick={()=>setPage(p=>p+1)}>下一批</button><label><input type="checkbox" checked={archived} onChange={e=>{setArchived(e.target.checked);setPage(0)}}/> 已归档</label>{intake&&<><Link className="button-link" to="/intake-single">单条录入</Link><Link className="button-link" to="/intelligence">AI 智能录入</Link></>}</div>
  {message&&<p role="status" className="notice">{message}</p>}
  {!doc?<section className="panel planned"><h2>创建或打开教研文档</h2><p>可录入题目、知识单元，或引用题库中的已有资源。</p></section>:<>
  <div className="doc-ribbon"><nav>{(['start','insert','view'] as const).map(t=><button key={t} aria-pressed={tab===t} onClick={()=>setTab(t)}>{{start:'开始',insert:'插入',view:'视图'}[t]}</button>)}</nav><div className="doc-band">

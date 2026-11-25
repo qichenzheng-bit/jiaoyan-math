@@ -43,3 +43,6 @@ def test_knowledge_private():
 def test_document_private():
     assert client.get("/api/documents").status_code==401
     assert client.post("/api/documents",json={}).status_code==401
+
+def test_intelligence_private():
+    assert client.get("/api/intelligence/jobs").status_code==401
