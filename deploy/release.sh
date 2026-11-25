@@ -14,7 +14,7 @@ flock -n 9 || { echo "Deployment busy"; exit 1; }
 release="$base/releases/$sha-$(date +%s)"
 mkdir "$release"
 rsync -a --exclude=.git --exclude=node_modules --exclude=.venv --exclude=.env --exclude=data/ ./ "$release/"
-printf '%s\\n' "$sha" > "$release/RELEASE_SHA"
+printf '%s\n' "$sha" > "$release/RELEASE_SHA"
 python3 -m venv "$release/venv"
 "$release/venv/bin/python" -m pip install -r "$release/backend/requirements.txt"
 (cd "$release/frontend" && npm install --no-audit --no-fund && npm run build && rm -rf node_modules)
@@ -25,8 +25,8 @@ set +a
 old=$(readlink -f "$base/current" || true)
 [[ -d "$old/backend" ]] || old=""
 switch_to() {
-  ln -s "$1" "$base/.current-$sha"
-  mv -Tf "$base/.current-$sha" "$base/current"
+  local link="$base/.current-$sha-$"
+  ln -s "$1" "$link" && mv -Tf "$link" "$base/current"
 }
 # Stop writers before taking a coordinated database and file backup.
 # Validate DB connectivity and determine current revision before stopping service.
@@ -35,7 +35,7 @@ if [[ -n "$before" ]]; then before=$(psql -X -d jiaoyan -tAc 'SELECT version_num
 backup="$base/backups/$(date -u +%Y%m%dT%H%M%SZ)-$sha"
 mkdir "$backup"
 systemctl --user stop jiaoyan.service
-if ! (pg_dump -Fc -d jiaoyan -f "$backup/database.dump" && tar -C "$base/data" -czf "$backup/files.tar.gz" files); then
+if ! (pg_dump -Fc -d jiaoyan -f "$backup/database.dump" && pg_restore --list "$backup/database.dump" >/dev/null && tar -C "$base/data" -czf "$backup/files.tar.gz" files && tar -tzf "$backup/files.tar.gz" >/dev/null); then
   [[ -z "$old" ]] || systemctl --user start jiaoyan.service
   echo "Backup failed; no migration performed"; exit 1
 fi
