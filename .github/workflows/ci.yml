@@ -74,3 +74,39 @@ jobs:
         with:
           node-version: "22"
       - run: bash deploy/release.sh
+
+  report:
+    # A separate hosted job publishes readable commit statuses for main deployments.
+    needs: [deployment-syntax, backend, frontend, deploy]
+    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Report test and deployment results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SYNTAX_RESULT: ${{ needs.deployment-syntax.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+        run: |
+          set -euo pipefail
+          report() {
+            local name="$1" result="$2" state
+            case "$result" in
+              success) state=success ;;
+              failure) state=failure ;;
+              cancelled|skipped|*) state=error ;;
+            esac
+            gh api --method POST "repos/$REPOSITORY/statuses/$SHA" \
+              -f state="$state" -f context="jiaoyan/$name" \
+              -f description="$name: $result" -f target_url="$RUN_URL" >/dev/null
+          }
+          report deployment-syntax "$SYNTAX_RESULT"
+          report backend "$BACKEND_RESULT"
+          report frontend "$FRONTEND_RESULT"
+          report deploy "$DEPLOY_RESULT"
