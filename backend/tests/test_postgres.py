@@ -32,6 +32,12 @@ def test_migration_and_login(tmp_path, monkeypatch):
         response = client.post("/api/auth/login", headers=origin, json={"username":"ci-admin", "password":"ci-only-password-2026"})
         assert response.status_code == 200
         assert client.get("/api/system").status_code == 200
+        setup=client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"卷头说明"})
+        assert setup.status_code==200,setup.text
+        created_doc=setup.json()
+        assert created_doc["blocks"][0]["content"]=="卷头说明"
+        assert client.get("/api/resources/"+created_doc["source_id"]).json()["source_type"]=="exam"
+        assert client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"卷头说明"}).status_code==409
         assert client.get("/api/files").status_code == 200
         upload = client.post("/api/files?name=notes.txt", headers=origin, content=b"test file")
         assert upload.status_code == 200, upload.text

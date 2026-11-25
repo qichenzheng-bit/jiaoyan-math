@@ -65,6 +65,10 @@ jobs:
     needs: [backend, frontend, deployment-syntax]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.ENABLE_DEPLOY == 'true'
     runs-on: [self-hosted, Linux, X64]
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: http.version
+      GIT_CONFIG_VALUE_0: HTTP/1.1
     concurrency:
       group: jiaoyan-production
       cancel-in-progress: false
