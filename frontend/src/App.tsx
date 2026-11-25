@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
-import {Link,Route,Routes,useLocation} from 'react-router-dom'
+import {Link,Route,Routes,Navigate,useLocation} from 'react-router-dom'
 import {api,Login} from './auth'
 import Settings,{defaults,type Preferences} from './pages/Settings'
 import Files from './pages/Files'
@@ -15,7 +15,6 @@ import Intelligence from './pages/Intelligence'
 import Tasks from './pages/Tasks'
 import DocumentPrint from './pages/DocumentPrint'
 import Studio from './pages/Studio'
-import Analytics from './pages/Analytics'
 import Checkin from './pages/Checkin'
 import Cover from './pages/Cover'
 import Drawing from './pages/Drawing'
@@ -66,8 +65,10 @@ export default function App(){
     <Route path="/" element={<Chat key="home"/>}/>
     <Route path="/overview" element={<Home/>}/>
     <Route path="/work" element={<Work/>}/>
+    <Route path="/publishing" element={<Navigate to="/project/publishing" replace/>}/>
+    <Route path="/analytics" element={<Navigate to="/project/publishing" replace/>}/>
     <Route path="/project/:id" element={<ProjectHub/>}/>
-    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={['/library','/create','/products','/operations'].includes(m.path)?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/drawing'?<Drawing/>:m.path==='/assets'?<Studio key="assets" kind="asset"/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/media'?<Studio key="media" kind="work" category="article"/>:m.path==='/slides'?<Studio key="slides" kind="work" category="slides"/>:m.path==='/publishing'?<Studio key="publishing" kind="publication"/>:m.path==='/analytics'?<Analytics/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Intelligence/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/research'?<DocWork key="research"/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
+    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={['/library','/create','/products','/operations'].includes(m.path)?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/drawing'?<Drawing/>:m.path==='/assets'?<Studio key="assets" kind="asset"/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/media'?<Studio key="media" kind="work" category="article"/>:m.path==='/slides'?<Studio key="slides" kind="work" category="slides"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Intelligence/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/research'?<DocWork key="research"/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="/print/:id" element={<DocumentPrint/>}/>
     <Route path="/intake-single" element={<Resources key="intake-single" intake/>}/>
     <Route path="*" element={<section className="panel planned"><h1>页面不存在</h1><Link to="/" className="text-link">返回首页</Link></section>}/>

@@ -12,7 +12,7 @@ export const modules:Module[]=[
  {path:'/library',name:'教学资源',desc:'题库、知识库、资料与素材',icon:'resources',group:'resources',ready:true},
  {path:'/create',name:'内容创作',desc:'视频、讲义、试卷及教学内容',icon:'research',group:'production',ready:true},
  {path:'/products',name:'商品售卖',desc:'课程与资料商品、订单及收入（待接入）',icon:'works',group:'production',ready:true},
- {path:'/operations',name:'内容发布',desc:'平台发布、封面设计及运营数据',icon:'chart',group:'publishing',ready:true},
+ {path:'/operations',name:'内容发布',desc:'封面设计',icon:'chart',group:'publishing',ready:true},
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
@@ -31,8 +31,6 @@ export const modules:Module[]=[
  {path:'/slides',name:'课件制作',desc:'课件草稿（编辑器待完善）',icon:'slides',group:'production',ready:false},
  {path:'/works',name:'教学作品',desc:'作品归档与版本管理',icon:'works',group:'production',ready:true},
  {path:'/covers',name:'封面设计',desc:'品牌封面与平台比例',icon:'media',group:'publishing',ready:true},
- {path:'/publishing',name:'发布管理',desc:'平台文案与发布台账',icon:'publishing',group:'publishing',ready:true},
- {path:'/analytics',name:'运营数据',desc:'平台数据与运营统计',icon:'chart',group:'publishing',ready:true},
  {path:'/checkin',name:'签到助手',desc:'签到、额度与积分记录',icon:'calendar',group:'tools',ready:true},
  {path:'/qoder',name:'AI 账号与模型',desc:'Qoder CN 授权及模型验证',icon:'spark',group:'tools',ready:true},
  {path:'/files',name:'文件管理',desc:'上传、预览、下载及归档',icon:'files',group:'tools',ready:true},
@@ -46,7 +44,7 @@ export const mainSections=[
  {path:'/library',name:'教学资源',icon:'resources',children:['/resources','/knowledge-library','/graph','/sources','/assets','/files']},
  {path:'/create',name:'内容创作',icon:'research',children:['/videos','/handouts','/papers','/research','/drawing','/media','/slides','/formulas','/works']},
  {path:'/products',name:'商品售卖',icon:'works',children:[]},
- {path:'/operations',name:'内容发布',icon:'publishing',children:['/covers','/publishing','/analytics']},
+ {path:'/operations',name:'内容发布',icon:'publishing',children:['/covers']},
 ]
 export const utilitySection={path:'/settings',name:'系统设置',icon:'settings',children:['/settings','/qoder','/checkin']}
 export function sectionFor(path:string){return [...mainSections,utilitySection].find(s=>s.path===path||s.children.includes(path))}
@@ -66,7 +64,7 @@ export const workspaceGroups:WorkspaceGroup[]=[
   {id:'creation',name:'教学制作',entries:[entry('/create','制作总览'),entry('/videos'),entry('/handouts'),entry('/papers'),entry('/research'),entry('/drawing'),entry('/formulas'),entry('/media'),entry('/slides'),entry('/works')]},
  ]},
  {id:'publishing',name:'内容发布',icon:'publishing',sections:[
-  {id:'release',name:'发布运营',entries:[entry('/operations','发布总览'),entry('/covers'),entry('/publishing'),entry('/analytics')]},
+  {id:'release',name:'发布运营',entries:[entry('/covers')]},
  ]},
  {id:'sales',name:'商品售卖',icon:'works',sections:[
   {id:'store',name:'商品与交易',entries:[entry('/products','商品售卖总览')]},

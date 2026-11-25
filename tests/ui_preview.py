@@ -184,6 +184,7 @@ with sync_playwright() as p:
             page.locator("#workspace-navigation").get_by_role("link",name="内容发布",exact=True).click()
             page.wait_for_url("**/project/publishing")
             page.locator(".project-hub").get_by_role("heading",name="内容发布",exact=True).wait_for()
+            assert page.locator(".project-hub .project-link").count()==1
             assert page.locator(".project-hub").get_by_role("link",name="封面设计",exact=True).is_visible()
             page.locator("#workspace-navigation").get_by_role("link",name="商品售卖",exact=True).click()
             page.wait_for_url("**/project/sales")

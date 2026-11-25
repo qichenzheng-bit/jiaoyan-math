@@ -12,7 +12,7 @@ type Task={id:string;kind:string;title:string;state:string;session_id:string|nul
 type VideoStatus={available:boolean;detail:string}
 type QoderStatus={available:boolean;verified_at?:number|null}
 type VideoProject={id:string;work_id:string|null;engine_id:string|null;source_snapshot:{title:string}}
-const steps=[{no:'01',name:'智能录入',desc:'识别资料、整理题目与知识',path:'/intake',icon:'spark'},{no:'02',name:'教学资源',desc:'积累、检索、关联教学内容',path:'/library',icon:'resources'},{no:'03',name:'内容创作',desc:'视频、讲义、试卷制作',path:'/create',icon:'research'},{no:'04',name:'作品归档',desc:'管理已完成的教学作品',path:'/works',icon:'works'},{no:'05',name:'运营发布',desc:'发布台账与运营数据',path:'/operations',icon:'publishing'}]
+const steps=[{no:'01',name:'智能录入',desc:'识别资料、整理题目与知识',path:'/intake',icon:'spark'},{no:'02',name:'教学资源',desc:'积累、检索、关联教学内容',path:'/library',icon:'resources'},{no:'03',name:'内容创作',desc:'视频、讲义、试卷制作',path:'/create',icon:'research'},{no:'04',name:'作品归档',desc:'管理已完成的教学作品',path:'/works',icon:'works'},{no:'05',name:'封面设计',desc:'设计教学内容封面',path:'/covers',icon:'publishing'}]
 const actions:Record<string,string>={'auth.login':'登录系统','auth.logout':'退出登录','auth.password_change':'修改密码','file.upload':'上传文件','file.archive':'归档文件','file.restore':'恢复文件','settings.update':'更新设置','admin.create':'创建管理员','resource.create':'录入资源','resource.update':'修改资源','resource.archive':'归档资源','resource.restore':'恢复资源'}
 const labels:Record<string,string>={question:'题目',knowledge:'知识单元',source:'来源资料'}
 function date(stamp:number){if(!Number.isFinite(stamp))return '—';return new Date(stamp*1000).toLocaleString(undefined,{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}

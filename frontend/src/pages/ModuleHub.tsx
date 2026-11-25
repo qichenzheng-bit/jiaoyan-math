@@ -6,7 +6,7 @@ const sections:Record<string,{lead:string;action?:string;actionPath?:string;grou
  '/library':{lead:'所有教学内容从这里沉淀。按类型检索、关联、复用，再进入内容制作。',action:'AI 智能录入',actionPath:'/intelligence',groups:[{name:'核心资源库',note:'题目、知识与原始来源',paths:['/resources','/knowledge-library','/sources']},{name:'资源组织与素材',note:'关联教学内容与复用素材',paths:['/graph','/assets','/files']}],pending:[]},
  '/create':{lead:'从已有资源出发，制作教学视频、讲义和试卷。工具仅在需要时打开。',action:'开始制作视频',actionPath:'/videos',groups:[{name:'核心内容制作',note:'教学视频、可打印讲义与试卷',paths:['/videos','/handouts','/papers','/works']},{name:'创作工具',note:'排版、绘图与公式',paths:['/research','/drawing','/formulas']},{name:'其他内容形式',note:'目前仅支持草稿管理',paths:['/media','/slides']}],pending:['课程制作']},
  '/products':{lead:'集中管理课程、资料商品及交易。售卖功能尚未接入，当前不会产生商品、订单或收入记录。',groups:[],pending:['课程商品','资料商品','商品组合与定价','商品上架','订单与交付','收入统计']},
- '/operations':{lead:'记录发布文案、平台链接和真实反馈数据，集中管理运营工作。',action:'进入发布台账',actionPath:'/publishing',groups:[{name:'内容运营',note:'已接入的运营工具',paths:['/covers','/publishing','/analytics']}],pending:['运营计划']},
+ '/operations':{lead:'设计和导出教学内容封面。',groups:[{name:'封面制作',note:'',paths:['/covers']}],pending:[]},
 }
 export default function ModuleHub({path}:{path:string}){
  const section=sectionFor(path),data=sections[path]
