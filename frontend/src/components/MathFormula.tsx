@@ -6,7 +6,7 @@ export function MathFormula({ latex, display = true }: { latex: string; display?
   const result = useMemo(() => {
     if (latex.length > 12000) return { error: '公式过长，请拆分。' }
     try {
-      return { html: katex.renderToString(latex, { displayMode: display, throwOnError: true,
+      return { html: katex.renderToString(latex.replace(/\\lim(?=\s*_)/g, "\\lim\\limits"), { displayMode: display, throwOnError: true,
         trust: false, strict: 'warn', maxExpand: 1000, maxSize: 20, output: 'htmlAndMathml' }) }
     } catch {
       return { error: 'LaTeX 语法或命令有误，请检查原公式。' }

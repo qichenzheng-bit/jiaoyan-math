@@ -6,7 +6,7 @@ OUT=Path("ui-screenshots");OUT.mkdir(exist_ok=True)
 subjects=["高等数学","线性代数","概率论与数理统计","数学分析","高等代数"]
 source={"id":"source-preview","code":"SDEMO0001","kind":"source","title":"考研数学（一）示例试卷","subject":"高等数学","content":"示例资料","source_type":"exam","tags":[],"archived":False,"revision":1}
 items=[dict(id=f"q{i}",code=f"QDEMO{i:04}",kind="question",title=t,subject="高等数学",chapter="一元函数微分学",question_type="解答题",content=c,answer=a,solution=s,analysis="",proof="",unit_type="",source_type="",source_id=source["id"],tags=tags,archived=False,revision=1,sources_revision=1) for i,(t,c,a,s,tags) in enumerate([
-("重要极限",r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$。","$1$",r"根据重要极限，$\lim_{x\to0}\frac{\sin x}{x}=1$。",["重要极限","极限运算"]),
+(r"重要极限 $\lim_{x\to0}\frac{\sin x}{x}$",r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$。","$1$",r"根据重要极限，$\lim_{x\to0}\frac{\sin x}{x}=1$。",["重要极限","极限运算"]),
 ("导数计算",r"设 $f(x)=x^2e^x$，求 $f'(x)$。",r"$e^x(x^2+2x)$","使用乘积求导法则。",["导数","乘积法则"]),
 ("定积分",r"计算 $\int_0^1 x^2\,dx$。",r"$\frac13$","使用牛顿—莱布尼茨公式。",["定积分"]),
 ("矩阵计算",r"计算 $\det\begin{pmatrix}1&2\\3&4\end{pmatrix}$。","$-2$","使用二阶行列式公式。",["行列式"])],1)]
@@ -41,6 +41,14 @@ with sync_playwright() as p:
         page.wait_for_selector(".legacy-shell",timeout=10000)
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
+        if name=="02-bank":
+            page.locator(".bank-detail .katex").first.wait_for()
+            assert page.locator(".bank-list .katex").count()>0
+        if name=="04-word":
+            page.locator(".doc-sheet .katex").first.wait_for()
+        if name=="06-cover":
+            page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
+            page.locator(".math-cover-art .katex").first.wait_for()
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")
