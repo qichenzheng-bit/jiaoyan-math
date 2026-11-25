@@ -46,7 +46,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert reused.json()["source_id"]==created_doc["source_id"]
         assert client.get("/api/documents?kind=intake&source_id="+created_doc["source_id"]).json()["total"]==2
         assert client.post("/api/resources",headers=origin,json={"kind":"source","title":"UI录入测试","source_type":"exam","cohort_year":"2026","content":"不同文本"}).status_code==409
-        assert client.post("/api/resources",headers=origin,json={"kind":"source","title":"UI录入测试","source_type":"exam","cohort_year":"2027","content":"下一年"}).status_code==200
+        assert client.post("/api/resources",headers=origin,json={"kind":"source","title":"UI录入测试","source_type":"exam","cohort_year":"2027","content":"卷头说明"}).status_code==200
         assert client.get("/api/files").status_code == 200
         upload = client.post("/api/files?name=notes.txt", headers=origin, content=b"test file")
         assert upload.status_code == 200, upload.text

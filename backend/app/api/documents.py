@@ -164,7 +164,6 @@ def setup(body:SetupRequest,db:Session=Depends(get_db),user:User=Depends(current
         s=bank.active_source(db,body.existing_source_id,True)
     else:
         data=bank.clean(bank.Draft(kind="source",title=body.title,subject=body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.edition),db)
-        bank.guard_duplicate(db,data)
         bank.guard_source_identity(db,data)
         s=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
         db.add(s);db.flush();bank.snapshot(db,s)
