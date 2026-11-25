@@ -181,11 +181,12 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
     page.locator(".mobile-doc-card").wait_for()
     page.get_by_role("button",name="编辑当前字段").click()
-    page.get_by_label("当前字段编辑").fill(r"求 $\\frac{1}{x}$ 的导数。")
+    page.get_by_label("当前字段编辑").fill(r"求 $\frac{1}{x}$ 的导数。")
     page.locator(".mobile-doc-math .katex").first.wait_for()
     assert page.get_by_role("button",name="保存草稿",exact=True).first.is_enabled()
     page.get_by_role("button",name="切换 Word 版").click()
     assert page.locator(".doc-sheet").get_by_text("的导数",exact=False).count()>0
+    assert page.locator(".doc-sheet .katex").count()>0
     page.get_by_role("button",name="切换卡片版").click()
     assert page.locator(".mobile-doc-math").get_by_text("的导数",exact=False).count()>0
     page.get_by_role("button",name="保存草稿",exact=True).first.click()
