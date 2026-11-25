@@ -66,7 +66,10 @@ with sync_playwright() as p:
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
         if name=="01-intake":
-            assert page.locator(".intake-entry").count()==4
+            assert page.locator(".intake-entry").count()==2
+            assert page.locator(".intake-entry[href='/work']").is_visible()
+            assert page.locator(".intake-entry[href='/intake?mode=document']").is_visible()
+            assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
             assert page.locator(".intake-flow-steps > div").count()==4
         if name=="16-intake-document":
             page.get_by_role("button",name="复用已有来源").click()
@@ -170,6 +173,10 @@ with sync_playwright() as p:
             page.locator("#workspace-navigation").get_by_role("link",name="教学教研",exact=True).click()
             page.wait_for_url("**/project/teaching")
             page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
+            intake_section=page.locator(".project-section").filter(has=page.get_by_role("heading",name="资料录入",exact=True))
+            assert intake_section.locator(".project-link").count()==2
+            assert intake_section.get_by_role("link",name="AI 录入",exact=True).get_attribute("href")=="/work"
+            assert intake_section.get_by_role("link",name="整套资料录入",exact=True).get_attribute("href")=="/intake?mode=document"
             assert page.locator(".project-hub").get_by_role("link",name="视频制作",exact=True).is_visible()
             assert page.locator(".project-hub").get_by_role("link",name="教学作品",exact=True).is_visible()
             assert page.locator(".project-hub").get_by_role("link",name="封面设计",exact=True).count()==0
@@ -302,8 +309,9 @@ with sync_playwright() as p:
     page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
     expect(drawer).to_have_count(0)
     assert page.locator(".project-hub").get_by_role("link",name="整套资料录入",exact=True).is_visible()
-    page.locator(".project-hub").get_by_role("link",name="录入工作台",exact=True).click()
-    page.locator(".intake-hub").wait_for()
+    page.locator(".project-hub").get_by_role("link",name="整套资料录入",exact=True).click()
+    page.wait_for_url("**/intake?mode=document")
+    page.locator(".legacy-intake").wait_for()
     assert not page.locator(".nav.open").count()
     page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
     page.locator(".bank-row").first.wait_for()
