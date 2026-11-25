@@ -20,6 +20,7 @@ review_job={"id":"review-demo","title":"补充示例","state":"review","detail":
 review_suggestion={"id":"supplement-demo","job_id":"review-demo","item_uid":"review-item","base_revision":1,"fields":["answer","solution"],"state":"review","detail":"AI生成待确认","proposal":{"answer":"$2x$","solution":r"利用幂函数求导公式，$(x^2)'=2x$。"},"accepted":[],"model":"Auto"}
 ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"$2x$","solution":"","analysis":"","proof":"","chapter":"","question_type":"解答题","unit_type":"","resource_id":None,"file_id":None,"width":100}]}
 ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["solution"],"instruction":"逐步推导","model":"Auto","state":"review","detail":"待确认","change_count":1,"changes":[{"uid":"ai-q1","field":"solution","before":"","after":r"由幂函数求导公式，$(x^2)'=2x$。"}],"accepted":[]}
+registration_preview={"revision":1,"items":[{"uid":"ai-q1","candidates":[],"knowledge":[{"id":"p4","name":"导数","code":"KP4","chapter":"微积分","matched":"导数"}],"chapter_suggestion":"微积分","peer_ids":[],"missing":["solution"]}],"similar_scan_limit":300}
 def answer(route):
     from urllib.parse import urlsplit,parse_qs
     u=urlsplit(route.request.url);p=u.path.removeprefix("/api");q=parse_qs(u.query)
@@ -34,6 +35,8 @@ def answer(route):
     }.get(p)
     if p=="/documents/ai-demo":result=ai_doc
     if p=="/documents/ai-demo/ai-edits":result=[ai_edit]
+    if p.endswith("/registration-history"):result=[]
+    if p=="/documents/ai-demo/registration-preview":result=registration_preview
     if p=="/documents/ai-demo/ai-edits/edit-demo":result=ai_edit
     if p=="/intelligence/jobs/review-demo":result=review_job
     if p=="/intelligence/jobs/review-demo/supplements":result=[review_suggestion]
@@ -119,6 +122,13 @@ with sync_playwright() as p:
             page.locator(".bank-detail .katex").first.wait_for()
             assert page.locator(".bank-list .katex").count()>0
         if name=="25-word-ai":
+            page.get_by_role("button",name="批量审核入库").click()
+            page.get_by_role("button",name="检查重复与知识点").click()
+            page.locator(".doc-review-item").wait_for()
+            page.get_by_role("button",name="采用建议章节",exact=False).click()
+            page.get_by_label("导数",exact=False).last.check()
+            assert page.get_by_role("button",name="确认批量入库（1 条）").is_enabled()
+            page.screenshot(path=str(OUT/"26-registration-review.png"),full_page=False)
             page.get_by_role("button",name="AI协作",exact=True).click()
             page.locator(".doc-ai-after .katex").first.wait_for()
             assert page.get_by_role("button",name="采纳选中修改").is_enabled()

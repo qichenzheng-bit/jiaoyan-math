@@ -418,11 +418,13 @@ def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
     results=[]
     for i,(b,v) in enumerate(zip(blocks,data)):
         strict=strict_candidates(db,v);seen={r.id for r in strict}
-        query=canonical_text(v["content"])[:3000]
+        query=canonical_text(v["content"])[:1200]
         similar=[]
         for r in recent[b["kind"]]:
             if r.id in seen:continue
-            score=SequenceMatcher(None,query,canonical_text(r.content)[:3000]).ratio()
+            matcher=SequenceMatcher(None,query,canonical_text(r.content)[:1200])
+            if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
+            score=matcher.ratio()
             if score>=.75:similar.append((score,r))
         candidates=[candidate(r,v,b) for r in strict]+[candidate(r,v,b,round(s,3)) for s,r in sorted(similar,key=lambda x:-x[0])[:5]]
         points,chapter=catalog_suggestions(db,d.subject,b)
