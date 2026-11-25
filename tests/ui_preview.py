@@ -117,7 +117,9 @@ with sync_playwright() as p:
             assert page.locator(".home-stat").count()==6
         if name=="12-create":
             assert page.locator(".hub-group").count()==3
-            assert page.locator(".clean-local-nav").get_by_role("link",name="封面设计").is_visible()
+            page.locator(".clean-context-menu summary").click()
+            assert page.locator(".clean-context-menu").get_by_role("link",name="封面设计").is_visible()
+            page.locator(".clean-context-menu summary").click()
         if name=="13-video":
             assert page.locator(".video-stage-track > div").count()==5
         if name=="02-bank":
@@ -216,6 +218,20 @@ with sync_playwright() as p:
     page.locator(".nav.open").get_by_role("link",name="资料录入",exact=True).click()
     page.locator(".intake-hub").wait_for()
     assert not page.locator(".nav.open").count()
+    page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
+    page.locator(".bank-row").first.wait_for()
+    assert page.locator(".bank-detail").is_hidden()
+    page.locator(".bank-row").first.click()
+    page.locator(".bank-detail .katex").first.wait_for()
+    assert page.locator(".bank-list").is_hidden()
+    page.screenshot(path=str(OUT/"30-resource-mobile.png"),full_page=False)
+    page.get_by_role("button",name="返回资源列表",exact=False).click()
+    assert page.locator(".bank-list").is_visible()
+    page.goto("http://127.0.0.1:4173/works",wait_until="networkidle")
+    assert page.locator(".studio-library").is_visible()
+    page.get_by_role("button",name="新建",exact=True).click()
+    assert page.locator(".clean-studio .resource-form").is_visible()
+    assert page.locator(".studio-library").is_hidden()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")
