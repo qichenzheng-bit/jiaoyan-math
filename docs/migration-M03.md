@@ -1,0 +1,2 @@
+# M03 AI 对话工作台
+参考旧仓库 chat.js、nav.js、stream_routes.py、session_routes.py、stream_parser.py、command_builder.py。React 实现会话列表、搜索、置顶、归档恢复、项目标签、编辑分支、复制、附件与公式/基础 Markdown。独立 Qoder worker v3 使用 --output-format stream-json，解析文本增量/最终消息，不展示工具日志，限制任务 240 秒；前端轮询增量快照而非模拟打字。服务端保存对话，关闭网页不主动停止 worker，重新打开原会话可同步尚存的任务；worker 重启或内存快照淘汰会标记失败，不承诺任务跨重启恢复。文本附件走公共文件存储及引用保护，只支持 UTF-8 txt/tex/md/csv 64KB、正文16000字，图片/PDF 留待 M07。历史上下文最多16条/16000字符，不使用旧 CLI 会话凭据。没有完整 Markdown 表格/链接渲染、项目独立权限、自动记忆、@ 检索、任务中心；留待后续 M08 等。M01/M02 CI 未确认时提交本阶段代码不代表验收完成。需要人工升级独立 worker 至 v3 并实测 CLI 事件、停止及手机布局。

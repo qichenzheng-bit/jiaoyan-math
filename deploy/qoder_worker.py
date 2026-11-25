@@ -90,8 +90,8 @@ def model_catalog():
 def refresh_models():
     global catalog, catalog_at
     with lock:
-        if login_process is not None:
-            return 409, {"detail": "请先完成或取消授权"}
+        if login_process is not None or chat_active:
+            return 409, {"detail": "请先完成当前授权或对话"}
     exe = executable()
     if not exe:
         return 503, {"detail": "未安装 Qoder CN CLI"}
@@ -175,6 +175,8 @@ def login_worker(proc):
 def start_login():
     global login_process, verified_at, catalog, catalog_at
     with lock:
+        if chat_active:
+            return 409, {"detail": "请先完成当前对话"}
         if login_process is not None:
             return 200, dict(login)
         exe = executable()
@@ -207,13 +209,13 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 2}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 3, "chat_available": True}
 
 def invoke(model, prompt):
     global verified_at
     with lock:
-        if login_process is not None:
-            return 409, {"detail": "请先完成或取消正在进行的授权"}
+        if login_process is not None or chat_active:
+            return 409, {"detail": "请先完成当前授权或对话"}
     exe = executable()
     if not exe:
         return 503, {"detail": "未安装 Qoder CN CLI"}
@@ -242,6 +244,138 @@ def invoke(model, prompt):
         except OSError:
             return 503, {"detail": "CLI 无法启动"}
 
+
+# Chat jobs are intentionally separate from the CLI's own session persistence.
+# All state is bounded, and no tools or raw event logs are exposed.
+chat_jobs = {}
+chat_active = None
+JOB_ID = re.compile(r"[0-9a-f-]{36}")
+
+def chat_event(event):
+    if not isinstance(event, dict):
+        return "", "", False
+    kind = event.get("type")
+    if kind == "error" or event.get("is_error"):
+        return "", "", True
+    inner = event.get("event")
+    if isinstance(inner, dict) and inner.get("type") == "content_block_delta":
+        delta = inner.get("delta")
+        if isinstance(delta, dict) and delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+            return delta["text"], "", False
+    if kind == "assistant":
+        message = event.get("message")
+        if isinstance(message, dict):
+            blocks = message.get("content")
+            if isinstance(blocks, list):
+                return "", "".join(b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)), False
+            if isinstance(blocks, str):
+                return "", blocks, False
+    if kind == "result":
+        value = event.get("result")
+        return "", value if isinstance(value, str) else "", False
+    return "", "", False
+
+def chat_snapshot(job):
+    return {k: job[k] for k in ("id","state","answer","detail")}
+
+def chat_run(job, exe, model, prompt):
+    global chat_active
+    proc = None
+    failure = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="qoder-chat-") as cwd:
+            # Prompt is passed as one argv entry; bounded by API and worker.
+            proc = subprocess.Popen([exe,"-m",model,"--tools","","--no-session-persistence",
+                "--output-format","stream-json","-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+            with lock:
+                job["proc"] = proc
+                if job["cancel"]: stop_process(proc)
+            deadline = time.monotonic()+240
+            buffer = b""
+            with selectors.DefaultSelector() as sel:
+                sel.register(proc.stdout,selectors.EVENT_READ)
+                while time.monotonic()<deadline:
+                    with lock:
+                        if job["cancel"]: break
+                    if not sel.select(.25):
+                        if proc.poll() is not None: break
+                        continue
+                    chunk=os.read(proc.stdout.fileno(),8192)
+                    if not chunk: break
+                    buffer+=chunk
+                    if len(buffer)>2_000_000:
+                        failure=True
+                        break
+                    while b"\n" in buffer:
+                        raw,buffer=buffer.split(b"\n",1)
+                        try: event=json.loads(raw)
+                        except (ValueError,UnicodeError): continue
+                        delta,final,bad=chat_event(event)
+                        failure=failure or bad
+                        with lock:
+                            if final: job["answer"]=final[:48000]
+                            elif delta: job["answer"]=(job["answer"]+delta)[:48000]
+                        if failure: break
+                    if failure: break
+                else:
+                    failure=True
+            if buffer.strip():
+                try:
+                    delta,final,bad=chat_event(json.loads(buffer))
+                    failure=failure or bad
+                    with lock:
+                        if final: job["answer"]=final[:48000]
+                        elif delta: job["answer"]=(job["answer"]+delta)[:48000]
+                except (ValueError,UnicodeError): pass
+            if proc.poll() is None:
+                try: proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    stop_process(proc)
+                    failure=True
+            proc.wait()
+            if proc.returncode!=0: failure=True
+    except (OSError,ValueError):
+        failure=True
+    finally:
+        if proc is not None:
+            if proc.poll() is None: stop_process(proc)
+            proc.wait()
+            if proc.stdout: proc.stdout.close()
+        with lock:
+            state="stopped" if job["cancel"] else "failed" if failure or not job["answer"] else "done"
+            job.update(state=state,detail={"stopped":"已停止生成","failed":"模型调用失败或超时，请检查授权、额度及 CLI 事件格式","done":""}[state],proc=None)
+            chat_active=None
+
+def chat_start(data):
+    global chat_active
+    if not isinstance(data,dict): return 422,{"detail":"请求无效"}
+    ident,model,prompt=data.get("id"),data.get("model"),data.get("prompt")
+    if not isinstance(ident,str) or not JOB_ID.fullmatch(ident) or not allowed_model(model) or not isinstance(prompt,str) or not 0<len(prompt.encode("utf-8"))<=100000:
+        return 422,{"detail":"模型或上下文无效"}
+    exe=executable()
+    if not exe: return 503,{"detail":"未安装 Qoder CN CLI"}
+    with lock:
+        if ident in chat_jobs: return 200,chat_snapshot(chat_jobs[ident])
+        if chat_active or login_process is not None: return 409,{"detail":"当前已有模型任务或授权，请先完成"}
+        # Keep a bounded number of completed jobs for reconnecting clients.
+        for old in list(chat_jobs)[:-31]:
+            if chat_jobs[old]["state"]!="running": del chat_jobs[old]
+        job={"id":ident,"state":"running","answer":"","detail":"","proc":None,"cancel":False}
+        chat_jobs[ident]=job
+        chat_active=ident
+        threading.Thread(target=chat_run,args=(job,exe,model,prompt),daemon=True).start()
+        return 200,chat_snapshot(job)
+
+def chat_state(ident, cancel=False):
+    with lock:
+        job=chat_jobs.get(ident)
+        if not job: return 404,{"detail":"执行任务不存在，可能已重启"}
+        if cancel and job["state"]=="running":
+            job["cancel"]=True
+            if job["proc"]: stop_process(job["proc"])
+        return 200,chat_snapshot(job)
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -258,10 +392,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/status":
             return self.reply(200, status())
+        if self.path.startswith("/chat/"):
+            return self.reply(*chat_state(self.path.removeprefix("/chat/")))
         if self.path == "/models":
             return self.reply(200, model_catalog())
         return self.reply(404, {"detail": "Not found"})
     def do_POST(self):
+        if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
+            return self.reply(*chat_state(self.path.split("/")[2], True))
+        if self.path == "/chat/start":
+            try:
+                n=int(self.headers.get("Content-Length","0"))
+                if not 0<n<=200000: raise ValueError()
+                data=json.loads(self.rfile.read(n))
+            except (ValueError,UnicodeError): return self.reply(422,{"detail":"请求无效"})
+            return self.reply(*chat_start(data))
         if self.path == "/models/refresh":
             return self.reply(*refresh_models())
         if self.path == "/login/start":

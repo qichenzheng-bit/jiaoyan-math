@@ -10,3 +10,5 @@ import './model-center.css'
 createRoot(document.getElementById('root')!).render(
   <StrictMode><BrowserRouter><App /></BrowserRouter></StrictMode>,
 )
+
+import './chat.css'

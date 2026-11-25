@@ -60,6 +60,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max"}
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Unknown"}).status_code==422
         assert client.put("/api/qoder/preferences",json={"model":"Auto"}).status_code==403
+        from app.api import qoder as chat_qoder
+        def fake_worker(method,path,body=None):
+            if path=="/status": return {"chat_available":True}
+            if path=="/chat/start": return {"state":"running"}
+            return {"state":"done","answer":"2","detail":""}
+        monkeypatch.setattr(chat_qoder,"request",fake_worker)
+        session=client.post("/api/chat/sessions",headers=origin,json={})
+        assert session.status_code==200,session.text
+        chat_id=session.json()["id"]
+        reply=client.post("/api/chat/sessions/"+chat_id+"/turn",headers=origin,json={"content":"1+1","model":"Auto"})
+        assert reply.status_code==200,reply.text
+        assert reply.json()["messages"][-1]["content"]=="2"
+        assert client.patch("/api/chat/sessions/"+chat_id,headers=origin,json={"pinned":True}).json()["pinned"]
+        assert client.get("/api/chat/sessions").json()[0]["id"]==chat_id
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

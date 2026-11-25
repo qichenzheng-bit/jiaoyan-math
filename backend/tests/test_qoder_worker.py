@@ -28,3 +28,8 @@ def test_model_restricted_to_catalog(monkeypatch):
     assert not worker.allowed_model("--help")
     monkeypatch.setattr(worker,"catalog",[])
     assert not worker.allowed_model("Auto")
+
+def test_chat_events():
+    assert worker.chat_event({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"数学"}}})==("数学","",False)
+    assert worker.chat_event({"type":"assistant","message":{"content":[{"type":"text","text":"结果"},{"type":"tool_use","input":{"secret":1}}]}})==("","结果",False)
+    assert worker.chat_event({"type":"result","is_error":True})==("","",True)

@@ -26,3 +26,7 @@ def test_model_config_is_private():
     assert client.get("/api/qoder/models").status_code==401
     assert client.get("/api/qoder/preferences").status_code==401
     assert client.post("/api/qoder/models/refresh").status_code==401
+
+def test_chat_is_private():
+    assert client.get("/api/chat/sessions").status_code==401
+    assert client.post("/api/chat/sessions",json={}).status_code==401

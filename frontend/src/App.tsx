@@ -6,6 +6,7 @@ import Files from './pages/Files'
 import FormulaLab from './pages/FormulaLab'
 import Resources from './pages/Resources'
 import Qoder from './pages/Qoder'
+import Chat from './pages/Chat'
 import Home from './pages/Home'
 import Sidebar from './components/Sidebar'
 import {Icon,BrandMark} from './components/Icon'
@@ -39,10 +40,10 @@ export default function App(){
    <header className="topbar"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button><div className="breadcrumb"><span>{groups.find(g=>g.id===current?.group)?.label??'工作空间'}</span><span className="crumb-slash">/</span><strong>{current?.name??'页面'}</strong></div><div className="topbar-actions"><span className="health" role="status" title={health}><span className={'status-dot '+(health==='服务已连接'?'':'offline')}/><span>{health}</span></span><Link className="icon-button top-search" title="搜索题库" aria-label="搜索题库" to="/resources"><Icon name="search" size={20}/></Link><Link className="icon-button top-ai" to="/qoder" title="AI 账号与模型" aria-label="AI 账号与模型"><Icon name="spark" size={19}/></Link></div></header>
    <main className="main-content" ref={mainRef}><div className="content-inner">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Home/>}/>
-    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/intake'?<Resources key="intake" intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
+    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/chat'?<Chat/>:m.path==='/intake'?<Resources key="intake" intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="*" element={<section className="panel planned"><h1>页面不存在</h1><Link to="/" className="text-link">返回首页</Link></section>}/>
    </Routes></div></main>
   </div>
-  <nav className="mobile-tabs" aria-label="常用入口">{[{path:'/',name:'首页',icon:'home'},{path:'/intake',name:'录入',icon:'intake'},{path:'/resources',name:'题库',icon:'resources'},{path:'/qoder',name:'AI',icon:'spark'}].map(m=><NavLink key={m.path} to={m.path} end={m.path==='/'}><Icon name={m.icon} size={21}/><span>{m.name}</span></NavLink>)}<button onClick={()=>setMenu(true)} aria-expanded={menu}><Icon name="menu" size={21}/><span>更多</span></button></nav>
+  <nav className="mobile-tabs" aria-label="常用入口">{[{path:'/',name:'首页',icon:'home'},{path:'/intake',name:'录入',icon:'intake'},{path:'/resources',name:'题库',icon:'resources'},{path:'/chat',name:'AI',icon:'spark'}].map(m=><NavLink key={m.path} to={m.path} end={m.path==='/'}><Icon name={m.icon} size={21}/><span>{m.name}</span></NavLink>)}<button onClick={()=>setMenu(true)} aria-expanded={menu}><Icon name="menu" size={21}/><span>更多</span></button></nav>
  </div>
 }

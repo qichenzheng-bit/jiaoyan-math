@@ -9,7 +9,7 @@ export const groups=[
 ]
 export const modules:Module[]=[
  {path:'/',name:'首页',desc:'数学教研与内容创作总览',icon:'home',group:'overview',ready:true},
- {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:false},
+ {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
  {path:'/tasks',name:'任务中心',desc:'后台任务进度和执行记录',icon:'clock',group:'overview',ready:false},
  {path:'/intake',name:'内容录入',desc:'录入题目与知识单元',icon:'intake',group:'resources',ready:true},
  {path:'/resources',name:'题库管理',desc:'题目、知识单元、查重与检索',icon:'resources',group:'resources',ready:true},
