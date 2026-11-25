@@ -12,5 +12,8 @@ def test_health():
 def test_no_public_api_docs():
     assert client.get("/docs").status_code == 404
 
-def test_business_api_not_exposed():
-    assert client.get("/api/resources").status_code == 404
+def test_business_api_requires_login():
+    # Phase 02 exposes resource routes only to authenticated administrators.
+    for path in ("/api/resources", "/api/resources/subjects", "/api/qoder/status"):
+        assert client.get(path).status_code == 401
+    assert client.post("/api/qoder/test", json={"model": "Auto", "prompt": "test"}).status_code == 401
