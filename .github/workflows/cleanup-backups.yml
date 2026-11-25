@@ -1,0 +1,34 @@
+name: Clean deployment backups
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cleanup-backups.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_DEPLOY == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    concurrency:
+      group: jiaoyan-production
+      cancel-in-progress: false
+    steps:
+      - name: Remove only deployment backup contents
+        run: |
+          set -euo pipefail
+          [[ $(id -un) == jiaoyan ]]
+          base="$HOME/jiaoyan-app"
+          [[ -f "$base/config/app.env" && -d "$base/backups" && ! -L "$base/backups" ]]
+          [[ "$(realpath "$base/backups")" == "$(realpath "$base")/backups" ]]
+          exec 9>"$base/deploy.lock"
+          flock -w 600 9
+          echo "Before cleanup:"
+          du -sh "$base/backups"
+          df -h "$base"
+          find "$base/backups" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          test -z "$(find "$base/backups" -mindepth 1 -maxdepth 1 -print -quit)"
+          echo "After cleanup:"
+          du -sh "$base/backups"
+          df -h "$base"
+          du -sh "$base/releases"
