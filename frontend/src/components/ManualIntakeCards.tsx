@@ -37,7 +37,7 @@ export function QuestionFields({value,subject,subjects,locked,onChange}:Props){
  const subKeys=Array.from({length:Math.min(30,subCount)},(_,i)=>String(i+1))
  const hasSubs=big&&subCount>0
  const stem=choice?options.main:hasSubs?sub.main:value.content
- const selectedLetters=/^[A-Z\s,，、]+$/.test(value.answer.trim())?value.answer.match(/[A-Z]/g)??[]:[]
+ const selectedLetters:string[]=/^[A-Z\s,，、]+$/.test(value.answer.trim())?value.answer.match(/[A-Z]/g)??[]:[]
  function setStem(v:string){onChange({content:choice?combine(v,options.parts,optKeys,k=>k+'. '):hasSubs?combine(v,sub.parts,subKeys,k=>'('+k+') '):v})}
  function setOption(k:string,v:string){onChange({content:combine(options.main,{...options.parts,[k]:v},optKeys,l=>l+'. ')})}
  function setSub(k:string,field:'content'|'answer'|'solution',v:string){
