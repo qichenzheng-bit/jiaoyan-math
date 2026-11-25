@@ -180,6 +180,22 @@ class TeachingDocument(Base):
     created_at: Mapped[int]=mapped_column(BigInteger)
     updated_at: Mapped[int]=mapped_column(BigInteger)
 
+class DocumentAiEdit(Base):
+    __tablename__="document_ai_edits"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    document_id: Mapped[str]=mapped_column(ForeignKey("teaching_documents.id",ondelete="RESTRICT"),index=True)
+    base_revision: Mapped[int]=mapped_column(Integer)
+    base_blocks: Mapped[list]=mapped_column(JSON)
+    fields: Mapped[list]=mapped_column(JSON)
+    instruction: Mapped[str]=mapped_column(Text)
+    model: Mapped[str]=mapped_column(String(80))
+    state: Mapped[str]=mapped_column(String(16))
+    detail: Mapped[str]=mapped_column(Text)
+    changes: Mapped[list]=mapped_column(JSON)
+    accepted: Mapped[list]=mapped_column(JSON)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
 class DocumentResourceReference(Base):
     __tablename__="document_resource_refs"
     document_id: Mapped[str]=mapped_column(ForeignKey("teaching_documents.id",ondelete="CASCADE"),primary_key=True)

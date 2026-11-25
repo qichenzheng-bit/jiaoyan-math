@@ -1,3 +1,4 @@
+import json
 """Opt-in integration test; run only against an isolated PostgreSQL database."""
 import os
 import pytest
@@ -193,6 +194,28 @@ def test_migration_and_login(tmp_path, monkeypatch):
         origin_record=client.get("/api/documents/"+converted_doc["id"]+"/origin").json()
         assert origin_record["job_id"]==j["id"] and origin_record["input_text"]=="求极限"
         assert origin_record["supplements"][0]["fields"]==["answer"]
+        from app.api import qoder
+        def fake_document_edit(method,path,body=None):
+            if path=="/status":return {"chat_available":True}
+            if path=="/chat/start":return {"state":"running"}
+            return {"state":"done","answer":json.dumps([{"uid":converted_doc["blocks"][0]["uid"],"field":"solution","value":"新解析"}])}
+        monkeypatch.setattr(qoder,"request",fake_document_edit)
+        edit_base="/api/documents/"+converted_doc["id"]+"/ai-edits"
+        payload={"revision":converted_doc["revision"],"block_ids":[converted_doc["blocks"][0]["uid"]],"fields":["solution"],"instruction":"补充解析"}
+        proposal=client.post(edit_base,headers=origin,json=payload)
+        assert proposal.status_code==200,proposal.text
+        eid=proposal.json()["id"]
+        reviewed=client.get(edit_base+"/"+eid).json()
+        assert reviewed["state"]=="review" and reviewed["changes"][0]["after"]=="新解析"
+        assert client.get("/api/documents/"+converted_doc["id"]).json()["blocks"][0]["solution"]==""
+        applied=client.post(edit_base+"/"+eid+"/apply",headers=origin,json={"revision":converted_doc["revision"],"indices":[0]})
+        assert applied.status_code==200,applied.text
+        assert applied.json()["blocks"][0]["solution"]=="新解析"
+        assert applied.json()["blocks"][0]["answer"]=="1"
+        assert applied.json()["revision"]==converted_doc["revision"]+1
+        assert client.get(edit_base+"/"+eid).json()["state"]=="accepted"
+        assert client.post(edit_base,headers=origin,json=payload).status_code==409
+        monkeypatch.setattr(qoder,"request",fake_ingest)
         assert client.get("/api/documents/"+created_doc["id"]+"/origin").json() is None
         def failed_ingest(method,path,body=None):
             if path=="/status":return {"chat_available":True}
