@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -14,7 +14,8 @@ def health():
 @router.get("/ready")
 def ready(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
-    db.execute(text("SELECT id FROM users WHERE id = 1"))
+    if db.execute(text("SELECT id FROM users WHERE id = 1")).scalar_one_or_none() is None:
+        raise HTTPException(503, "服务未就绪")
     return {"status": "ok"}
 
 @router.get("/system", dependencies=[Depends(current_user)])
