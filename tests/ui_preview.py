@@ -167,14 +167,18 @@ with sync_playwright() as p:
             assert page.locator(".home-stat").count()==6
         if name=="12-create":
             assert page.locator(".hub-group").count()==3
-            assert page.locator('[data-nav-group="teaching"]').get_by_role("link",name="视频制作",exact=True).is_visible()
-            assert page.locator('[data-nav-group="teaching"]').get_by_role("link",name="教学作品",exact=True).is_visible()
-            assert page.locator('[data-nav-group="teaching"]').get_by_role("link",name="封面设计",exact=True).count()==0
-            page.locator("#workspace-navigation").get_by_role("button",name="内容发布",exact=True).click()
-            assert page.locator('[data-nav-group="publishing"]').get_by_role("link",name="封面设计",exact=True).is_visible()
-            page.locator("#workspace-navigation").get_by_role("button",name="商品售卖",exact=True).click()
-            assert page.locator('[data-nav-group="sales"]').get_by_role("link",name="商品售卖总览",exact=True).is_visible()
-            page.locator('[data-nav-group="sales"]').get_by_role("link",name="商品售卖总览",exact=True).click()
+            page.locator("#workspace-navigation").get_by_role("link",name="教学教研",exact=True).click()
+            page.get_by_role("heading",name="教学教研",exact=True).wait_for()
+            assert page.locator(".project-hub").get_by_role("link",name="视频制作",exact=False).is_visible()
+            assert page.locator(".project-hub").get_by_role("link",name="教学作品",exact=False).is_visible()
+            assert page.locator(".project-hub").get_by_role("link",name="封面设计",exact=False).count()==0
+            assert page.locator("#workspace-navigation .clean-nav-children").count()==0
+            page.locator("#workspace-navigation").get_by_role("link",name="内容发布",exact=True).click()
+            page.get_by_role("heading",name="内容发布",exact=True).wait_for()
+            assert page.locator(".project-hub").get_by_role("link",name="封面设计",exact=False).is_visible()
+            page.locator("#workspace-navigation").get_by_role("link",name="商品售卖",exact=True).click()
+            page.get_by_role("heading",name="商品售卖",exact=True).wait_for()
+            page.locator(".project-hub").get_by_role("link",name="商品售卖总览",exact=False).click()
             page.get_by_text("商品上架",exact=True).wait_for()
             assert page.locator(".module-hub").get_by_role("link",name="教学作品",exact=True).count()==0
             page.goto("http://127.0.0.1:4173/create",wait_until="networkidle")
@@ -289,11 +293,12 @@ with sync_playwright() as p:
     expect(menu).to_have_attribute("aria-expanded","true")
     drawer=page.locator("#workspace-navigation.nav.open")
     expect(drawer).to_be_visible()
-    expect(drawer.get_by_role("button",name="教学教研",exact=True)).to_be_visible()
-    page.locator(".nav.open").get_by_role("button",name="教学教研",exact=True).click()
-    page.locator(".nav.open").get_by_role("button",name="资料录入",exact=True).click()
-    assert page.locator(".nav.open").get_by_role("link",name="整套资料录入",exact=True).is_visible()
-    page.locator(".nav.open").get_by_role("link",name="录入工作台",exact=True).click()
+    expect(drawer.get_by_role("link",name="教学教研",exact=True)).to_be_visible()
+    drawer.get_by_role("link",name="教学教研",exact=True).click()
+    page.get_by_role("heading",name="教学教研",exact=True).wait_for()
+    expect(drawer).to_have_count(0)
+    assert page.locator(".project-hub").get_by_role("link",name="整套资料录入",exact=False).is_visible()
+    page.locator(".project-hub").get_by_role("link",name="录入工作台",exact=False).click()
     page.locator(".intake-hub").wait_for()
     assert not page.locator(".nav.open").count()
     page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
