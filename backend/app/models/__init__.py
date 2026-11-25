@@ -216,3 +216,14 @@ class StudioRevision(Base):
     revision: Mapped[int]=mapped_column(Integer,primary_key=True)
     snapshot: Mapped[dict]=mapped_column(JSON)
     created_at: Mapped[int]=mapped_column(BigInteger)
+
+class VideoProject(Base):
+    __tablename__ = "video_projects"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    resource_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"))
+    resource_revision: Mapped[int] = mapped_column(Integer)
+    source_snapshot: Mapped[dict] = mapped_column(JSON)
+    engine_id: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True)
+    work_id: Mapped[str | None] = mapped_column(ForeignKey("studio_items.id", ondelete="RESTRICT"), nullable=True, unique=True)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),)

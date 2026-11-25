@@ -26,7 +26,8 @@ class Asset(BaseModel):
     note:str=Field(default="",max_length=2000)
     favorite:bool=False
 class Work(BaseModel):
-    category:Literal["drawing","cover","article","slides","document"]
+    video_project_id:str|None=Field(default=None,max_length=36)
+    category:Literal["drawing","cover","article","slides","document","video"]
     file_id:str|None=Field(default=None,max_length=36)
     document_id:str|None=Field(default=None,max_length=36)
     resource_id:str|None=Field(default=None,max_length=36)
@@ -81,6 +82,13 @@ def validate(db,body,ident=None):
         if any(len(t)>60 for t in d["tags"]):raise HTTPException(422,"标签过长")
         d["tags"]=list(dict.fromkeys(t.strip() for t in d["tags"] if t.strip()))
     if body.kind=="work":
+        if d["category"]=="video":
+            from app.models import VideoProject
+            link=db.get(VideoProject,d["video_project_id"]) if d["video_project_id"] else None
+            if not link or not ident or link.work_id!=ident or d["resource_id"]!=link.resource_id:
+                raise HTTPException(422,"视频作品必须由视频审核归档生成")
+        elif d["video_project_id"]:
+            raise HTTPException(422,"视频项目仅用于视频作品")
         for key,cls in (("document_id",TeachingDocument),("resource_id",TeachingResource)):
             if d[key]:
                 r=db.get(cls,d[key])
