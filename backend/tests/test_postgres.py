@@ -20,7 +20,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
     assert settings.database_url.startswith("postgresql+psycopg://")
     assert engine().url.database == "jiaoyan_ci", "Use a dedicated CI database"
     command.upgrade(Config("alembic.ini"), "head")
-    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "chat_sessions", "chat_messages", "alembic_version"} <= set(inspect(engine()).get_table_names())
+    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "chat_sessions", "chat_messages", "resource_source_links", "resource_source_versions", "knowledge_point_catalog", "resource_knowledge_links", "alembic_version"} <= set(inspect(engine()).get_table_names())
     with TestClient(create_app(), base_url="https://testserver") as client:
         assert client.get("/api/ready").status_code == 503
         assert client.get("/api/system").status_code == 401
@@ -53,6 +53,18 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/resources/"+rid+"/archive",headers=origin).status_code==200
         assert client.get("/api/resources?kind=question").json()["total"]==0
         assert client.post("/api/resources/"+rid+"/restore",headers=origin).status_code==200
+        assert created.json()["code"].startswith("Q")
+        assert client.post("/api/resources",headers=origin,json=draft).status_code==409
+        source=client.post("/api/resources",headers=origin,json={"kind":"source","title":"教材","content":"说明","source_type":"textbook"}).json()
+        assert source["code"].startswith("S")
+        links=client.get("/api/resources/"+rid+"/sources").json()
+        changed=client.put("/api/resources/"+rid+"/sources",headers=origin,json={"revision":links["revision"],"items":[{"source_id":source["id"],"is_primary":True,"page_start":1,"page_end":2}]})
+        assert changed.status_code==200,changed.text
+        assert client.get("/api/resources/"+rid).json()["source_id"]==source["id"]
+        assert client.post("/api/resources/"+source["id"]+"/archive",headers=origin).status_code==409
+        assert client.put("/api/resources/"+rid+"/sources",headers=origin,json={"revision":links["revision"],"items":[]}).status_code==409
+        assert client.get("/api/resources/"+source["id"]+"/versions").json()[0]["version"]==1
+        assert client.put("/api/resources/"+rid,headers=origin,json={**draft,"revision":1}).status_code==409
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto"}

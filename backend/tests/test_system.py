@@ -30,3 +30,8 @@ def test_model_config_is_private():
 def test_chat_is_private():
     assert client.get("/api/chat/sessions").status_code==401
     assert client.post("/api/chat/sessions",json={}).status_code==401
+
+def test_resource_detail_is_private():
+    assert client.get("/api/resources/example").status_code==401
+    assert client.get("/api/resources/example/sources").status_code==401
+    assert client.get("/api/resources/example/versions").status_code==401

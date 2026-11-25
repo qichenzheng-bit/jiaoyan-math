@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
@@ -60,6 +60,23 @@ class TeachingResource(Base):
     tags: Mapped[list] = mapped_column(JSON)
     source_id: Mapped[str | None] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    code: Mapped[str] = mapped_column(String(16), unique=True)
+    exam_type: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    chapter: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    question_type: Mapped[str] = mapped_column(String(20), default="", server_default="")
+    unit_type: Mapped[str] = mapped_column(String(24), default="", server_default="")
+    source_type: Mapped[str] = mapped_column(String(16), default="", server_default="")
+    authority_tier: Mapped[str] = mapped_column(String(24), default="", server_default="")
+    cohort_year: Mapped[str] = mapped_column(String(12), default="", server_default="")
+    series_key: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    edition: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    dedup_reason: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    analysis: Mapped[str] = mapped_column(Text, default="", server_default="")
+    proof: Mapped[str] = mapped_column(Text, default="", server_default="")
+    exams: Mapped[list] = mapped_column(JSON, default=list)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    sources_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    dedup_override: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
@@ -86,3 +103,51 @@ class ChatMessage(Base):
     model: Mapped[str] = mapped_column(String(80))
     attachments: Mapped[list] = mapped_column(JSON)
     created_at: Mapped[int] = mapped_column(BigInteger)
+
+class ResourceSourceLink(Base):
+    __tablename__ = "resource_source_links"
+    resource_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="CASCADE"),primary_key=True)
+    source_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
+    provenance_role: Mapped[str] = mapped_column(String(16),primary_key=True)
+    original_question_number: Mapped[str] = mapped_column(String(40))
+    page_start: Mapped[int | None] = mapped_column(Integer,nullable=True)
+    page_end: Mapped[int | None] = mapped_column(Integer,nullable=True)
+    chapter: Mapped[str] = mapped_column(String(120))
+    note: Mapped[str] = mapped_column(String(300))
+    is_primary: Mapped[bool] = mapped_column(Boolean)
+    role_verified: Mapped[bool] = mapped_column(Boolean)
+    __table_args__ = (
+        CheckConstraint("resource_id <> source_id",name="ck_resource_source_not_self"),
+        CheckConstraint("provenance_role IN ('original','reproduced','adapted')",name="ck_resource_source_role"),
+        CheckConstraint("(page_start IS NULL OR page_start >= 1) AND (page_end IS NULL OR page_end >= 1) AND (page_start IS NULL OR page_end IS NULL OR page_end >= page_start)",name="ck_resource_source_pages"),
+    )
+
+class SourceVersion(Base):
+    __tablename__ = "resource_source_versions"
+    source_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
+    version: Mapped[int] = mapped_column(Integer,primary_key=True)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+class KnowledgePointCatalog(Base):
+    __tablename__ = "knowledge_point_catalog"
+    id: Mapped[str] = mapped_column(String(36),primary_key=True)
+    code: Mapped[str] = mapped_column(String(16),unique=True)
+    name: Mapped[str] = mapped_column(String(180))
+    name_key: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(40))
+    chapter: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    replaced_by_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="RESTRICT"),nullable=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+    __table_args__=(UniqueConstraint("subject","name_key",name="uq_kp_subject_name"),CheckConstraint("status IN ('active','disabled','replaced')",name="ck_kp_status"),CheckConstraint("replaced_by_id IS NULL OR replaced_by_id <> id",name="ck_kp_not_self"))
+
+class ResourceKnowledgeLink(Base):
+    __tablename__ = "resource_knowledge_links"
+    resource_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
+    knowledge_id: Mapped[str] = mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="RESTRICT"),primary_key=True)
+    role: Mapped[str] = mapped_column(String(16))
+    __table_args__=(CheckConstraint("role IN ('core','related')",name="ck_resource_kp_role"),)
