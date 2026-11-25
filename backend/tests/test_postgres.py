@@ -136,6 +136,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/tasks").status_code==200
         assert client.post("/api/tasks/sync",headers=origin).status_code==200
         assert client.post("/api/intelligence/pdf-text",headers=origin,json={"file_id":item["id"]}).status_code==415
+        imported=client.post("/api/intelligence/import",headers=origin,json={"file_id":item["id"],"mode":"text"})
+        assert imported.status_code==200,imported.text
+        import_id=imported.json()["import_id"]
+        assert imported.json()["text"]=="test file"
+        assert client.get("/api/intelligence/import/"+import_id).json()["file_id"]==item["id"]
         from app.api import intelligence
         # Source identity is resolved from saved messages, never from caller-supplied role.
         saved_chat=client.get("/api/chat/sessions/"+chat_id).json()
@@ -148,6 +153,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
             if path=="/chat/start":return {"state":"running"}
             return {"state":"done","answer":'[{"kind":"question","title":"测试提取","content":"求极限"}]'}
         monkeypatch.setattr(qoder,"request",fake_ingest)
+        imported_job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"文件导入","text":"test file","import_id":import_id})
+        assert imported_job.status_code==200,imported_job.text
+        assert imported_job.json()["provenance"]["file_id"]==item["id"]
+        assert imported_job.json()["provenance"]["edited"] is False
+        assert client.post("/api/files/"+item["id"]+"/archive",headers=origin).status_code==409
         job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"提取测试","text":"求极限","subject":"高数","source_message_id":user_message["id"],"intent":"question","source_id":created_doc["source_id"]})
         assert job.status_code==200,job.text
         j=client.get("/api/intelligence/jobs/"+job.json()["id"]).json()

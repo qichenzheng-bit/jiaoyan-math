@@ -28,3 +28,8 @@ echo "PENDING entries require configuration or inspection. This workflow does no
 
 label="pinned video source delivered"; report test -f "$base/current/video-engine-source/SOURCE_REVISION"
 label="independent video service active"; report systemctl is-active --quiet jiaoyan-video.service
+
+label="PDF text extraction"; report command -v pdftotext
+label="PDF page rasterizer"; report command -v pdftoppm
+label="OCR executable"; report command -v tesseract
+label="OCR Chinese and English languages"; report bash -c 'tesseract --list-langs 2>/dev/null | grep -qx chi_sim && tesseract --list-langs 2>/dev/null | grep -qx eng'

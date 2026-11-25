@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user,require_origin,now,audit
 from app.core.solution_methods import normalize_subject
-from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession
+from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession, IntakeImport
 from app.services.pdf_text import extract_pdf
+from app.services import material_import, storage
 from app.api import qoder, documents as docs, resources as bank
 
 router=APIRouter(prefix="/intelligence",dependencies=[Depends(current_user)])
@@ -18,6 +19,7 @@ class Start(BaseModel):
     subject:str=Field(default="",max_length=40)
     text:str=Field(min_length=1,max_length=24000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+    import_id:str|None=Field(default=None,max_length=36)
     source_message_id:str|None=Field(default=None,max_length=36)
     source_id:str|None=Field(default=None,max_length=36)
     input_origin:Literal["manual","chat_draft"]="manual"
@@ -85,6 +87,14 @@ def read_chat_source(ident:str,db:Session=Depends(get_db)):
             "title":session.title if session else "聊天内容","has_attachments":bool(m.attachments or m.resource_refs)}
 
 def build_provenance(db,body):
+    if body.import_id:
+        if body.source_message_id:raise HTTPException(422,"请选择单一输入来源")
+        record=db.get(IntakeImport,body.import_id)
+        if not record:raise HTTPException(404,"导入记录不存在")
+        file=db.get(StoredFile,record.file_id)
+        if not file or file.archived:raise HTTPException(422,"原始文件已归档")
+        return {"kind":"file_import","intent":body.intent,"import_id":record.id,"file_id":file.id,
+                "file_name":file.name,"sha256":file.sha256,"edited":record.text!=body.text,**record.metadata_json}
     if body.source_message_id:
         m=chat_source(db,body.source_message_id)
         return {"kind":"chat_"+m.role,"session_id":m.session_id,"message_id":m.id,
@@ -99,10 +109,15 @@ def launch(db,user,body,provenance,retry_of=None):
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
     prompt+="\n【本次整理目标】"+focus
     if provenance.get("kind")=="chat_assistant":prompt+="\n来源是AI生成回复，不是原始文献；只能整理为待核对草稿。"
+    if provenance.get("kind")=="file_import" and provenance.get("warnings"):
+        prompt+="\n文件提取可能失真。保留不确定标记，不自行还原缺失公式、图形或答案。所有结果待人工对照原件。"
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"原文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"独立Qoder执行服务需升级至V3")
     j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,source_id=body.source_id,provenance=provenance,retry_of=retry_of,revision=1,created_at=now(),updated_at=now())
-    db.add(j);audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()
+    db.add(j);db.flush()
+    if provenance.get("kind")=="file_import":
+        storage.link_file(db,provenance["file_id"],"intake_job",j.id)
+    audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()
     try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt})
     except HTTPException as e:
         # Ambiguous transport failures may occur after acceptance. Reconcile the original ID.
@@ -159,3 +174,28 @@ def pdf_text(body:PDFRequest,db:Session=Depends(get_db)):
     f=db.get(StoredFile,body.file_id)
     if not f:raise HTTPException(404,"文件不存在")
     return {"text":extract_pdf(f,body.start,body.end),"file_id":f.id,"start":body.start,"end":body.end}
+
+class MaterialRequest(PDFRequest):
+    mode:Literal["text","ocr"]="text"
+
+@router.get("/import/capabilities")
+def import_capabilities():
+    return material_import.capabilities()
+
+@router.post("/import",dependencies=[Depends(require_origin)])
+def import_material(body:MaterialRequest,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    file=db.get(StoredFile,body.file_id)
+    if not file:raise HTTPException(404,"文件不存在")
+    result=material_import.extract(file,body.mode,body.start,body.end)
+    record=IntakeImport(id=str(uuid4()),file_id=file.id,text=result["text"],
+        metadata_json={k:v for k,v in result.items() if k!="text"},created_at=now())
+    db.add(record);audit(db,"intelligence.import",user.id);db.commit()
+    return {**result,"import_id":record.id,"file_id":file.id,"file_name":file.name}
+
+@router.get("/import/{ident}")
+def import_detail(ident:str,db:Session=Depends(get_db)):
+    record=db.get(IntakeImport,ident)
+    if not record:raise HTTPException(404,"导入记录不存在")
+    file=db.get(StoredFile,record.file_id)
+    if not file:raise HTTPException(404,"原始文件不存在")
+    return {**record.metadata_json,"import_id":record.id,"file_id":file.id,"file_name":file.name,"text":record.text}

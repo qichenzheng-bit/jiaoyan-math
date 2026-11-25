@@ -185,6 +185,14 @@ class DocumentResourceReference(Base):
     document_id: Mapped[str]=mapped_column(ForeignKey("teaching_documents.id",ondelete="CASCADE"),primary_key=True)
     resource_id: Mapped[str]=mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
 
+class IntakeImport(Base):
+    __tablename__="intake_imports"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    file_id: Mapped[str]=mapped_column(ForeignKey("files.id",ondelete="RESTRICT"),index=True)
+    text: Mapped[str]=mapped_column(Text)
+    metadata_json: Mapped[dict]=mapped_column(JSON)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+
 class IntakeJob(Base):
     __tablename__="intake_jobs"
     id: Mapped[str]=mapped_column(String(36),primary_key=True)
