@@ -9,7 +9,6 @@ import Work from './pages/Work'
 import Graph from './pages/Graph'
 import DocWork from './pages/DocWork'
 import Intake from './pages/Intake'
-import Intelligence from './pages/Intelligence'
 import Tasks from './pages/Tasks'
 import DocumentPrint from './pages/DocumentPrint'
 import Studio from './pages/Studio'
@@ -37,7 +36,7 @@ export default function App(){
  const current=modules.find(m=>m.path===location.pathname)
  const project=workspaceGroups.find(g=>location.pathname==='/project/'+g.id)
  const isChat=location.pathname==='/'||location.pathname==='/chat'
- const workHome=location.pathname==='/work', isWork=workHome||location.pathname==='/intelligence', modeHome=isChat||isWork
+ const isWork=location.pathname==='/work'||location.pathname==='/intelligence', workHome=isWork&&!new URLSearchParams(location.search).has('job')&&!new URLSearchParams(location.search).has('history'), modeHome=isChat||isWork
  const lastChat=useRef('/')
  useEffect(()=>{if(isChat)lastChat.current=location.pathname+location.search},[isChat,location.pathname,location.search])
  function allowMode(path:string){return window.dispatchEvent(new CustomEvent('wg-chat-navigation',{cancelable:true,detail:{path}}))}
@@ -69,7 +68,7 @@ export default function App(){
     <Route path="/publishing" element={<Navigate to="/project/publishing" replace/>}/>
     <Route path="/analytics" element={<Navigate to="/project/publishing" replace/>}/>
     <Route path="/project/:id" element={<ProjectHub/>}/>
-    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/products'?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Intelligence/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
+    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/products'?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Navigate to={'/work'+location.search} state={location.state} replace/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="/print/:id" element={<DocumentPrint/>}/>
     <Route path="/source-print/:id" element={<DocumentPrint source/>}/>
     <Route path="/intake-single" element={<Resources key="intake-single" intake/>}/>

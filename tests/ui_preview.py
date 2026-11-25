@@ -86,8 +86,8 @@ with sync_playwright() as p:
             page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
             page.get_by_role("button",name="添加与工具").click()
             page.get_by_role("button",name="转录入",exact=True).click()
-            page.wait_for_url("**/intelligence")
-            assert page.get_by_label("原文",exact=True).input_value().startswith("录入题目")
+            page.wait_for_url("**/work")
+            assert page.get_by_label("输入录入资料",exact=True).input_value().startswith("录入题目")
             assert page.get_by_text("已带入聊天正文").is_visible()
             page.goto("http://127.0.0.1:4173/chat",wait_until="networkidle")
         if name=="22-intake-supplement":
@@ -96,12 +96,12 @@ with sync_playwright() as p:
             assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
             assert page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容").is_visible()
         if name=="18-intelligence":
-            page.get_by_label("选择资料文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
-            page.get_by_role("button",name="提取并预览").click()
-            page.locator(".material-preview .katex").first.wait_for()
-            page.get_by_role("button",name="使用提取内容").click()
-            assert page.get_by_label("原文",exact=True).input_value()==r"求 $\frac{1}{x}$ 的导数。"
-            assert page.get_by_text("已关联原文件：demo.tex").is_visible()
+            page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
+            page.get_by_role("button",name="发送资料").click()
+            page.locator(".work-review-preview .katex").first.wait_for()
+            assert page.get_by_label("输入录入资料",exact=True).input_value()==r"求 $\frac{1}{x}$ 的导数。"
+            assert page.locator(".intelligence-stages").count()==0
+            assert page.locator(".material-import").count()==0
         if name=="19-intake-intent":
             page.locator(".chat-intake-suggestion").wait_for()
             assert page.locator(".chat-message.user .chat-message-body").evaluate("(el)=>getComputedStyle(el).width !== getComputedStyle(el.parentElement).width")
@@ -112,11 +112,13 @@ with sync_playwright() as p:
             page.get_by_role("button",name="更多选项",exact=True).click()
             page.screenshot(path=str(OUT/(name+".png")),full_page=False)
             page.get_by_role("button",name="使用本次用户原文").click()
-            page.wait_for_url("**/intelligence?from=msg-user&intent=question")
-            page.get_by_label("原文",exact=True).wait_for()
+            page.wait_for_url("**/work?from=msg-user&intent=question")
+            page.get_by_label("输入录入资料",exact=True).wait_for()
             page.get_by_text("已带入聊天正文").wait_for()
-            assert page.get_by_label("原文",exact=True).input_value()==demo_chat["messages"][0]["content"]
+            assert page.get_by_label("输入录入资料",exact=True).input_value()==demo_chat["messages"][0]["content"]
+            page.get_by_role("button",name="添加录入资料").click()
             assert page.get_by_label("录入目标").input_value()=="question"
+            page.get_by_role("button",name="添加录入资料").click()
             page.screenshot(path=str(OUT/"20-intake-linked.png"),full_page=False)
             continue
         if name=="00-home":

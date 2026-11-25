@@ -45,8 +45,8 @@ useEffect(()=>{const reset=()=>fresh();const guard=(event:Event)=>{const path=(e
   if(content.length>24000){setError('正文超过录入任务的24000字上限，请复制并分批录入。');return}
   if(hasAttachments&&!window.confirm('本次只转入正文，不包含附件或题库引用。请在录入工作台重新导入需要的原文。继续？'))return
   if(origin==='assistant'&&!window.confirm('这段内容由 AI 生成，不是原始资料。将作为待人工核对的整理草稿转入，继续？'))return
-  if(messageId)navigate('/intelligence?'+new URLSearchParams({from:messageId,intent:intent??'mixed'}))
-  else navigate('/intelligence',{state:{intakeDraft:{text:content,origin}}})
+  if(messageId)navigate('/work?'+new URLSearchParams({from:messageId,intent:intent??'mixed'}))
+  else navigate('/work',{state:{intakeDraft:{text:content,origin}}})
  }
  async function send(e:FormEvent){e.preventDefault();if(busy||running||!draft.trim()||!ready)return;setBusy(true);setError('');try{let id=active?.id;if(!id){const s=await api<Session>('/chat/sessions',{method:'POST',body:JSON.stringify({})});id=s.id;activeId.current=id}const d=await api<Detail>('/chat/sessions/'+id+'/turn',{method:'POST',body:JSON.stringify({content:draft,model,attachments:files.map(f=>f.id),resource_ids:refs.map(r=>r.id),retrieval_query:retrieve,rewind_id:edit??null})});activeId.current=d.id;setActive(d);setDraft('');setFiles([]);setRefs([]);setRetrieve('');setEdit(undefined);nearBottom.current=true;list();navigate('/chat?session='+encodeURIComponent(d.id),{replace:true})}catch(e){failure(e)}finally{setBusy(false)}}
  async function stop(){if(!active)return;setBusy(true);try{setActive(await api<Detail>('/chat/sessions/'+active.id+'/stop',{method:'POST'}))}catch(e){failure(e)}finally{setBusy(false)}}
