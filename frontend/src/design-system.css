@@ -94,3 +94,20 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
  .login-form{padding:28px 24px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:0s!important;animation-duration:0s!important}}
+
+/* Six business workspaces, subordinate navigation inside each workspace. */
+.legacy-shell .main-section-links{display:grid;gap:7px;margin-top:10px}
+.legacy-shell .main-section-links a{min-height:44px;font-size:15px}
+.legacy-shell .utility-links{display:grid;gap:4px;flex:none;padding-bottom:9px}
+.legacy-shell .nav{width:224px;flex-basis:224px}
+.legacy-shell .side-head .brand-logo{width:146px}
+.section-tabs{display:flex;gap:4px;align-items:center;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line);overflow-x:auto;min-height:44px;flex-shrink:0;scrollbar-width:thin}
+.section-tabs a{flex:none;color:var(--muted);font-size:13px;padding:10px 12px;border-radius:5px}
+.section-tabs a:hover{background:var(--hover)}
+.section-tabs a.active{color:var(--accent);background:var(--selected);font-weight:600}
+.module-hub{max-width:1300px;margin:0 auto}.hub-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.hub-card{display:flex;flex-direction:column;gap:10px;min-height:158px}.hub-card .soft-icon{align-self:flex-start;color:var(--accent);background:var(--accent-soft)}a.hub-card:hover{border-color:var(--gold);background:var(--hover)}.hub-card .text-link{margin-top:auto}.hub-pending{opacity:.8}
+.home-quick>div{grid-template-columns:repeat(3,minmax(0,1fr))}
+.video-work{display:grid;gap:14px}.video-service{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.video-service button{margin-left:auto}.video-layout{display:grid;grid-template-columns:minmax(220px,25%) minmax(0,1fr) minmax(180px,23%);gap:14px;align-items:start}.video-projects,.video-detail,.video-jobs{display:grid;gap:12px;min-width:0}.video-projects label{display:grid;gap:5px}.video-project-row{display:grid!important;justify-content:stretch!important;text-align:left;gap:5px!important}.video-project-row.selected{background:var(--selected);border-color:var(--gold)}.video-project-row small,.video-job small{color:var(--muted)}.video-detail video{width:100%;background:#000;border-radius:8px}.video-detail textarea{width:100%}.video-detail details{min-width:0}.video-detail h3{font-size:14px}.video-job{display:grid;gap:6px;padding-bottom:10px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.video-job progress{width:100%;accent-color:var(--gold)}.video-code{max-height:350px;overflow:auto;white-space:pre-wrap;font-size:12px}.video-projects hr{border:0;border-top:1px solid var(--line);width:100%}.chat-route .chat-workbench{height:calc(100dvh - 150px)}
+@media(max-width:1000px){.video-layout{grid-template-columns:minmax(190px,30%) minmax(0,1fr)}.video-jobs{grid-column:1/-1}.hub-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.legacy-shell .nav,.legacy-shell.is-collapsed .nav{width:min(290px,86vw);flex-basis:auto}.section-tabs{padding:0 8px;min-height:42px}.section-tabs a{padding:9px}.hub-grid,.video-layout{grid-template-columns:1fr}.video-jobs{grid-column:auto}.home-quick>div{grid-template-columns:repeat(2,minmax(0,1fr))}.chat-route .chat-workbench{height:calc(100dvh - 190px)}}

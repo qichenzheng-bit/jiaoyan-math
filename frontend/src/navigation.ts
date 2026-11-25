@@ -9,6 +9,12 @@ export const groups=[
 ]
 export const modules:Module[]=[
  {path:'/',name:'首页',desc:'数学教研与内容创作总览',icon:'home',group:'overview',ready:true},
+ {path:'/library',name:'教学资源',desc:'题库、知识库、资料与素材',icon:'resources',group:'resources',ready:true},
+ {path:'/create',name:'内容创作',desc:'视频、讲义、试卷及教学内容',icon:'research',group:'production',ready:true},
+ {path:'/products',name:'作品与商品',desc:'成品与商品化管理',icon:'works',group:'production',ready:true},
+ {path:'/operations',name:'运营中心',desc:'内容发布及经营数据',icon:'chart',group:'publishing',ready:true},
+ {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
+ {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
  {path:'/tasks',name:'任务中心',desc:'后台任务进度和执行记录',icon:'clock',group:'overview',ready:true},
  {path:'/intake',name:'内容录入',desc:'录入题目与知识单元',icon:'intake',group:'resources',ready:true},
@@ -33,3 +39,14 @@ export const modules:Module[]=[
  {path:'/formulas',name:'公式预览',desc:'LaTeX 公式实时显示',icon:'formulas',group:'tools',ready:true},
  {path:'/settings',name:'系统设置',desc:'账号、外观、存储及操作记录',icon:'settings',group:'tools',ready:true},
 ]
+
+export const mainSections=[
+ {path:'/',name:'首页',icon:'home',children:[]},
+ {path:'/chat',name:'AI 助手',icon:'spark',children:['/chat','/intelligence','/intake','/intake-single']},
+ {path:'/library',name:'教学资源',icon:'resources',children:['/resources','/knowledge-library','/graph','/sources','/assets','/files']},
+ {path:'/create',name:'内容创作',icon:'research',children:['/videos','/handouts','/papers','/research','/drawing','/covers','/media','/slides','/formulas']},
+ {path:'/products',name:'作品与商品',icon:'works',children:['/works']},
+ {path:'/operations',name:'运营中心',icon:'chart',children:['/publishing','/analytics']},
+]
+export const utilitySection={path:'/settings',name:'系统设置',icon:'settings',children:['/settings','/qoder','/checkin']}
+export function sectionFor(path:string){return [...mainSections,utilitySection].find(s=>s.path===path||s.children.includes(path))}

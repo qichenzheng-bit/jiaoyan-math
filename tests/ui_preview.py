@@ -23,7 +23,7 @@ def answer(route):
       "/chat/sessions":[],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
-      "/studio":{"items":[],"total":0},"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
+      "/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
     if p=="/resources":
         rows=[source] if q.get("kind")==["source"] else items
@@ -36,9 +36,10 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/","00-home"),("/intake","01-intake"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
+        assert page.locator(".main-section-links a").count()==6
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
         if name=="02-bank":

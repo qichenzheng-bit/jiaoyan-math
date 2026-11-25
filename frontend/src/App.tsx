@@ -19,9 +19,11 @@ import Checkin from './pages/Checkin'
 import Cover from './pages/Cover'
 import Drawing from './pages/Drawing'
 import Home from './pages/Home'
+import VideoWork from './pages/VideoWork'
+import ModuleHub from './pages/ModuleHub'
 import Sidebar from './components/Sidebar'
 import {Icon,BrandMark} from './components/Icon'
-import {groups,modules,type Module} from './navigation'
+import {groups,modules,mainSections,sectionFor,type Module} from './navigation'
 
 function Pending({module}:{module:Module}){
  return <><div className="page-heading"><h1>{module.name}</h1><p className="muted">{module.desc}</p></div><section className="panel planned"><span className="soft-icon"><Icon name={module.icon} size={28}/></span><h2>此模块尚未迁移</h2><p>功能将按照旧系统的业务流程逐步接入，目前不可使用。</p><Link className="button-link" to={module.path==='/chat'?'/qoder':'/'}>{module.path==='/chat'?'管理 AI 账号':'返回首页'}</Link></section></>
@@ -35,6 +37,7 @@ export default function App(){
  const [error,setError]=useState('')
  const location=useLocation(),mainRef=useRef<HTMLElement>(null)
  const current=modules.find(m=>m.path===location.pathname)
+ const section=sectionFor(location.pathname)
  useEffect(()=>{setMenu(false);mainRef.current?.scrollTo(0,0)},[location.pathname])
  useEffect(()=>{const close=(e:KeyboardEvent)=>{if(e.key==='Escape')setMenu(false)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[])
  useEffect(()=>{try{localStorage.setItem('wg-sidebar-collapsed',String(collapsed))}catch{}},[collapsed])
@@ -48,15 +51,16 @@ export default function App(){
   {menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
   <Sidebar user={user} displayName={preferences.display_name} open={menu} collapsed={collapsed} onClose={()=>setMenu(false)} onToggle={()=>setCollapsed(c=>!c)} onLogout={()=>void logout()}/>
   <div className="workspace">
-   <header className="topbar"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button><div className="breadcrumb"><span>{groups.find(g=>g.id===current?.group)?.label??'工作空间'}</span><span className="crumb-slash">/</span><strong>{current?.name??'页面'}</strong></div><div className="topbar-actions"><span className="health" role="status" title={health}><span className={'status-dot '+(health==='服务已连接'?'':'offline')}/><span>{health}</span></span><Link className="icon-button top-search" title="搜索题库" aria-label="搜索题库" to="/resources"><Icon name="search" size={20}/></Link><Link className="icon-button top-ai" to="/qoder" title="AI 账号与模型" aria-label="AI 账号与模型"><Icon name="spark" size={19}/></Link></div></header>
+   <header className="topbar"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button><div className="breadcrumb"><span>{section?.name??groups.find(g=>g.id===current?.group)?.label??'工作空间'}</span><span className="crumb-slash">/</span><strong>{current?.name??'页面'}</strong></div><div className="topbar-actions"><span className="health" role="status" title={health}><span className={'status-dot '+(health==='服务已连接'?'':'offline')}/><span>{health}</span></span><Link className="icon-button top-search" title="搜索题库" aria-label="搜索题库" to="/resources"><Icon name="search" size={20}/></Link><Link className="icon-button top-ai" to="/qoder" title="AI 账号与模型" aria-label="AI 账号与模型"><Icon name="spark" size={19}/></Link></div></header>
+   {section&&section.children.length>0&&<nav className="section-tabs" aria-label={section.name+'内部导航'}>{section.path!=='/chat'&&section.path!=='/settings'&&<NavLink to={section.path} end>概览</NavLink>}{section.children.filter(p=>p!=='/intake-single').map(p=>{const m=modules.find(x=>x.path===p);return m?<NavLink to={p} end key={p}>{m.name}</NavLink>:null})}</nav>}
    <main className="main-content" ref={mainRef}><div className="content-inner">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Home/>}/>
-    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/covers'?<Cover/>:m.path==='/drawing'?<Drawing/>:m.path==='/assets'?<Studio key="assets" kind="asset"/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/media'?<Studio key="media" kind="work" category="article"/>:m.path==='/slides'?<Studio key="slides" kind="work" category="slides"/>:m.path==='/publishing'?<Studio key="publishing" kind="publication"/>:m.path==='/analytics'?<Analytics/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Intelligence/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/research'?<DocWork key="research"/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
+    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={['/library','/create','/products','/operations'].includes(m.path)?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/drawing'?<Drawing/>:m.path==='/assets'?<Studio key="assets" kind="asset"/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/media'?<Studio key="media" kind="work" category="article"/>:m.path==='/slides'?<Studio key="slides" kind="work" category="slides"/>:m.path==='/publishing'?<Studio key="publishing" kind="publication"/>:m.path==='/analytics'?<Analytics/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Intelligence/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/research'?<DocWork key="research"/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="/print/:id" element={<DocumentPrint/>}/>
     <Route path="/intake-single" element={<Resources key="intake-single" intake/>}/>
     <Route path="*" element={<section className="panel planned"><h1>页面不存在</h1><Link to="/" className="text-link">返回首页</Link></section>}/>
    </Routes></div></main>
   </div>
-  <nav className="mobile-tabs" aria-label="常用入口">{[{path:'/',name:'首页',icon:'home'},{path:'/intake',name:'录入',icon:'intake'},{path:'/resources',name:'题库',icon:'resources'},{path:'/chat',name:'AI',icon:'spark'}].map(m=><NavLink key={m.path} to={m.path} end={m.path==='/'}><Icon name={m.icon} size={21}/><span>{m.name}</span></NavLink>)}<button onClick={()=>setMenu(true)} aria-expanded={menu}><Icon name="menu" size={21}/><span>更多</span></button></nav>
+  <nav className="mobile-tabs" aria-label="常用入口">{mainSections.slice(0,4).map(m=><NavLink key={m.path} to={m.path} end className={section?.path===m.path?'active':''}><Icon name={m.icon} size={21}/><span>{m.name}</span></NavLink>)}<button onClick={()=>setMenu(true)} aria-expanded={menu}><Icon name="menu" size={21}/><span>更多</span></button></nav>
  </div>
 }

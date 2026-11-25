@@ -38,7 +38,7 @@ def snapshot(r):
                "answer": r.answer, "subject": r.subject, "chapter": r.chapter,
                "exam_type": r.exam_type, "question_type": r.question_type,
                "analysis": r.analysis, "tags": r.tags or [], "fps": 60 }
-    if not result["reference_solution"].strip():
+    if not (result["reference_solution"] or "").strip():
         raise HTTPException(422, "请先在题库保存完整解析")
     # Old engine's schema has tighter bounds. Never silently truncate teaching material.
     for key, size in {"title":180,"problem":20000,"reference_solution":120000,"answer":4000,"subject":20,
