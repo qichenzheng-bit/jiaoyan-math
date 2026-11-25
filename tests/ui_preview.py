@@ -42,7 +42,21 @@ with sync_playwright() as p:
         assert page.locator(".main-section-links a").count()==6
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
+        if name=="00-home":
+            assert page.locator(".workflow-step").count()==5
+            assert page.locator(".home-stat").count()==6
+        if name=="12-create":
+            assert page.locator(".hub-group").count()==3
+            page.get_by_role("button",name="更多工具").click()
+            assert page.locator(".section-popover").get_by_text("封面设计").is_visible()
+            page.keyboard.press("Escape")
+            assert page.locator(".section-popover").count()==0
+        if name=="13-video":
+            assert page.locator(".video-stage-track > div").count()==5
         if name=="02-bank":
+            page.get_by_role("button",name="高级筛选").click()
+            assert page.get_by_label("章节",exact=True).is_visible()
+            page.get_by_role("button",name="收起筛选").click()
             page.locator(".bank-detail .katex").first.wait_for()
             assert page.locator(".bank-list .katex").count()>0
         if name=="04-word":

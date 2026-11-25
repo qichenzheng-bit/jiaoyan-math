@@ -30,3 +30,4 @@ import './legacy-ui.css'
 
 import './math-content.css'
 import './design-system.css'
+import './workflow-ui.css'
