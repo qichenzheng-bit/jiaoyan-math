@@ -33,7 +33,10 @@ def answer(route):
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
       "/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
-    if p=="/documents/ai-demo":result=ai_doc
+    if p=="/documents/ai-demo":
+        result=ai_doc
+        if route.request.method=="PUT":
+            result={**json.loads(route.request.post_data),"revision":2}
     if p=="/documents/ai-demo/ai-edits":result=[ai_edit]
     if p.endswith("/registration-history"):result=[]
     if p=="/documents/ai-demo/registration-preview":result=registration_preview
@@ -147,6 +150,22 @@ with sync_playwright() as p:
             page.screenshot(path=str(OUT/"23-word-origin.png"),full_page=False)
             page.get_by_role("button",name="编辑",exact=True).click()
             page.set_viewport_size({"width":393,"height":873})
+            page.locator(".mobile-doc-card").wait_for()
+            page.locator(".mobile-doc-math .katex").first.wait_for()
+            assert page.locator(".doc-canvas").count()==0
+            page.get_by_role("button",name="答案",exact=True).click()
+            page.locator(".mobile-doc-math .katex").first.wait_for()
+            page.get_by_role("button",name="下一条",exact=True).click()
+            assert page.locator(".mobile-doc-card h2").inner_text()=="导数计算"
+            page.get_by_role("button",name="条目列表",exact=True).click()
+            assert page.locator(".mobile-doc-list-item").count()==4
+            page.locator(".mobile-doc-list-item").first.click()
+            page.get_by_role("button",name="原文对照",exact=True).click()
+            page.locator(".doc-origin-text .katex").first.wait_for()
+            page.get_by_role("button",name="返回当前条目").click()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.screenshot(path=str(OUT/"27-mobile-card.png"),full_page=False)
+            page.get_by_role("button",name="切换 Word 版").click()
             page.get_by_role("navigation",name="文档面板").get_by_role("button",name="页面").click()
             assert page.locator(".doc-canvas").is_visible()
             assert not page.locator(".doc-side").is_visible()
@@ -157,6 +176,28 @@ with sync_playwright() as p:
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
+    # Phone-first card entry: edit, save, switch layout, and keep the same document.
+    page.set_viewport_size({"width":393,"height":873})
+    page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
+    page.locator(".mobile-doc-card").wait_for()
+    page.get_by_role("button",name="编辑当前字段").click()
+    page.get_by_label("当前字段编辑").fill(r"求 $\\frac{1}{x}$ 的导数。")
+    page.locator(".mobile-doc-math .katex").first.wait_for()
+    assert page.get_by_role("button",name="保存草稿",exact=True).first.is_enabled()
+    page.get_by_role("button",name="切换 Word 版").click()
+    assert page.locator(".doc-sheet").get_by_text("的导数",exact=False).count()>0
+    page.get_by_role("button",name="切换卡片版").click()
+    assert page.locator(".mobile-doc-math").get_by_text("的导数",exact=False).count()>0
+    page.get_by_role("button",name="保存草稿",exact=True).first.click()
+    page.get_by_text("已保存 · v2",exact=False).first.wait_for()
+    page.get_by_role("button",name="AI 修改",exact=True).click()
+    page.locator(".doc-ai-after .katex").first.wait_for()
+    page.get_by_role("button",name="返回当前条目").click()
+    page.get_by_role("button",name="批量审核",exact=True).click()
+    page.get_by_role("button",name="检查重复与知识点").wait_for()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(OUT/"28-mobile-review.png"),full_page=False)
+    page.set_viewport_size({"width":1600,"height":900})
     # Theme and mobile smoke checks use the same compiled application.
     page.goto("http://127.0.0.1:4173/",wait_until="networkidle")
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#f8f7f3"

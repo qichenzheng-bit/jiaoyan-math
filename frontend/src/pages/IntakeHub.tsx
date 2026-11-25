@@ -8,7 +8,7 @@ type Document={id:string;title:string;subject:string;source_id:string|null;updat
 const states:Record<string,string>={running:'提取中',review:'待审核',converted:'已生成文档',failed:'执行失败',stopped:'已停止'}
 const entries=[
  {name:'AI 智能录入',desc:'粘贴题目、导入文本或文字版 PDF，交给 AI 拆分整理。',icon:'spark',path:'/intelligence',detail:'推荐 · 多条内容'},
- {name:'整套资料录入',desc:'先登记试卷、教材或讲义，再到 Word 工作台逐题编辑。',icon:'files',path:'/intake?mode=document',detail:'适合完整资料'},
+ {name:'整套资料录入',desc:'先登记试卷、教材或讲义，电脑用 Word 工作台，手机用卡片逐条编辑。',icon:'files',path:'/intake?mode=document',detail:'适合完整资料'},
  {name:'单道题目录入',desc:'已有题目、答案和解析时，直接编辑并确认保存。',icon:'resources',path:'/intake-single?kind=question',detail:'手动录入'},
  {name:'知识单元录入',desc:'整理定义、定理、性质、公式或方法。',icon:'book',path:'/intake-single?kind=knowledge',detail:'手动录入'},
 ]
