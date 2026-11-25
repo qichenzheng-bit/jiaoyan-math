@@ -135,11 +135,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices}).status_code==409
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
-        assert client.get("/api/qoder/preferences").json()=={"model":"Auto","video_model":"Auto"}
+        assert client.get("/api/qoder/preferences").json()=={"model":"Auto","video_model":"Auto","effort":"default","video_effort":"default"}
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Qwen4-Max"}).status_code==200
-        assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max","video_model":"Auto"}
+        assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max","video_model":"Auto","effort":"default","video_effort":"default"}
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Qwen4-Max","video_model":"Qwen4-Max"}).status_code==200
-        assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max","video_model":"Qwen4-Max"}
+        assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max","video_model":"Qwen4-Max","effort":"default","video_effort":"default"}
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Qwen4-Max","video_model":"Unknown"}).status_code==422
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Unknown"}).status_code==422
         assert client.put("/api/qoder/preferences",json={"model":"Auto"}).status_code==403

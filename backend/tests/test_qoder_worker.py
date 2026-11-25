@@ -59,3 +59,9 @@ def test_video_request_rejects_oversize_and_unsafe_parameters(monkeypatch):
     assert worker.chat_start({"id":ident,"model":"Auto","prompt":"ok","timeout":901},video=True)[0]==422
     assert worker.chat_start({"id":ident,"model":"Auto","prompt":"ok","effort":"--help"},video=True)[0]==422
     assert worker.chat_start({"id":ident,"model":"Auto","prompt":"ok","system":"x"*4097},video=True)[0]==422
+
+
+def test_catalog_efforts_are_explicit_only():
+    assert worker.parse_catalog('MODEL\nAuto\nFast')=={"Auto":[],"Fast":[]}
+    assert worker.parse_catalog('{"models":[{"id":"Qwen","efforts":["high","low","--help"]},{"id":"Fast"}]}')=={"Qwen":["low","high"],"Fast":[]}
+    assert worker.parse_catalog('MODEL\nAuto\nQwen efforts: low, high')=={"Auto":[],"Qwen":["low","high"]}

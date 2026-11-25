@@ -65,6 +65,9 @@ def login_cancel():
 
 MODEL_KEY = "ai.qoder.model"
 VIDEO_MODEL_KEY = "ai.qoder.video_model"
+EFFORT_KEY = "ai.qoder.effort"
+VIDEO_EFFORT_KEY = "ai.qoder.video_effort"
+VIDEO_EFFORTS = {"low","medium","high","xhigh","max"}
 def fallback():
     return {"models":[{"id":m,"label":m,"efforts":["default"]} for m in ("Auto","Fast")],"source":"fallback","updated_at":None}
 
@@ -137,6 +140,24 @@ def models_refresh():
 class ModelPreference(BaseModel):
     model: str=Field(min_length=1,max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
     video_model: str|None=Field(default=None,min_length=1,max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+    effort: str|None=Field(default=None,max_length=16)
+    video_effort: str|None=Field(default=None,max_length=16)
+
+def stored_effort(db,key):
+    row=db.get(Setting,key)
+    return row.value if row else "default"
+
+def validate_effort(catalog,model,effort,video=False):
+    if effort=="default":return
+    if video and effort not in VIDEO_EFFORTS:raise HTTPException(422,"视频引擎不支持该档位")
+    if catalog.get("source")!="cli" or not any(m.get("id")==model and effort in m.get("efforts",[]) for m in catalog.get("models",[])):
+        raise HTTPException(422,"该模型未报告所选推理强度，请刷新模型")
+
+def assistant_effort(db,model):
+    prefs=model_preference(db)
+    effort=prefs["effort"] if prefs["model"]==model else "default"
+    if effort!="default":validate_effort(available_models(),model,effort)
+    return {"effort":effort} if effort!="default" else {}
 
 def video_model_preference(db):
     row=db.get(Setting,VIDEO_MODEL_KEY)
@@ -145,11 +166,20 @@ def video_model_preference(db):
 @router.get("/preferences")
 def model_preference(db:Session=Depends(get_db)):
     row=db.get(Setting,MODEL_KEY)
-    return {"model":row.value if row else "Auto","video_model":video_model_preference(db)}
+    return {"model":row.value if row else "Auto","video_model":video_model_preference(db),"effort":stored_effort(db,EFFORT_KEY),"video_effort":stored_effort(db,VIDEO_EFFORT_KEY)}
 
 @router.put("/preferences",dependencies=[Depends(require_origin)])
 def set_model(body:ModelPreference,db:Session=Depends(get_db),user:User=Depends(current_user)):
-    options={m["id"] for m in available_models()["models"]}
+    catalog=available_models()
+    options={m["id"] for m in catalog["models"]}
+    old=model_preference(db)
+    video_model=body.video_model or old["video_model"]
+    effort=body.effort if body.effort is not None else (old["effort"] if old["model"]==body.model else "default")
+    video_effort=body.video_effort if body.video_effort is not None else (old["video_effort"] if old["video_model"]==video_model else "default")
+    validate_effort(catalog,body.model,effort)
+    validate_effort(catalog,video_model,video_effort,True)
+    db.merge(Setting(key=EFFORT_KEY,value=effort))
+    db.merge(Setting(key=VIDEO_EFFORT_KEY,value=video_effort))
     if body.model not in options or (body.video_model is not None and body.video_model not in options):
         raise HTTPException(422,"该模型不在当前可用清单中")
     db.merge(Setting(key=MODEL_KEY,value=body.model))

@@ -58,6 +58,8 @@ MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}")
 FALLBACK_MODELS = ("Auto", "Fast")
 catalog = None
 catalog_at = None
+catalog_efforts = {}
+SUPPORTED_EFFORTS = ('none','off','disabled','low','medium','high','xhigh','max')
 
 def parse_models(output):
     names = []
@@ -82,15 +84,40 @@ def parse_models(output):
                 names.append(name)
     return names[:200]
 
+def parse_catalog(output):
+    """Only explicit per-model capabilities are evidence. Never infer from a model name."""
+    clean = ANSI.sub("", output)
+    try:
+        payload = json.loads(clean)
+    except ValueError:
+        payload = None
+    rows = payload.get("models") if isinstance(payload, dict) else payload
+    result = {}
+    if isinstance(rows, list):
+        for row in rows:
+            ident = row if isinstance(row, str) else row.get("id", row.get("model_id", "")) if isinstance(row,dict) else ""
+            if not isinstance(ident,str) or not MODEL_ID.fullmatch(ident):
+                continue
+            values = row.get("efforts", row.get("reasoning_efforts", [])) if isinstance(row,dict) else []
+            result[ident] = [e for e in SUPPORTED_EFFORTS if isinstance(values,list) and e in values]
+    else:
+        result = {name: [] for name in parse_models(clean)}
+        for line in clean.splitlines():
+            match = re.fullmatch(r"\s*(?:[-*]\s+)?([A-Za-z0-9][A-Za-z0-9._:/-]{0,79})\s+(?:reasoning[ _-]*efforts?|efforts?)\s*[:=]\s*\[?([a-zA-Z, /|]+)\]?\s*",line,re.I)
+            if match:
+                ident, values = match.groups()
+                result[ident]=[e for e in SUPPORTED_EFFORTS if e in re.split(r"[, /|]+",values.lower())]
+    return dict(list(result.items())[:200])
+
 def model_catalog():
     with lock:
         names = list(FALLBACK_MODELS if catalog is None else catalog)
-        return {"models": [{"id": n, "label": n, "efforts": ["default"]} for n in names],
+        return {"models": [{"id": n, "label": n, "efforts": list(catalog_efforts.get(n, [])) if catalog is not None else []} for n in names],
                 "source": "fallback" if catalog is None else "cli",
                 "updated_at": catalog_at}
 
 def refresh_models():
-    global catalog, catalog_at
+    global catalog, catalog_at, catalog_efforts
     with lock:
         if login_process is not None or chat_active:
             return 409, {"detail": "请先完成当前授权或对话"}
@@ -111,11 +138,12 @@ def refresh_models():
         no_models = "no models available" in (output + err.decode("utf-8", "replace")).lower()
         if proc.returncode != 0 and not no_models:
             return 503, {"detail": "CLI 模型探测失败，保留此前清单"}
-        names = [] if no_models else parse_models(output)
+        metadata = {} if no_models else parse_catalog(output)
+        names = list(metadata)
         if not names and not no_models:
             return 503, {"detail": "无法解析 CLI 模型清单，保留此前清单"}
         with lock:
-            catalog, catalog_at = names, int(time.time())
+            catalog, catalog_at, catalog_efforts = names, int(time.time()), metadata
         return 200, model_catalog()
     except OSError:
         return 503, {"detail": "无法启动模型探测"}
@@ -179,7 +207,7 @@ def login_worker(proc):
                 login_process = None
 
 def start_login():
-    global login_process, verified_at, catalog, catalog_at
+    global login_process, verified_at, catalog, catalog_at, catalog_efforts
     with lock:
         if chat_active:
             return 409, {"detail": "请先完成当前对话"}
@@ -199,7 +227,7 @@ def start_login():
             return 503, {"detail": "无法启动官方登录命令"}
         login_process = proc
         verified_at = None
-        catalog, catalog_at = None, None
+        catalog, catalog_at, catalog_efforts = None, None, {}
         login.update(state="starting", url="", detail="正在获取官方授权链接")
         threading.Thread(target=login_worker, args=(proc,), daemon=True).start()
         return 200, dict(login)
@@ -215,7 +243,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 6, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 7, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
@@ -343,7 +371,7 @@ def chat_run(job, exe, model, prompt):
             args = [exe,"-m",model,"--tools","","--no-session-persistence","--output-format","stream-json"]
             if video:
                 if job["system"]: args += ["--system-prompt", job["system"]]
-                if job["effort"] != "default": args += ["--reasoning-effort",job["effort"]]
+            if job["effort"] != "default": args += ["--reasoning-effort",job["effort"]]
             proc = subprocess.Popen(args+["-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
             with lock:
@@ -420,6 +448,8 @@ def chat_start(data, video=False):
     if not isinstance(ident,str) or not JOB_ID.fullmatch(ident) or not allowed_model(model) or not isinstance(prompt,str) or "\x00" in prompt or not 0<len(prompt.encode("utf-8"))<=(120000 if video else 100000):
         return 422,{"detail":"模型或上下文无效；请检查模型及提示词长度"}
     system,effort,timeout=data.get("system",""),data.get("effort","default"),data.get("timeout",900)
+    if effort != "default" and (not isinstance(effort,str) or effort not in catalog_efforts.get(model, [])):
+        return 422,{"detail":"当前模型未报告该推理强度，请刷新模型配置"}
     if video and (not isinstance(system,str) or "\x00" in system or len(system.encode("utf-8"))>4096 or effort not in ("default","low","medium","high","xhigh","max") or type(timeout) is not int or not 1<=timeout<=900):
         return 422,{"detail":"视频模型参数无效"}
     exe=executable()
