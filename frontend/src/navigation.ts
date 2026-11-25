@@ -16,7 +16,7 @@ export const modules:Module[]=[
  {path:'/graph',name:'知识图谱',desc:'知识点树、关联与图谱',icon:'graph',group:'resources',ready:true},
  {path:'/sources',name:'来源资料',desc:'教材、试卷与讲义来源',icon:'files',group:'resources',ready:true},
  {path:'/assets',name:'素材库',desc:'图片、模板与公式素材',icon:'media',group:'resources',ready:false},
- {path:'/research',name:'Word 工作台',desc:'文档编辑、大纲和分页',icon:'research',group:'research',ready:false},
+ {path:'/research',name:'Word 工作台',desc:'文档编辑、大纲和分页',icon:'research',group:'research',ready:true},
  {path:'/handouts',name:'讲义管理',desc:'教研讲义与知识编排',icon:'book',group:'research',ready:false},
  {path:'/papers',name:'试卷管理',desc:'组卷、排版与导出',icon:'works',group:'research',ready:false},
  {path:'/drawing',name:'数学绘图',desc:'数学图形创作',icon:'graph',group:'production',ready:false},

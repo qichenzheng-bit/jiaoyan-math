@@ -1,4 +1,4 @@
-import {useEffect,useState,type FormEvent} from 'react'
+import {useEffect,useState,type FormEvent,type ReactNode} from 'react'
 import {api} from '../auth'
 import {Link} from 'react-router-dom'
 import ChatText from './ChatText'
@@ -16,7 +16,7 @@ export default function Graph(){
  const active=points.find(p=>p.id===selected), visibleSet=new Set(visible.map(p=>p.id))
  const childEdges=edges.filter(e=>e.relation_type==='contains'&&visibleSet.has(e.source_id)&&visibleSet.has(e.target_id))
  const roots=visible.filter(p=>!childEdges.some(e=>e.target_id===p.id))
- function tree(p:Point,depth=0){return <div key={p.id} className="kp-tree-node"><button style={{paddingLeft:8+Math.min(depth,8)*12}} className={selected===p.id?'active':''} onClick={()=>setSelected(p.id)}>{p.name}<small>{p.code}</small></button>{depth<40&&childEdges.filter(e=>e.source_id===p.id).map(e=>{const child=visible.find(x=>x.id===e.target_id);return child?tree(child,depth+1):null})}</div>}
+ function tree(p:Point,depth=0):ReactNode{return <div key={p.id} className="kp-tree-node"><button style={{paddingLeft:8+Math.min(depth,8)*12}} className={selected===p.id?'active':''} onClick={()=>setSelected(p.id)}>{p.name}<small>{p.code}</small></button>{depth<40&&childEdges.filter(e=>e.source_id===p.id).map(e=>{const child=visible.find(x=>x.id===e.target_id);return child?tree(child,depth+1):null})}</div>}
  function editing(p?:Point){setTab('manage');setEdit(p?.id??'');setDraft(p?{name:p.name,subject:p.subject,chapter:p.chapter,description:p.description,aliases:p.aliases.join('，'),status:p.status==='active'?'active':'disabled',revision:p.revision}:empty)}
  async function act(fn:()=>Promise<void>){setBusy(true);setMessage('');try{await fn();setRefresh(v=>v+1)}catch(e){setMessage(e instanceof Error?e.message:'操作失败')}finally{setBusy(false)}}
  function save(e:FormEvent){e.preventDefault();void act(async()=>{const r=await api<Point>('/knowledge/points'+(edit?'/'+edit:''),{method:edit?'PUT':'POST',body:JSON.stringify({...draft,aliases:draft.aliases.split(/[，,]/).map(s=>s.trim()).filter(Boolean)})});setSelected(r.id);setEdit('');setDraft(empty);setMessage('已保存知识点')})}

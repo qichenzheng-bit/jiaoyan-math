@@ -164,3 +164,21 @@ class KnowledgeRelation(Base):
     target_id: Mapped[str]=mapped_column(ForeignKey("knowledge_point_catalog.id",ondelete="RESTRICT"),primary_key=True)
     relation_type: Mapped[str]=mapped_column(String(16),primary_key=True)
     __table_args__=(CheckConstraint("source_id <> target_id",name="ck_knowledge_relation_not_self"),CheckConstraint("relation_type IN ('contains','related','prerequisite')",name="ck_knowledge_relation_type"))
+
+class TeachingDocument(Base):
+    __tablename__="teaching_documents"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    title: Mapped[str]=mapped_column(String(200))
+    kind: Mapped[str]=mapped_column(String(16))
+    subject: Mapped[str]=mapped_column(String(40))
+    source_id: Mapped[str | None]=mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),nullable=True)
+    blocks: Mapped[list]=mapped_column(JSON)
+    revision: Mapped[int]=mapped_column(Integer)
+    archived: Mapped[bool]=mapped_column(Boolean)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class DocumentResourceReference(Base):
+    __tablename__="document_resource_refs"
+    document_id: Mapped[str]=mapped_column(ForeignKey("teaching_documents.id",ondelete="CASCADE"),primary_key=True)
+    resource_id: Mapped[str]=mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)

@@ -76,6 +76,18 @@ def test_migration_and_login(tmp_path, monkeypatch):
         link=client.get("/api/knowledge/resources/"+rid).json()
         assert client.put("/api/knowledge/resources/"+rid,headers=origin,json={"revision":link["revision"],"items":[{"knowledge_id":k["id"],"role":"core"}]}).status_code==200
         assert client.get("/api/knowledge/points/"+k["id"]+"/resources").json()[0]["id"]==rid
+        doc=client.post("/api/documents",headers=origin,json={"title":"录入测试","subject":"高数","blocks":[{"uid":"a","kind":"question","title":"新题","content":"求导数","answer":"1"}]})
+        assert doc.status_code==200,doc.text
+        d=doc.json()
+        registered=client.post("/api/documents/"+d["id"]+"/blocks/a/register",headers=origin,json={"revision":d["revision"]})
+        assert registered.status_code==200,registered.text
+        rd=registered.json()
+        assert rd["blocks"][0]["snapshot"]["code"].startswith("Q")
+        assert rd["blocks"][0]["kind"]=="reference"
+        assert client.put("/api/documents/"+d["id"],headers=origin,json=d).status_code==409
+        updated=client.put("/api/documents/"+d["id"],headers=origin,json={**rd,"title":"修订标题"})
+        assert updated.status_code==200,updated.text
+        assert updated.json()["blocks"][0]["snapshot"]==rd["blocks"][0]["snapshot"]
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto"}
