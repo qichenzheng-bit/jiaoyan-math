@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
 from app.core.solution_methods import normalize_subject
-from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User
+from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement
 from app.services import storage
 from app.api import resources as bank
 
@@ -98,6 +98,15 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     db.add(d);db.flush();references(db,d);audit(db,"document.create",user.id);db.commit();return public(d)
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):return public(row(db,id))
+
+@router.get("/{id}/origin")
+def origin(id:str,db:Session=Depends(get_db)):
+    d=db.get(Doc,id)
+    if not d:raise HTTPException(404,"文档不存在")
+    job=db.scalar(select(IntakeJob).where(IntakeJob.document_id==d.id).order_by(IntakeJob.created_at.desc()).limit(1))
+    if not job:return None
+    supplements=db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==job.id,IntakeSupplement.state=="accepted").order_by(IntakeSupplement.created_at.desc()).limit(100))
+    return {"job_id":job.id,"input_text":job.input_text,"provenance":job.provenance or {},"supplements":[{"item_uid":s.item_uid,"fields":s.accepted,"state":s.state,"model":s.model} for s in supplements]}
 @router.put("/{id}",dependencies=[Depends(require_origin)])
 def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)

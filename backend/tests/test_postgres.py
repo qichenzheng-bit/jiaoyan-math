@@ -190,6 +190,10 @@ def test_migration_and_login(tmp_path, monkeypatch):
         converted_doc=client.get("/api/documents/"+converted.json()["document_id"]).json()
         assert converted_doc["blocks"][0]["kind"]=="question"
         assert converted_doc["source_id"]==created_doc["source_id"]
+        origin_record=client.get("/api/documents/"+converted_doc["id"]+"/origin").json()
+        assert origin_record["job_id"]==j["id"] and origin_record["input_text"]=="求极限"
+        assert origin_record["supplements"][0]["fields"]==["answer"]
+        assert client.get("/api/documents/"+created_doc["id"]+"/origin").json() is None
         def failed_ingest(method,path,body=None):
             if path=="/status":return {"chat_available":True}
             if path=="/chat/start":return {"state":"running"}
