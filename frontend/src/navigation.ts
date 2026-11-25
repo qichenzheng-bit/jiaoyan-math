@@ -17,7 +17,7 @@ export const modules:Module[]=[
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
  {path:'/tasks',name:'任务中心',desc:'后台任务进度和执行记录',icon:'clock',group:'overview',ready:true},
- {path:'/intake',name:'内容录入',desc:'录入题目与知识单元',icon:'intake',group:'resources',ready:true},
+ {path:'/intake',name:'录入工作台',desc:'统一管理 AI 与手动录入流程',icon:'intake',group:'resources',ready:true},
  {path:'/intelligence',name:'AI 智能录入',desc:'原文提取与草稿审核',icon:'spark',group:'resources',ready:true},
  {path:'/resources',name:'题库管理',desc:'题目、知识单元、查重与检索',icon:'resources',group:'resources',ready:true},
  {path:'/graph',name:'知识图谱',desc:'知识点树、关联与图谱',icon:'graph',group:'resources',ready:true},

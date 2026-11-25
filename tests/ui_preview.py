@@ -20,7 +20,7 @@ def answer(route):
       "/auth/me":{"username":"预览管理员"},"/ready":{"status":"ok"},"/settings":{"display_name":"微光数学","theme":"light"},"/resources/subjects":subjects,
       "/knowledge/points":{"items":points,"total":len(points)},"/knowledge/relations":{"items":edges,"truncated":False},
       "/documents/demo":doc,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
-      "/chat/sessions":[],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
+      "/intelligence/jobs":[],"/chat/sessions":[],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
       "/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
@@ -36,12 +36,25 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+    for path,name in [("/","00-home"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/chat","05-chat"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
         page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
         page.wait_for_selector(".legacy-shell",timeout=10000)
         assert page.locator(".main-section-links a").count()==6
         page.evaluate("document.fonts.ready")
         page.wait_for_timeout(300)
+        if name=="01-intake":
+            assert page.locator(".intake-entry").count()==4
+            assert page.locator(".intake-flow-steps > div").count()==4
+        if name=="17-intake-knowledge":
+            assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
+        if name=="05-chat":
+            assert page.locator(".intake-chat-prompts > *").count()==6
+            page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
+            page.get_by_role("button",name="转录入",exact=True).click()
+            page.wait_for_url("**/intelligence")
+            assert page.get_by_label("原文",exact=True).input_value().startswith("录入题目")
+            assert page.get_by_text("已带入聊天正文").is_visible()
+            page.goto("http://127.0.0.1:4173/chat",wait_until="networkidle")
         if name=="00-home":
             assert page.locator(".workflow-step").count()==5
             assert page.locator(".home-stat").count()==6
