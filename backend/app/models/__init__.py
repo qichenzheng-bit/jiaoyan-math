@@ -32,6 +32,7 @@ class StoredFile(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     media_type: Mapped[str] = mapped_column(String(100))
     generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 class AuditLog(Base):
@@ -40,3 +41,9 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(80), index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger, index=True)
+
+class FileReference(Base):
+    __tablename__ = "file_references"
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(80), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(100), primary_key=True)

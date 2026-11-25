@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Route, Routes, Link } from 'react-router-dom'
 import { api, Login, PasswordSettings } from './auth'
+import Files from './pages/Files'
+import FormulaLab from './pages/FormulaLab'
 
 const modules = [
   { path: '/', name: '工作台首页', desc: '教研与创作入口' },
@@ -10,13 +12,15 @@ const modules = [
   { path: '/media', name: '多媒体制作', desc: '图文、绘图、文档、文章与课件' },
   { path: '/works', name: '教学作品', desc: '作品归档及版本管理' },
   { path: '/publishing', name: '自媒体运营', desc: '平台适配、发布管理及运营数据' },
+  { path: '/files', name: '文件管理', desc: '公共文件上传、预览与归档' },
+  { path: '/formulas', name: '公式预览', desc: 'LaTeX 公式实时显示' },
   { path: '/settings', name: '系统设置', desc: '账号、模型、存储及系统信息' },
 ] as const
 
 function Home() {
   return <><h1>教研工作台</h1><p className="muted">管理教学资源与创作任务。</p>
     <section className="notice">基础工程测试版。教研业务功能尚未开放。</section>
-    <div className="tiles">{modules.slice(1).map(m => <Link className="tile" key={m.path} to={m.path}><strong>{m.name}</strong><span>{m.desc}</span><small>{m.path === '/settings' ? '账号设置' : '待开发'}</small></Link>)}</div>
+    <div className="tiles">{modules.slice(1).map(m => <Link className="tile" key={m.path} to={m.path}><strong>{m.name}</strong><span>{m.desc}</span><small>{['/settings','/files','/formulas'].includes(m.path) ? '基础功能' : '待开发'}</small></Link>)}</div>
   </>
 }
 
@@ -54,7 +58,7 @@ export default function App() {
     </nav>
     <main>{error && <p role="alert">{error}</p>}<Routes>
       <Route path="/" element={<Home/>}/>
-      {modules.slice(1).map(m => <Route key={m.path} path={m.path} element={<><h1>{m.name}</h1><p>{m.desc}</p>{m.path==='/settings'?<PasswordSettings/>:<section className="notice">此模块将在对应开发阶段开放。</section>}</>}/>)}
+      {modules.slice(1).map(m => <Route key={m.path} path={m.path} element={m.path==='/files'?<Files/>:m.path==='/formulas'?<FormulaLab/>:<><h1>{m.name}</h1><p>{m.desc}</p>{m.path==='/settings'?<PasswordSettings/>:<section className="notice">此模块将在对应开发阶段开放。</section>}</>}/>)}
       <Route path="*" element={<><h1>页面不存在</h1><Link to="/">返回首页</Link></>}/>
     </Routes></main>
     {assistant && <aside aria-label="AI 助手"><h2>AI 助手</h2><p>模型接入将在后续阶段完成。</p><button onClick={() => setAssistant(false)}>关闭</button></aside>}
