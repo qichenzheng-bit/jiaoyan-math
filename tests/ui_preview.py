@@ -27,7 +27,7 @@ def answer(route):
     result={
       "/auth/me":{"username":"预览管理员"},"/ready":{"status":"ok"},"/settings":{"display_name":"微光数学","theme":"light"},"/resources/subjects":subjects,
       "/knowledge/points":{"items":points,"total":len(points)},"/knowledge/relations":{"items":edges,"truncated":False},
-      "/documents/demo":doc,"/documents/demo/origin":{"job_id":"review-demo","input_text":r"原始资料 $x^2$","provenance":{"kind":"manual"},"supplements":[]},"/resources/source-preview":source,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
+      "/documents/demo":doc,"/documents/source-export/source-preview":{**doc,"kind":"paper","source_export":True,"has_source_content":True,"batch_count":1},"/documents/demo/origin":{"job_id":"review-demo","input_text":r"原始资料 $x^2$","provenance":{"kind":"manual"},"supplements":[]},"/resources/source-preview":source,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
       "/intelligence/jobs":[],"/intelligence/import/capabilities":{"text":True,"docx":True,"pdf_text":True,"image_ocr":False,"pdf_ocr":False},"/chat/sessions/chat-demo":demo_chat,"/intelligence/chat-source/msg-user":{"message_id":"msg-user","session_id":"chat-demo","role":"user","text":demo_chat["messages"][0]["content"],"title":demo_chat["title"],"has_attachments":False},"/chat/sessions":[{k:v for k,v in demo_chat.items() if k!="messages"}],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
@@ -332,6 +332,15 @@ with sync_playwright() as p:
     page.wait_for_url("**/intake?mode=document")
     page.locator(".legacy-intake").wait_for()
     assert not page.locator(".nav.open").count()
+    page.goto("http://127.0.0.1:4173/sources",wait_until="networkidle")
+    page.locator(".bank-row").first.click()
+    page.get_by_role("link",name="导出 PDF",exact=True).click()
+    page.wait_for_url("**/source-print/source-preview")
+    page.locator(".print-document .katex").first.wait_for()
+    assert page.locator(".print-question-number").count()==4
+    assert page.get_by_role("button",name="打印 / 保存为 PDF",exact=True).is_enabled()
+    page.get_by_label("仅题目").check()
+    assert page.locator(".print-document").get_by_text("答案：",exact=False).count()==0
     page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
     page.locator(".bank-row").first.wait_for()
     assert page.locator(".bank-detail").is_hidden()

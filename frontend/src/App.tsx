@@ -71,6 +71,7 @@ export default function App(){
     <Route path="/project/:id" element={<ProjectHub/>}/>
     {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/products'?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/tasks'?<Tasks/>:m.path==='/intelligence'?<Intelligence/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="/print/:id" element={<DocumentPrint/>}/>
+    <Route path="/source-print/:id" element={<DocumentPrint source/>}/>
     <Route path="/intake-single" element={<Resources key="intake-single" intake/>}/>
     <Route path="*" element={<section className="panel planned"><h1>页面不存在</h1><Link to="/" className="text-link">返回首页</Link></section>}/>
    </Routes></div></main>

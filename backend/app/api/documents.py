@@ -99,6 +99,46 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     bank.admin_lock(db,user)
     d=Doc(id=str(uuid4()),title=body.title.strip(),kind=body.kind,subject=normalize_subject(body.subject),source_id=body.source_id,blocks=validate(db,body,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();references(db,d);audit(db,"document.create",user.id);db.commit();return public(d)
+def assemble_source_export(source, documents, resources):
+    """Read-only export: preserve saved batch order and block snapshots."""
+    blocks=[]
+    seen=set()
+    batches=[d for d in documents if d.blocks]
+    for d in batches:
+        if len(batches)>1:
+            blocks.append(Block(uid="batch-"+d.id[:30],kind="heading",title=d.title).model_dump())
+        for index, block in enumerate(d.blocks):
+            item=dict(block)
+            item["uid"]=f"{d.id}-{index}"
+            blocks.append(item)
+            if block.get("resource_id"):seen.add(block["resource_id"])
+    remaining=[]
+    for resource in resources:
+        if resource.id in seen:continue
+        seen.add(resource.id)
+        remaining.append({**Block(uid=resource.id,kind="reference",resource_id=resource.id).model_dump(),"snapshot":bank.view(resource)})
+    if remaining:
+        if blocks:blocks.append(Block(uid="linked-resources",kind="heading",title="其他已关联资源").model_dump())
+        blocks.extend(remaining)
+    has_content=bool(blocks)
+    if not has_content and source.content:
+        blocks.append(Block(uid="source-description",kind="text",content=source.content).model_dump())
+    return {"title":source.title,"subject":source.subject,
+            "kind":{"exam":"paper","textbook":"textbook","handout":"handout"}.get(source.source_type,"intake"),
+            "blocks":blocks,"source_export":True,"batch_count":len(batches),
+            "has_source_content":has_content}
+
+@router.get("/source-export/{source_id}")
+def source_export(source_id:str,db:Session=Depends(get_db)):
+    source=bank.existing(db,source_id)
+    if source.kind!="source":raise HTTPException(404,"来源不存在")
+    # Intake batches and explicitly promoted original documents, not unrelated compositions.
+    documents=list(db.scalars(select(Doc).where(Doc.source_id==source.id,Doc.archived==False).order_by(Doc.created_at,Doc.id)))
+    documents=[d for d in documents if d.kind=="intake" or source.content.endswith("对应文档编号 "+d.id)]
+    linked_ids=select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source.id,ResourceSourceLink.provenance_role.in_(("original","reproduced")))
+    resources=list(db.scalars(select(Resource).where(Resource.archived==False,Resource.kind.in_(("question","knowledge")),or_(Resource.source_id==source.id,Resource.id.in_(linked_ids))).order_by(Resource.created_at,Resource.id)))
+    return assemble_source_export(source,documents,resources)
+
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):return public(row(db,id))
 
