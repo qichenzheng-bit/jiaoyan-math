@@ -89,8 +89,11 @@ def save_staged(db: Session, temp: Path, name: str, user_id: int, generated: boo
     if size == 0 or size > settings.max_file_bytes:
         raise HTTPException(413, "文件为空或超过大小限制")
     media = detect_type(temp, name)
+    hasher = hashlib.sha256()
     with temp.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
     # Serialize deduplication across workers with the single administrator row.
     db.scalar(select(User).where(User.id == user_id).with_for_update())
     existing = db.scalar(select(StoredFile).where(StoredFile.sha256 == digest, StoredFile.generated == generated).order_by(StoredFile.created_at))

@@ -14,6 +14,7 @@ flock -n 9 || { echo "Deployment busy"; exit 1; }
 release="$base/releases/$sha-$(date +%s)"
 mkdir "$release"
 rsync -a --exclude=.git --exclude=node_modules --exclude=.venv --exclude=.env --exclude=data/ ./ "$release/"
+printf '%s\\n' "$sha" > "$release/RELEASE_SHA"
 python3 -m venv "$release/venv"
 "$release/venv/bin/python" -m pip install -r "$release/backend/requirements.txt"
 (cd "$release/frontend" && npm install --no-audit --no-fund && npm run build && rm -rf node_modules)
@@ -28,11 +29,12 @@ switch_to() {
   mv -Tf "$base/.current-$sha" "$base/current"
 }
 # Stop writers before taking a coordinated database and file backup.
-systemctl --user stop jiaoyan.service
-backup="$base/backups/$(date -u +%Y%m%dT%H%M%SZ)-$sha"
+# Validate DB connectivity and determine current revision before stopping service.
 before=$(psql -X -d jiaoyan -tAc "SELECT to_regclass('public.alembic_version')" )
 if [[ -n "$before" ]]; then before=$(psql -X -d jiaoyan -tAc 'SELECT version_num FROM alembic_version'); fi
+backup="$base/backups/$(date -u +%Y%m%dT%H%M%SZ)-$sha"
 mkdir "$backup"
+systemctl --user stop jiaoyan.service
 if ! (pg_dump -Fc -d jiaoyan -f "$backup/database.dump" && tar -C "$base/data" -czf "$backup/files.tar.gz" files); then
   [[ -z "$old" ]] || systemctl --user start jiaoyan.service
   echo "Backup failed; no migration performed"; exit 1
@@ -42,8 +44,7 @@ printf '%s\n' "$old" > "$backup/previous-release"
 migrated=false
 if (cd "$release/backend" && "$release/venv/bin/python" -m alembic upgrade head); then
   migrated=true
-  switch_to "$release"
-  if systemctl --user start jiaoyan.service; then
+  if switch_to "$release" && systemctl --user start jiaoyan.service; then
     for _ in $(seq 1 20); do
       if curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null && curl -fsS --max-time 2 http://127.0.0.1:8765/ >/dev/null; then
         # First deployment deliberately permits admin initialization after migration.

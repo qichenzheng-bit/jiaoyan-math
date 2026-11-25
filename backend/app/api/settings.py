@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import shutil
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -39,7 +40,9 @@ def status():
     if settings.storage_root:
         usage = shutil.disk_usage(root())
         disk = {"total":usage.total,"free":usage.free}
-    return {"version":settings.version,"release":os.environ.get("RELEASE_SHA","development"),"disk":disk}
+    release_file = Path(__file__).resolve().parents[3] / "RELEASE_SHA"
+    release = release_file.read_text().strip() if release_file.is_file() else "development"
+    return {"version":settings.version,"release":release,"disk":disk}
 
 @router.get("/audit")
 def logs(db: Session = Depends(get_db)):
