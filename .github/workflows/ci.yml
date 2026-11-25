@@ -1,6 +1,8 @@
-name: Hosted CI (manual / PR)
+name: CI and release
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 permissions:
@@ -60,9 +62,41 @@ jobs:
           node-version: "22"
       - run: npm install --no-audit --no-fund
       - run: npm run build
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm install --no-audit --no-fund && npm run build
+        working-directory: frontend
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+      - run: |
+          (cd frontend && npm run preview -- --port 4173) &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          python tests/ui_preview.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: clean-workspace-screenshots
+          path: ui-screenshots/
+          if-no-files-found: ignore
+          retention-days: 3
   deploy:
-    needs: [backend, frontend, deployment-syntax]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.ENABLE_DEPLOY == 'true'
+    needs: [backend, frontend, deployment-syntax, browser]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.ENABLE_DEPLOY == 'true'
     runs-on: [self-hosted, Linux, X64]
     env:
       GIT_CONFIG_COUNT: "1"
@@ -80,7 +114,7 @@ jobs:
 
   report:
     # A separate hosted job publishes readable commit statuses for main deployments.
-    needs: [deployment-syntax, backend, frontend, deploy]
+    needs: [deployment-syntax, backend, frontend, browser, deploy]
     if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
@@ -95,6 +129,7 @@ jobs:
           SYNTAX_RESULT: ${{ needs.deployment-syntax.result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
         run: |
           set -euo pipefail
@@ -112,4 +147,5 @@ jobs:
           report deployment-syntax "$SYNTAX_RESULT"
           report backend "$BACKEND_RESULT"
           report frontend "$FRONTEND_RESULT"
+          report browser "$BROWSER_RESULT"
           report deploy "$DEPLOY_RESULT"

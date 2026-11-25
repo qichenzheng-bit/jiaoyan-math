@@ -3,7 +3,7 @@
 
 1. 在服务器可信仓库副本执行 sudo bash deploy/bootstrap.sh https://实际域名。先核实 jiaoyan 数据库没有被其他服务使用；配置脚本拒绝覆盖已存在的 app.env。安装依赖需联网。配置文件只在服务器上。
 2. 配置域名解析、有效 TLS 证书和 nginx.conf.example，执行 nginx -t 后 reload。不得以公开 HTTP 传输账号密码。后端仅监听 127.0.0.1:8765。
-3. GitHub Settings > Secrets and variables > Actions > Variables 新建 ENABLE_DEPLOY=true。main 分支提交自动触发 Server CI and release，也可手动运行。通过同服务器隔离测试、前端编译及浏览器测试后才执行部署。Hosted CI 保留供 PR / 手动测试，不消耗每次 main 提交的托管执行器额度。
+3. GitHub Settings > Secrets and variables > Actions > Variables 新建 ENABLE_DEPLOY=true。main 分支提交自动触发 CI and release。托管执行器完成 Python 3.10/3.12、前端编译、脚本检查及浏览器验收后，才允许可信 main 进入现有服务器部署。Server CI and release 保留为手动备用流程，不与主流程重复触发。
 4. 首次部署后，以 jiaoyan 用户在服务器执行：
    cd ~/jiaoyan-app/current/backend
    set -a; source ~/jiaoyan-app/config/app.env; set +a
@@ -17,3 +17,5 @@ Actions > Server preflight 可读取 Runner、磁盘、数据库连通性、syst
 
 ## 托管 Runner 未分配时
 主分支使用既有非 root 自托管 Runner 串行验证。临时 PostgreSQL 在 /tmp 私有 Unix socket 运行，与正式数据库分离；不读取 app.env、不调用真实 Qoder。仅使用服务器现有 Python 版本，Hosted CI 保留 3.10/3.12 矩阵。Playwright 使用本地缓存，若提示系统依赖不足，由管理员安装所提示的 Chromium 依赖（不得给 Runner sudo 权限）。任何测试失败均不进入 release.sh。截图上传失败不影响已验证的部署结果。自托管 Runner 仅用于可信 main，禁止不可信 PR 执行。
+
+公开仓库请严格审核外部 PR，禁止不可信工作流使用生产自托管 Runner；建议将生产部署 Runner 放在仅维护者可访问的私有部署仓库，避免公开仓库 PR 工作流攻击。不要在公开仓库或日志中存放生产密钥。
