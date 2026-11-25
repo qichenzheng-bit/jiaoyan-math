@@ -155,10 +155,13 @@ def similar(body:Draft,db:Session=Depends(get_db)):
     d=clean(body,db)
     query=canonical_text(d["content"])[:3000]
     rows=list(db.scalars(select(TeachingResource).where(TeachingResource.kind==body.kind,TeachingResource.fingerprint!=d["fingerprint"],TeachingResource.archived==False).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).limit(300)))
-    items=[]
+    exact_stems=list(db.scalars(select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.stem_key==d["stem_key"],TeachingResource.fingerprint!=d["fingerprint"],TeachingResource.archived==False).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).limit(10))) if body.kind=="question" else []
+    items=[{"resource":view(r),"similarity":1.0,"reason":"规范化题干相同，答案或解析不同","match_kind":"same_stem"} for r in exact_stems]
+    seen={r.id for r in exact_stems}
     for r in rows:
+        if r.id in seen:continue
         score=SequenceMatcher(None,query,canonical_text(r.content)[:3000]).ratio()
-        if score>=.75: items.append({"resource":view(r),"similarity":round(score,3),"reason":"题干或正文相似，答案、解析或标题可能不同"})
+        if score>=.75: items.append({"resource":view(r),"similarity":round(score,3),"reason":"题干或正文相似，答案、解析或标题可能不同","match_kind":"similar"})
     return {"items":sorted(items,key=lambda x:x["similarity"],reverse=True)[:10],"mode":"recent_python","scanned":len(rows),"scan_limit":300}
 
 @router.post("",dependencies=[Depends(require_origin)])

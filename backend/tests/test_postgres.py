@@ -113,6 +113,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert review.status_code==200,review.text
         match=next(x for x in review.json()["items"][0]["candidates"] if x["id"]==rid)
         assert match["kind"]=="same_stem" and match["appendable"]
+        manual_matches=client.post("/api/resources/similar",headers=origin,json={"kind":"question","title":"极限","content":"求极限","solution":"另一种解法"}).json()
+        assert any(c["resource"]["id"]==rid and c["match_kind"]=="same_stem" for c in manual_matches["items"])
         assert any(p["id"]==k["id"] for p in review.json()["items"][0]["knowledge"])
         choices=[{"uid":"new","action":"create"},{"uid":"same","action":"append","resource_id":rid,"resource_revision":match["revision"],"knowledge_ids":["missing"]}]
         count=client.get("/api/resources?kind=question").json()["total"]
@@ -243,6 +245,22 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get(edit_base+"/"+eid).json()["state"]=="accepted"
         assert any(t["id"]==eid and t["kind"]=="document_ai" and t["document_id"]==converted_doc["id"] and t["state"]=="accepted" for t in client.get("/api/tasks").json())
         assert client.post(edit_base,headers=origin,json=payload).status_code==409
+        # One continuous chat-source -> extraction -> supplement -> document edit -> bank registration chain.
+        final_doc=applied.json()
+        final_base="/api/documents/"+final_doc["id"]
+        final_uid=final_doc["blocks"][0]["uid"]
+        final_review=client.post(final_base+"/registration-preview",headers=origin,json={"revision":final_doc["revision"],"block_ids":[final_uid]})
+        assert final_review.status_code==200,final_review.text
+        final_match=next(c for c in final_review.json()["items"][0]["candidates"] if c["id"]==rid)
+        assert final_match["kind"]=="same_stem"
+        final_commit=client.post(final_base+"/registration-commit",headers=origin,json={"revision":final_doc["revision"],"items":[{"uid":final_uid,"action":"append","resource_id":rid,"resource_revision":final_match["revision"],"knowledge_ids":[k["id"]]}]})
+        assert final_commit.status_code==200,final_commit.text
+        snapshot=final_commit.json()["blocks"][0]["snapshot"]
+        assert snapshot["id"]==rid and snapshot["answer"]=="1" and "新解析" in snapshot["solution"]
+        assert final_commit.json()["source_id"]==created_doc["source_id"]
+        assert client.get(final_base+"/origin").json()["job_id"]==j["id"]
+        assert client.get(final_base+"/registration-history").json()[0]["count"]==1
+        assert any(x["id"]==rid for x in client.get("/api/knowledge/points/"+k["id"]+"/resources").json())
         monkeypatch.setattr(qoder,"request",fake_ingest)
         assert client.get("/api/documents/"+created_doc["id"]+"/origin").json() is None
         def failed_ingest(method,path,body=None):
