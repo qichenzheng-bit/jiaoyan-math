@@ -37,6 +37,9 @@ def answer(route):
         result=ai_doc
         if route.request.method=="PUT":
             result={**json.loads(route.request.post_data),"revision":2}
+    if p=="/documents/ai-demo/manual-save" and route.request.method=="POST":
+        body=json.loads(route.request.post_data)
+        result={**body,"revision":body["revision"]+1,"blocks":[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"code":"QNEW","kind":b["kind"],"id":"saved-"+b["uid"]}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]}
     if p=="/documents/ai-demo/ai-edits":result=[ai_edit]
     if p.endswith("/registration-history"):result=[]
     if p=="/documents/ai-demo/registration-preview":result=registration_preview
@@ -243,18 +246,18 @@ with sync_playwright() as p:
             page.get_by_role("button",name="编辑",exact=True).click()
             page.set_viewport_size({"width":393,"height":873})
             page.locator(".mobile-doc-card").wait_for()
-            page.locator(".mobile-doc-math .katex").first.wait_for()
+            page.locator(".manual-render .katex").first.wait_for()
             assert page.locator(".doc-canvas").count()==0
-            page.get_by_role("button",name="答案",exact=True).click()
-            page.locator(".mobile-doc-math .katex").first.wait_for()
+            assert page.get_by_role("button",name="AI 修改",exact=True).count()==0
+            assert page.get_by_role("button",name="原文对照",exact=True).count()==0
+            assert page.get_by_role("link",name="导出 PDF",exact=True).count()==0
             page.get_by_role("button",name="下一条",exact=True).click()
-            assert page.locator(".mobile-doc-card h2").inner_text()=="导数计算"
-            page.get_by_role("button",name="条目列表",exact=True).click()
-            assert page.locator(".mobile-doc-list-item").count()==4
-            page.locator(".mobile-doc-list-item").first.click()
-            page.get_by_role("button",name="原文对照",exact=True).click()
-            page.locator(".doc-origin-text .katex").first.wait_for()
-            page.get_by_role("button",name="返回当前条目").click()
+            assert page.locator(".mobile-doc-card h2").inner_text()=="第 2 题"
+            page.get_by_role("button",name="全部题目",exact=True).click()
+            assert page.locator(".manual-list-row").count()==4
+            page.get_by_role("button",name="整套预览",exact=True).click()
+            assert page.locator(".manual-render .katex").count()>0
+            page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.screenshot(path=str(OUT/"27-mobile-card.png"),full_page=False)
             page.get_by_role("button",name="切换 Word 版").click()
@@ -268,26 +271,45 @@ with sync_playwright() as p:
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
-    # Phone-first card entry: edit, save, switch layout, and keep the same document.
+    # Phone-first manual entry: structured inputs, no review, Word compatibility.
     page.set_viewport_size({"width":393,"height":873})
     page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
     page.locator(".mobile-doc-card").wait_for()
-    page.get_by_role("button",name="编辑当前字段").click()
-    page.get_by_label("当前字段编辑").fill(r"求 $\frac{1}{x}$ 的导数。")
-    page.locator(".mobile-doc-math .katex").first.wait_for()
-    assert page.get_by_role("button",name="保存草稿",exact=True).first.is_enabled()
+    page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")
+    page.locator(".manual-field-preview .katex").first.wait_for()
+    assert page.get_by_role("button",name="保存并入库",exact=True).first.is_enabled()
+    assert page.get_by_label("条目标题",exact=True).count()==0
     page.get_by_role("button",name="切换 Word 版").click()
     assert page.locator(".doc-sheet").get_by_text("的导数",exact=False).count()>0
     assert page.locator(".doc-sheet .katex").count()>0
     page.get_by_role("button",name="切换卡片版").click()
-    assert page.locator(".mobile-doc-math").get_by_text("的导数",exact=False).count()>0
-    page.get_by_role("button",name="保存草稿",exact=True).first.click()
-    page.get_by_text("已保存 · v2",exact=False).first.wait_for()
-    page.get_by_role("button",name="AI 修改",exact=True).click()
-    page.locator(".doc-ai-after .katex").first.wait_for()
-    page.get_by_role("button",name="返回当前条目").click()
-    page.get_by_role("button",name="批量审核",exact=True).click()
-    page.get_by_role("button",name="检查重复与知识点").wait_for()
+    assert page.get_by_label("题目",exact=True).input_value().endswith("的导数。")
+    page.get_by_role("button",name="＋ 单选题",exact=True).click()
+    page.get_by_label("题目",exact=True).fill("选择正确答案")
+    page.get_by_label("A 选项",exact=True).fill("$1$")
+    page.get_by_label("B 选项",exact=True).fill("$2$")
+    page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
+    page.locator(".manual-answer-choices").get_by_role("button",name="B",exact=True).click()
+    assert page.get_by_label("答案",exact=True).input_value()=="B"
+    page.get_by_label("题型",exact=True).select_option("多选题")
+    page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
+    assert page.get_by_label("答案",exact=True).input_value()=="AB"
+    page.get_by_role("button",name="＋ 填空题",exact=True).click()
+    page.get_by_label("题目",exact=True).fill("计算")
+    page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
+    assert "underline" in page.get_by_label("题目",exact=True).input_value()
+    page.get_by_role("button",name="＋ 解答题",exact=True).click()
+    page.get_by_label("题目",exact=True).fill("已知函数")
+    assert page.get_by_label("第 1 小问题目",exact=True).count()==0
+    page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
+    page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
+    page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
+    page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
+    page.get_by_role("button",name="整套预览",exact=True).click()
+    assert page.locator(".manual-list-row").count()==4
+    page.get_by_role("button",name="保存并入库",exact=True).first.click()
+    page.get_by_text("已保存并直接入库",exact=True).wait_for()
+    assert page.get_by_role("button",name="批量审核",exact=True).count()==0
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path=str(OUT/"28-mobile-review.png"),full_page=False)
     page.set_viewport_size({"width":1600,"height":900})

@@ -133,6 +133,30 @@ def test_migration_and_login(tmp_path, monkeypatch):
         record=client.get(base+"/registration-history/"+history[0]["id"]).json()
         assert record["entries"][1]["input"]["solution"]=="另一种解法"
         assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices}).status_code==409
+        # Phone entry saves the entire draft and registers it atomically, without review.
+        manual=reused.json()
+        manual_path="/api/documents/"+manual["id"]
+        draft_blocks=[
+            {"uid":"manual-heading","kind":"heading","title":"一、选择题"},
+            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"多选题","chapter":"矩阵","content":"选择正确项\\nA. 1\\nB. 2","answer":"AB","solution":"已知解析"},
+            {"uid":"manual-b","kind":"question","question_type":"解答题","content":"已知函数\\n(1) 求导数","answer":"(1) 2x","solution":"(1) 直接计算"},
+        ]
+        before_count=client.get("/api/resources?kind=question").json()["total"]
+        bad=client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":[*draft_blocks,{"uid":"bad","kind":"question","content":""}]})
+        assert bad.status_code==422
+        assert client.get("/api/resources?kind=question").json()["total"]==before_count
+        assert client.get(manual_path).json()["revision"]==manual["revision"]
+        saved=client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":draft_blocks})
+        assert saved.status_code==200,saved.text
+        assert saved.json()["blocks"][1]["snapshot"]["subject"]=="线性代数"
+        assert saved.json()["blocks"][1]["snapshot"]["chapter"]=="矩阵"
+        assert saved.json()["blocks"][1]["snapshot"]["answer"]=="AB"
+        assert saved.json()["blocks"][2]["snapshot"]["content"].endswith("(1) 求导数")
+        assert client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":draft_blocks}).status_code==409
+        assert client.get(manual_path+"/export").status_code==409
+        exported=client.get("/api/documents/source-export/"+manual["source_id"])
+        assert exported.status_code==200,exported.text
+        assert any(b.get("snapshot",{}).get("content","").startswith("选择正确项") for b in exported.json()["blocks"])
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto","video_model":"Auto","effort":"default","video_effort":"default"}
