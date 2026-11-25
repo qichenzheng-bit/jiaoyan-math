@@ -1,0 +1,2 @@
+# Pinned upstream runtime source
+Source: qichenzheng-bit/weiguang-math-V5 @ fec8a4f8c21b829a8f043a2c3538aff4cc48ea08. Five exact binary parts of a private Git archive. Unpack using deploy/unpack-video-source.sh. This is the original backend and rendering runtime, including prompt files; no deployed user database, secrets, or generated videos. CI verifies SHA256. The server receives the source in its release directory; no separate git clone is required.

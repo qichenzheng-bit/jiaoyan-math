@@ -25,3 +25,6 @@ label="application service active"; report systemctl --user is-active --quiet ji
 label="local application health"; report curl -fsS --max-time 3 http://127.0.0.1:8765/api/health
 label="local application readiness"; report curl -fsS --max-time 3 http://127.0.0.1:8765/api/ready
 echo "PENDING entries require configuration or inspection. This workflow does not deploy."
+
+label="pinned video source delivered"; report test -f "$base/current/video-engine-source/SOURCE_REVISION"
+label="independent video service active"; report systemctl is-active --quiet jiaoyan-video.service

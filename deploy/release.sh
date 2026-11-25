@@ -15,6 +15,8 @@ release="$base/releases/$sha-$(date +%s)"
 mkdir "$release"
 rsync -a --exclude=.git --exclude=node_modules --exclude=.venv --exclude=.env --exclude=data/ ./ "$release/"
 printf '%s\n' "$sha" > "$release/RELEASE_SHA"
+# Source delivery only: the non-root runner never installs privileged video services.
+bash "$release/deploy/unpack-video-source.sh" "$release/video-engine-source"
 python3 -m venv "$release/venv"
 "$release/venv/bin/python" -m pip install -r "$release/backend/requirements.txt"
 (cd "$release/frontend" && npm install --no-audit --no-fund && npm run build && rm -rf node_modules)
