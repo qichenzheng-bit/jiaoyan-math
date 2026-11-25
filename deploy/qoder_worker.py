@@ -17,16 +17,16 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 SOCKET = "/run/jiaoyan-qoder/worker.sock"
-AUTH_DOMAINS = ("qoder.com.cn", "qoder.com", "aliyun.com", "alibabacloud.com")
+AUTH_DOMAINS = ("qoder.cn", "qoder.com.cn", "qoder.com", "aliyun.com", "alibabacloud.com")
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 URL = re.compile(r"https://[^\s<>\x00-\x20\"']+")
 
 def executable():
-    found = shutil.which("qoderclicn")
+    found = shutil.which("qoderclicn") or shutil.which("qodercn")
     if found:
         return found
     home = Path.home()
-    for path in (home / ".qoder-cn/bin/qoderclicn/qoderclicn", home / ".qoder-cn/bin/qoderclicn", home / ".local/bin/qoderclicn"):
+    for path in (home / ".qoder-cn/bin/qoderclicn/qoderclicn", home / ".qoder-cn/bin/qoderclicn", home / ".local/bin/qoderclicn", home / ".local/bin/qodercn", home / ".qoder-cn/bin/qodercn"):
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)
     return None
@@ -135,6 +135,7 @@ def stop_process(proc):
 def login_worker(proc):
     global login_process
     deadline = time.monotonic() + 300
+    link_deadline = time.monotonic() + 45
     buffer = ""
     outcome = "failed"
     detail = "CLI 授权未完成；可重新发起或在服务器终端检查"
@@ -157,6 +158,9 @@ def login_worker(proc):
                 if proc.poll() is not None:
                     if proc.returncode == 0:
                         outcome, detail = "finished", "CLI 登录流程已结束，请验证模型确认授权有效"
+                    break
+                if time.monotonic() >= link_deadline and not authorization_url(buffer):
+                    outcome, detail = "failed", "CLI 未返回可识别的官方授权链接；请检查 CLI 版本及服务器网络后重试"
                     break
             else:
                 outcome, detail = "expired", "授权已超时，请重新发起"
@@ -211,7 +215,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 5, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 6, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at

@@ -6,6 +6,9 @@ spec.loader.exec_module(worker)
 
 def test_only_official_auth_links():
     assert worker.authorization_url("Open https://qoder.com.cn/auth/login?state=abc") == "https://qoder.com.cn/auth/login?state=abc"
+    assert worker.authorization_url("Open https://qoder.cn/auth/login?state=abc") == "https://qoder.cn/auth/login?state=abc"
+    assert worker.authorization_url("Open https://auth.qoder.cn/oauth?state=abc") == "https://auth.qoder.cn/oauth?state=abc"
+    assert not worker.authorization_url("https://qoder.cn.evil.example/auth?state=abc")
     assert not worker.authorization_url("https://qoder.com.cn.evil.example/auth?state=abc")
     assert not worker.authorization_url("https://qoder.com.cn@evil.example/auth?state=abc")
     assert not worker.authorization_url("http://qoder.com.cn/auth")
