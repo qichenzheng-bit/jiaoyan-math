@@ -22,7 +22,7 @@ def answer(route):
     result={
       "/auth/me":{"username":"预览管理员"},"/ready":{"status":"ok"},"/settings":{"display_name":"微光数学","theme":"light"},"/resources/subjects":subjects,
       "/knowledge/points":{"items":points,"total":len(points)},"/knowledge/relations":{"items":edges,"truncated":False},
-      "/documents/demo":doc,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
+      "/documents/demo":doc,"/resources/source-preview":source,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
       "/intelligence/jobs":[],"/chat/sessions/chat-demo":demo_chat,"/intelligence/chat-source/msg-user":{"message_id":"msg-user","session_id":"chat-demo","role":"user","text":demo_chat["messages"][0]["content"],"title":demo_chat["title"],"has_attachments":False},"/chat/sessions":[],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"models":[{"id":"Auto","label":"Auto"}]},"/qoder/preferences":{"model":"Auto"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
@@ -48,6 +48,13 @@ with sync_playwright() as p:
         if name=="01-intake":
             assert page.locator(".intake-entry").count()==4
             assert page.locator(".intake-flow-steps > div").count()==4
+        if name=="16-intake-document":
+            page.get_by_role("button",name="复用已有来源").click()
+            page.get_by_label("选择来源资料",exact=True).first.click()
+            page.locator(".math-choice-options").get_by_role("button").filter(has_text="SDEMO0001").click()
+            assert page.locator(".source-selected").is_visible()
+            assert page.get_by_label("录入批次名称").input_value()==source["title"]
+            page.screenshot(path=str(OUT/"21-source-reuse.png"),full_page=False)
         if name=="17-intake-knowledge":
             assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
         if name=="05-chat":

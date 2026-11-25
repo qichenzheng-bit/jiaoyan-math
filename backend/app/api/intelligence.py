@@ -19,6 +19,7 @@ class Start(BaseModel):
     text:str=Field(min_length=1,max_length=24000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
     source_message_id:str|None=Field(default=None,max_length=36)
+    source_id:str|None=Field(default=None,max_length=36)
     input_origin:Literal["manual","chat_draft"]="manual"
     intent:Literal["mixed","question","knowledge","document"]="mixed"
 class Review(BaseModel):
@@ -40,7 +41,7 @@ def parse_answer(text):
         result.append(b.model_dump())
     return result
 def view(j,full=False):
-    r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at")}
+    r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at","source_id")}
     r.update(provenance=j.provenance or {},retry_of=j.retry_of)
     if full:r.update(items=j.items,input_text=j.input_text)
     return r
@@ -92,6 +93,7 @@ def build_provenance(db,body):
 
 def launch(db,user,body,provenance,retry_of=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
+    if body.source_id:bank.active_source(db,body.source_id,True)
     prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。仅输出JSON数组，每项kind(question或knowledge),title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n学科："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
     intent=provenance.get("intent","mixed")
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
@@ -99,7 +101,7 @@ def launch(db,user,body,provenance,retry_of=None):
     if provenance.get("kind")=="chat_assistant":prompt+="\n来源是AI生成回复，不是原始文献；只能整理为待核对草稿。"
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"原文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"独立Qoder执行服务需升级至V3")
-    j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,provenance=provenance,retry_of=retry_of,revision=1,created_at=now(),updated_at=now())
+    j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,source_id=body.source_id,provenance=provenance,retry_of=retry_of,revision=1,created_at=now(),updated_at=now())
     db.add(j);audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()
     try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt})
     except HTTPException as e:
@@ -120,7 +122,7 @@ def retry(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(curre
     if j.state not in ("failed","stopped") or j.revision!=body.revision:
         raise HTTPException(409,"仅失败或已停止任务可重试，请刷新任务状态")
     provenance=j.provenance or {"kind":"manual","intent":"mixed"}
-    draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model)
+    draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model,source_id=j.source_id)
     return launch(db,user,draft,provenance,retry_of=j.id)
 
 @router.post("/jobs/{id}/stop",dependencies=[Depends(require_origin)])
@@ -143,8 +145,8 @@ def convert(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(cur
     bank.admin_lock(db,user);j=get_job(db,id)
     if j.document_id:return {"document_id":j.document_id}
     if j.state!="review" or j.revision!=body.revision or not j.items:raise HTTPException(409,"请先审核草稿")
-    draft=docs.Draft(title=j.title,subject=j.subject,blocks=j.items)
-    d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=None,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
+    draft=docs.Draft(title=j.title,subject=j.subject,source_id=j.source_id,blocks=j.items)
+    d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=j.source_id,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.convert",user.id);db.commit();return {"document_id":d.id}
 
 class PDFRequest(BaseModel):

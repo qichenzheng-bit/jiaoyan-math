@@ -85,10 +85,11 @@ def references(db,d):
     for id in existing-files:db.delete(db.get(FileReference,(id,"teaching_document",d.id)))
     for id in files-existing:storage.link_file(db,id,"teaching_document",d.id)
 @router.get("")
-def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["intake","handout","paper"]|None=None,limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["intake","handout","paper"]|None=None,source_id:str|None=Query(None,max_length=36),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
     stmt=select(Doc).where(Doc.archived==archived)
     if q.strip():stmt=stmt.where(Doc.title.contains(q.strip(),autoescape=True))
     if kind:stmt=stmt.where(Doc.kind==kind)
+    if source_id:stmt=stmt.where(Doc.source_id==source_id)
     return {"items":[summary(d) for d in db.scalars(stmt.order_by(Doc.updated_at.desc(),Doc.id).offset(offset).limit(limit))],"total":db.scalar(select(func.count()).select_from(stmt.subquery()))}
 @router.post("",dependencies=[Depends(require_origin)])
 def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -118,7 +119,8 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
     if not block:raise HTTPException(404,"文档块不存在")
     if block["kind"]=="reference":return public(d)
     if block["kind"] not in ("question","knowledge") or not block["title"].strip() or not block["content"].strip():raise HTTPException(422,"只能将完整题目或知识单元入库")
-    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject,content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
+    source=bank.active_source(db,d.source_id) if body.bind_source and d.source_id else None
+    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject,exam_type=source.exam_type if source else "",content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
     values=bank.clean(draft,db);bank.guard_duplicate(db,values)
     primary=values.pop("source_id")
     r=Resource(id=str(uuid4()),code=bank.new_code(db,draft.kind),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
@@ -144,7 +146,9 @@ def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(cu
 class SetupRequest(BaseModel):
     title:str=Field(min_length=1,max_length=200)
     subject:str=Field(default="",max_length=40)
-    source_type:Literal["exam","textbook","handout"]
+    source_type:Literal["exam","textbook","handout"]="exam"
+    existing_source_id:str|None=Field(default=None,max_length=36)
+    edition:str=Field(default="",max_length=60)
     exam_type:str=Field(default="",max_length=80)
     year:str=Field(default="",max_length=12)
     nature:str=Field(default="",max_length=60)
@@ -154,11 +158,16 @@ class SetupRequest(BaseModel):
 @router.post("/setup",dependencies=[Depends(require_origin)])
 def setup(body:SetupRequest,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user)
+    if not body.title.strip():raise HTTPException(422,"录入批次标题不能为空")
     text="\n".join(x for x in (body.nature,body.note,body.intro) if x.strip()) or body.title
-    data=bank.clean(bank.Draft(kind="source",title=body.title,subject=body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.nature),db)
-    bank.guard_duplicate(db,data)
-    s=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
-    db.add(s);db.flush();bank.snapshot(db,s)
+    if body.existing_source_id:
+        s=bank.active_source(db,body.existing_source_id,True)
+    else:
+        data=bank.clean(bank.Draft(kind="source",title=body.title,subject=body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.edition),db)
+        bank.guard_duplicate(db,data)
+        bank.guard_source_identity(db,data)
+        s=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+        db.add(s);db.flush();bank.snapshot(db,s)
     blocks=[Block(uid=str(uuid4()),kind="text",content=body.intro).model_dump()] if body.intro.strip() else []
     d=Doc(id=str(uuid4()),title=body.title.strip(),kind="intake",subject=normalize_subject(body.subject),source_id=s.id,blocks=blocks,revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();references(db,d);audit(db,"document.setup",user.id);db.commit();return public(d)

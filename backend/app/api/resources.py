@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text
-from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference
+from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob
 from app.services import storage
 
 router=APIRouter(prefix="/resources",tags=["resources"],dependencies=[Depends(current_user)])
@@ -84,6 +84,26 @@ def exact(db,d,exclude=None):
     stmt=select(TeachingResource).where(TeachingResource.kind==d["kind"],TeachingResource.fingerprint==d["fingerprint"])
     if exclude: stmt=stmt.where(TeachingResource.id!=exclude)
     return stmt
+def source_identity_matches(db,data,exclude=None):
+    """Source identity is independent of notes and extracted text. Unknown metadata is not evidence of a distinct edition."""
+    if data["kind"]!="source":return []
+    stmt=select(TeachingResource).where(TeachingResource.kind=="source",TeachingResource.source_type==data["source_type"])
+    if exclude:stmt=stmt.where(TeachingResource.id!=exclude)
+    def compatible(a,b):
+        a,b=canonical_text(a),canonical_text(b)
+        return not a or not b or a==b
+    return [r for r in db.scalars(stmt) if canonical_text(r.title)==canonical_text(data["title"])
+            and all(compatible(getattr(r,k),data[k]) for k in ("cohort_year","exam_type","edition","series_key"))][:20]
+
+def guard_source_identity(db,data,exclude=None):
+    if source_identity_matches(db,data,exclude):
+        raise HTTPException(409,"存在同名且资料信息相符的来源（含归档资料），请先复用或核对年份、考试类别、版次。备注不同不能作为新建依据。")
+
+def active_source(db,ident,lock=False):
+    src=existing(db,ident,lock)
+    if src.kind!="source" or src.archived:raise HTTPException(422,"请选择未归档的来源资料")
+    return src
+
 def guard_duplicate(db,d,exclude=None):
     if db.scalar(exact(db,d,exclude).limit(1)):
         if not d["dedup_override"] or not d["dedup_reason"]:
@@ -121,6 +141,10 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
     rows=db.scalars(select(TeachingResource).where(*filters).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).offset(offset).limit(limit))
     return {"items":[view(r) for r in rows],"total":total}
 
+@router.post("/source-matches",dependencies=[Depends(require_origin)])
+def source_matches(body:Draft,db:Session=Depends(get_db)):
+    return [view(r) for r in source_identity_matches(db,clean(body,db))]
+
 @router.post("/duplicates",dependencies=[Depends(require_origin)])
 def duplicates(body:Draft,db:Session=Depends(get_db)):
     return [view(r) for r in db.scalars(exact(db,clean(body,db)).limit(20))]
@@ -141,6 +165,7 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     admin_lock(db,user)
     d=clean(body,db)
     guard_duplicate(db,d)
+    guard_source_identity(db,d)
     primary=d.pop("source_id")
     row=TeachingResource(id=str(uuid4()),code=new_code(db,body.kind),**d,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(row);db.flush()
@@ -159,6 +184,7 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if body.revision!=row.revision: raise HTTPException(409,"资源已修改，请重新加载")
     d=clean(body,db)
     if d["fingerprint"]!=row.fingerprint: guard_duplicate(db,d,id)
+    if row.kind=="source" and any(d[k]!=getattr(row,k) for k in ("title","source_type","cohort_year","exam_type","edition","series_key")):guard_source_identity(db,d,id)
     primary=d.pop("source_id")
     for k,v in d.items(): setattr(row,k,v)
     if row.source_id!=primary: change_primary(db,row,primary)
@@ -168,6 +194,8 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
 def set_archived(db,row,value,user):
     if row.archived==value: return view(row)
     if value and row.kind=="source":
+        if db.scalar(select(IntakeJob.id).where(IntakeJob.source_id==row.id,IntakeJob.state.in_(("running","review"))).limit(1)):
+            raise HTTPException(409,"来源仍被待处理录入任务使用，请先完成或停止任务")
         if db.scalar(select(DocumentResourceReference.document_id).where(DocumentResourceReference.resource_id==row.id).limit(1)):
             raise HTTPException(409,"来源已被文档引用，请先解除绑定")
         if db.scalar(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==row.id).limit(1)):

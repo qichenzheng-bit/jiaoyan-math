@@ -192,6 +192,7 @@ class IntakeJob(Base):
     subject: Mapped[str]=mapped_column(String(40))
     input_text: Mapped[str]=mapped_column(Text)
     provenance: Mapped[dict | None]=mapped_column(JSON,nullable=True)
+    source_id: Mapped[str | None]=mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),nullable=True,index=True)
     retry_of: Mapped[str | None]=mapped_column(ForeignKey("intake_jobs.id",ondelete="RESTRICT"),nullable=True,unique=True)
     model: Mapped[str]=mapped_column(String(80))
     state: Mapped[str]=mapped_column(String(16))

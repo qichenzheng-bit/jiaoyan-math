@@ -38,6 +38,15 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert created_doc["blocks"][0]["content"]=="卷头说明"
         assert client.get("/api/resources/"+created_doc["source_id"]).json()["source_type"]=="exam"
         assert client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"卷头说明"}).status_code==409
+        assert client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"不同备注"}).status_code==409
+        match=client.post("/api/resources/source-matches",headers=origin,json={"kind":"source","title":"UI录入测试","source_type":"exam","cohort_year":"2026","content":"其他说明"})
+        assert match.status_code==200 and match.json()[0]["id"]==created_doc["source_id"]
+        reused=client.post("/api/documents/setup",headers=origin,json={"title":"第二批","subject":"高等数学","existing_source_id":created_doc["source_id"]})
+        assert reused.status_code==200,reused.text
+        assert reused.json()["source_id"]==created_doc["source_id"]
+        assert client.get("/api/documents?kind=intake&source_id="+created_doc["source_id"]).json()["total"]==2
+        assert client.post("/api/resources",headers=origin,json={"kind":"source","title":"UI录入测试","source_type":"exam","cohort_year":"2026","content":"不同文本"}).status_code==409
+        assert client.post("/api/resources",headers=origin,json={"kind":"source","title":"UI录入测试","source_type":"exam","cohort_year":"2027","content":"下一年"}).status_code==200
         assert client.get("/api/files").status_code == 200
         upload = client.post("/api/files?name=notes.txt", headers=origin, content=b"test file")
         assert upload.status_code == 200, upload.text
@@ -139,7 +148,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
             if path=="/chat/start":return {"state":"running"}
             return {"state":"done","answer":'[{"kind":"question","title":"测试提取","content":"求极限"}]'}
         monkeypatch.setattr(qoder,"request",fake_ingest)
-        job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"提取测试","text":"求极限","subject":"高数","source_message_id":user_message["id"],"intent":"question"})
+        job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"提取测试","text":"求极限","subject":"高数","source_message_id":user_message["id"],"intent":"question","source_id":created_doc["source_id"]})
         assert job.status_code==200,job.text
         j=client.get("/api/intelligence/jobs/"+job.json()["id"]).json()
         assert j["provenance"]["kind"]=="chat_user"
@@ -147,10 +156,12 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert j["provenance"]["edited"] is True
         assert j["provenance"]["intent"]=="question"
         assert client.post("/api/intelligence/jobs/"+j["id"]+"/retry",headers=origin,json={"revision":j["revision"]}).status_code==409
-        assert j["state"]=="review"
+        assert j["state"]=="review" and j["source_id"]==created_doc["source_id"]
         converted=client.post("/api/intelligence/jobs/"+j["id"]+"/document",headers=origin,json={"revision":j["revision"]})
         assert converted.status_code==200,converted.text
-        assert client.get("/api/documents/"+converted.json()["document_id"]).json()["blocks"][0]["kind"]=="question"
+        converted_doc=client.get("/api/documents/"+converted.json()["document_id"]).json()
+        assert converted_doc["blocks"][0]["kind"]=="question"
+        assert converted_doc["source_id"]==created_doc["source_id"]
         def failed_ingest(method,path,body=None):
             if path=="/status":return {"chat_available":True}
             if path=="/chat/start":return {"state":"running"}
