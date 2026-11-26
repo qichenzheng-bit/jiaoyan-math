@@ -13,7 +13,7 @@ import ChatText from './ChatText'
 import InlineMathEditor,{InlineImageUpload} from '../components/InlineMathEditor'
 import {QuestionFields,KnowledgePoints,resourceQuestionTypes,displayQuestionType} from '../components/ManualIntakeCards'
 type Kind='question'|'knowledge'|'source'
-type Draft={kind:Kind;title:string;subject:string;content:string;answer:string;solution:string;tags:string[];source_id:string|null;exam_type:string;chapter:string;question_type:string;difficulty?:string;unit_type:string;analysis:string;proof:string;exams:string[];source_type:string;authority_tier:string;cohort_year:string;series_key:string;edition:string;revision?:number;dedup_override?:boolean;dedup_reason?:string}
+type Draft={question_data?:import('../components/questionData').QuestionData|null;kind:Kind;title:string;subject:string;content:string;answer:string;solution:string;tags:string[];source_id:string|null;exam_type:string;chapter:string;question_type:string;difficulty?:string;unit_type:string;analysis:string;proof:string;exams:string[];source_type:string;authority_tier:string;cohort_year:string;series_key:string;edition:string;revision?:number;dedup_override?:boolean;dedup_reason?:string}
 type Resource=Draft&{id:string;code:string;archived:boolean;sources_revision:number}
 const labels={question:'题目',knowledge:'知识单元',source:'来源资料'}
 const blank=(kind:Kind='question'):Draft=>({kind,title:'',subject:'',content:'',answer:'',solution:'',tags:[],source_id:null,exam_type:'',chapter:'',question_type:'',unit_type:'',analysis:'',proof:'',exams:[],source_type:'',authority_tier:'',cohort_year:'',series_key:'',edition:''})

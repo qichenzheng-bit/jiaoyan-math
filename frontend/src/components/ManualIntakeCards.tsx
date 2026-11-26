@@ -13,11 +13,13 @@ import InlineMathEditor from './InlineMathEditor'
 import './ManualWordWork.css'
 import {PrintableDocument} from '../pages/DocumentPrint'
 import {SolutionFields} from './StructuredSolutionFields'
+import StructuredQuestionEditor from './StructuredQuestionEditor'
+import {currentQuestionData,type QuestionData} from './questionData'
 
 export const questionTypes=['选择题','填空题','综合题']
 export const resourceQuestionTypes=['选择题','单选题','多选题','填空题','综合题']
 export const displayQuestionType=(type:string)=>['解答题','计算题','证明题'].includes(type)?'综合题':type
-type QuestionValue={subject?:string|null;chapter:string;question_type:string;difficulty?:string;content:string;answer:string;solution:string}
+type QuestionValue={subject?:string|null;chapter:string;question_type:string;difficulty?:string;content:string;answer:string;solution:string;question_data?:QuestionData|null}
 type Props={value:QuestionValue;subject:string;subjects:string[];locked:boolean;onChange:(p:Partial<QuestionValue>)=>void;knowledge?:ReactNode;contentOnly?:boolean}
 function marked(text:string,pattern:RegExp){
  const parts:Record<string,string>={},order:string[]=[]
@@ -42,7 +44,12 @@ function combineSubStem(main:string,parts:Record<string,string>,keys:string[]){
 function Field(props:{label:string;value:string;onChange:(v:string)=>void;locked:boolean;placeholder?:string;rows?:number}){
  return <InlineMathEditor {...props}/>
 }
-export function QuestionFields({value,subject,subjects,locked,onChange,knowledge,contentOnly=false}:Props){
+export function QuestionFields(props:Props){
+ const data=currentQuestionData(props.value.question_data,props.value)
+ if(data)return <StructuredQuestionEditor {...props} data={data}/>
+ return <>{!!props.value.question_data?.warnings?.length&&<p className="muted" role="status">{props.value.question_data.warnings.join('；')}</p>}<LegacyQuestionFields {...props}/></>
+}
+function LegacyQuestionFields({value,subject,subjects,locked,onChange,knowledge,contentOnly=false}:Props){
  const type=['单选题','多选题','选择题'].includes(value.question_type)?'选择题':value.question_type==='填空题'?'填空题':'综合题',choice=type==='选择题',fill=type==='填空题',big=!choice&&!fill
  const options=marked(value.content,choicesPattern),sub=marked(value.content,subPattern),answers=marked(value.answer,subPattern),solutions=marked(value.solution,subPattern)
  const [optionCount,setOptionCount]=useState(Math.max(4,...options.order.map(k=>k.charCodeAt(0)-64))),[subCount,setSubCount]=useState(Math.max(0,...[...sub.order,...answers.order,...solutions.order].map(Number)))

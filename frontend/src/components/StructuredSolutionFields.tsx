@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react'
 import InlineMathEditor from './InlineMathEditor'
 import {confirmAction} from './WorkspaceConfirm'
 type Method={body:string;recommended:boolean}
-const header=/^###\s*(※\s*)?解法[一二三四五六七八九十\d]+[：:]?\s*$/
+const header=/^###\s*(※\s*)?(?:解法|方法)[一二三四五六七八九十\d]+[：:]?\s*$/
 const numerals=['一','二','三','四','五','六','七','八','九','十']
 function read(raw:string):Method[]{
  const rows:Method[]=[];let current:Method|undefined
@@ -16,7 +16,7 @@ function read(raw:string):Method[]{
 }
 function write(rows:Method[]){
  if(rows.length===1)return rows[0].body
- return rows.map((m,i)=>'### '+(m.recommended?'※ ':'')+'解法'+(numerals[i]??String(i+1))+'\n'+m.body).join('\n\n')
+ return rows.map((m,i)=>'### '+(m.recommended?'※ ':'')+'方法'+(numerals[i]??String(i+1))+'\n'+m.body).join('\n\n')
 }
 export function SolutionFields({label,value,locked,onChange}:{label:string;value:string;locked:boolean;onChange:(v:string)=>void}){
  const [rows,setRows]=useState(()=>read(value)),[raw,setRaw]=useState(false)

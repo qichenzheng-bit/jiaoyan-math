@@ -1,4 +1,5 @@
 import {MathChoice} from '../components/MathText'
+import type {QuestionData} from '../components/questionData'
 import {useEffect,useRef,useState} from 'react'
 import {Link,useSearchParams,useNavigate} from 'react-router-dom'
 import {useWorkspaceGuard,useWorkspaceBack,handleWorkspaceBack} from '../components/WorkspaceNavigation'
@@ -11,8 +12,8 @@ import AssemblyPicker from '../components/AssemblyPicker'
 import {confirmAction} from '../components/WorkspaceConfirm'
 export type CardPanel='card'|'list'|'tools'
 export type Kind='heading'|'text'|'question'|'knowledge'|'reference'|'image'|'pagebreak'
-export type R={id:string;unit_type?:string;code:string;kind:string;revision?:number;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string;subject?:string;question_type?:string;difficulty?:string;tags?:string[]}
-export type Block={dedup_reason?:string;edit_reference_revision?:number|null;heading_level?:1|2|null;score?:number;uid:string;kind:Kind;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;subject?:string|null;knowledge_tags?:string[];reuse_resource_id?:string|null;reuse_revision?:number|null;reuse_code?:string;fork_from_id?:string|null;chapter:string;question_type:string;difficulty?:string;unit_type:string;resource_id:string|null;file_id:string|null;width:number;snapshot?:R}
+export type R={question_data?:QuestionData|null;id:string;unit_type?:string;code:string;kind:string;revision?:number;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string;subject?:string;question_type?:string;difficulty?:string;tags?:string[]}
+export type Block={question_data?:QuestionData|null;dedup_reason?:string;edit_reference_revision?:number|null;heading_level?:1|2|null;score?:number;uid:string;kind:Kind;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;subject?:string|null;knowledge_tags?:string[];reuse_resource_id?:string|null;reuse_revision?:number|null;reuse_code?:string;fork_from_id?:string|null;chapter:string;question_type:string;difficulty?:string;unit_type:string;resource_id:string|null;file_id:string|null;width:number;snapshot?:R}
 type Summary={id:string;title:string;kind:'intake'|'handout'|'paper'|'textbook';subject:string;source_id:string|null;revision:number;archived:boolean}
 export type Doc=Summary&{blocks:Block[]}
 
@@ -44,7 +45,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  useWorkspaceBack(()=>{if(busy)return true;if(review||result){setReview(undefined);setResult(undefined);choose('');return true}if(picker==='append'){setPicker(null);return true}if(doc&&!picker&&selected){choose('');return true}return false})
  function choose(uid:string){if(imageUploading.current)return;setCardPanel(!uid?'list':'card');setSelected(uid)}
  function update(p:Partial<Doc>){setDoc(d=>d&&({...d,...p}));setDirty(true)}
- function editBlock(p:Partial<Block>){if(!doc||!block||doc.archived||(busy&&!imageUploading.current))return;const changed=['content','answer','solution','title','proof','subject','chapter','unit_type','question_type'].some(k=>Object.hasOwn(p,k));setDoc(d=>d&&({...d,blocks:d.blocks.map(b=>b.uid===selected?{...b,...(changed?{dedup_reason:''}:{}),...p}:b)}));setDirty(true)}
+ function editBlock(p:Partial<Block>){if(!doc||!block||doc.archived||(busy&&!imageUploading.current))return;const changed=['content','answer','solution','title','proof','subject','chapter','unit_type','question_type'].some(k=>Object.hasOwn(p,k));setDoc(d=>d&&({...d,blocks:d.blocks.map(b=>b.uid===selected?{...b,...(changed?{dedup_reason:'',...(['content','answer','solution','question_type'].some(k=>Object.hasOwn(p,k))&&!Object.hasOwn(p,'question_data')?{question_data:null}:{})}:{}),...p}:b)}));setDirty(true)}
  function insert(b:Block){if(!doc||doc.archived)return;if(doc.blocks.length>=200){setMessage('文档已达到 200 个条目，请拆分。');return}const i=doc.blocks.findIndex(x=>x.uid===selected);const bs=[...doc.blocks];bs.splice(i<0?bs.length:i+1,0,b);update({blocks:bs});choose(b.uid)}
  function move(delta:number){if(!doc||!block||locked)return;const i=doc.blocks.indexOf(block),j=i+delta;if(j<0||j>=doc.blocks.length)return;const bs=[...doc.blocks];[bs[i],bs[j]]=[bs[j],bs[i]];update({blocks:bs})}
  function reorder(uid:string,target:string){if(!doc||locked||uid===target)return;const from=doc.blocks.findIndex(b=>b.uid===uid),to=doc.blocks.findIndex(b=>b.uid===target);if(from<0||to<0)return;const bs=[...doc.blocks];const [item]=bs.splice(from,1);bs.splice(to,0,item);update({blocks:bs});choose(uid)}

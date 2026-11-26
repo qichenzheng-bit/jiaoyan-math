@@ -11,7 +11,7 @@ import ExecutionTrace from '../components/ExecutionTrace'
 import IntakeSupplement from '../components/IntakeSupplement'
 import {DuplicateMatches,QuestionFields,type MatchResource} from '../components/ManualIntakeCards'
 import './WorkReview.css'
-type Item={uid:string;kind:'question'|'knowledge';title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string;question_type:string;unit_type:string;subject?:string|null;knowledge_tags?:string[];difficulty?:string;reuse_resource_id?:string|null;reuse_revision?:number|null;reuse_code?:string|null;fork_from_id?:string|null;dedup_reason?:string}
+type Item={question_data?:import('../components/questionData').QuestionData|null;uid:string;kind:'question'|'knowledge';title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string;question_type:string;unit_type:string;subject?:string|null;knowledge_tags?:string[];difficulty?:string;reuse_resource_id?:string|null;reuse_revision?:number|null;reuse_code?:string|null;fork_from_id?:string|null;dedup_reason?:string}
 type PageField='content'|'answer'|'solution'|'proof'
 type PageMap=Record<string,Partial<Record<PageField,number>>>
 type AppendTarget={id:string;title:string;revision:number;block_count:number;available:boolean}
@@ -61,7 +61,7 @@ export default function Intelligence(){
  const approvals=job?.reviewed_uids??[],approved=new Set(approvals),done=items.filter(b=>approved.has(b.uid)).length
  function choose(uid:string){setCurrent(uid);setEditing(false);setAnswerOpen(false);setSourceTab('edit');setDesktopTab('matches')}
  async function save(nextItems=items,nextApproved=approvals){if(!job)return;setSaving(true);setSaveError('');try{const j=await api<Job>(endpoint(job.id),{method:'PUT',body:JSON.stringify({revision:job.revision,items:nextItems,reviewed_uids:nextApproved,...(job.provenance?.confirmed_pages?{confirmed_pages:Object.fromEntries(Object.entries(job.provenance.confirmed_pages).filter(([uid])=>nextItems.some(x=>x.uid===uid)))}:{})})});setJob(j);setDirty(false);window.dispatchEvent(new Event('wg-recent-changed'));return j}catch(e){setSaveError(e instanceof Error?e.message:'保存失败');throw e}finally{setSaving(false)}}
- function patch(uid:string,fields:Partial<Item>){setSaveError('');setJob(j=>j&&({...j,reviewed_uids:(j.reviewed_uids??[]).filter(x=>x!==uid),items:j.items.map(b=>b.uid===uid?{...b,...fields}:b)}));setDirty(true)}
+ function patch(uid:string,fields:Partial<Item>){setSaveError('');setJob(j=>j&&({...j,reviewed_uids:(j.reviewed_uids??[]).filter(x=>x!==uid),items:j.items.map(b=>b.uid===uid?{...b,...(['content','answer','solution','question_type'].some(k=>Object.hasOwn(fields,k))&&!Object.hasOwn(fields,'question_data')?{question_data:null}:{}),...fields}:b)}));setDirty(true)}
  function confirmPage(field:PageField,page:number){if(!active||busy)return;setJob(j=>j&&({...j,reviewed_uids:(j.reviewed_uids??[]).filter(uid=>uid!==active.uid),provenance:{...j.provenance,confirmed_pages:{...j.provenance?.confirmed_pages,[active.uid]:{...j.provenance?.confirmed_pages?.[active.uid],[field]:page}}}}));setDirty(true)}
  function change(uid:string,k:keyof Item,v:string){patch(uid,{dedup_reason:'',[k]:k==='knowledge_tags'?v.split(/[,，、]/).map(x=>x.trim()).filter(Boolean).slice(0,20):v})}
  async function chooseMatch(r:MatchResource,reuse:boolean){
