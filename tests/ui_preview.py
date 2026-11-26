@@ -18,6 +18,7 @@ demo_chat={"id":"chat-demo","title":"录入建议示例","project":"","pinned":F
  "messages":[{"id":"msg-user","role":"user","content":"请录入一道题：求 $x^2$ 的导数。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[]},
  {"id":"msg-ai","role":"assistant","content":"可以整理为题目草稿，请确认。\n\n### 解法说明\n\n| 方法 | 结果 |\n| --- | --- |\n| 幂函数 | $2x$ |\n\n"+'```wg-card\n{"type":"comparison","title":"解法对比","items":[{"label":"方法一","text":"直接求导"},{"label":"方法二","text":"定义法"}]}\n```',"state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[],"intake_intent":"question"}]}
 review_job={"id":"review-demo","title":"补充示例","state":"review","detail":"待人工核对","revision":1,"document_id":None,"input_text":"求导数","items":[{"uid":"review-item","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"","solution":"","analysis":"","proof":"","chapter":"","question_type":"","unit_type":""}]}
+review_clean={**review_job,"id":"review-clean","reviewed_uids":[],"items":[{**review_job["items"][0],"answer":"$2x$","solution":"幂函数求导"}]}
 review_suggestion={"id":"supplement-demo","job_id":"review-demo","item_uid":"review-item","base_revision":1,"fields":["answer","solution"],"state":"review","detail":"AI生成待确认","proposal":{"answer":"$2x$","solution":r"利用幂函数求导公式，$(x^2)'=2x$。"},"accepted":[],"model":"Auto"}
 ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"$2x$","solution":"","analysis":"","proof":"","chapter":"","question_type":"解答题","unit_type":"","resource_id":None,"file_id":None,"width":100}]}
 ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["solution"],"instruction":"逐步推导","model":"Auto","state":"review","detail":"待确认","change_count":1,"changes":[{"uid":"ai-q1","field":"solution","before":"","after":r"由幂函数求导公式，$(x^2)'=2x$。"}],"accepted":[]}
@@ -95,6 +96,13 @@ def answer(route):
     if p=="/documents/ai-demo/ai-edits/edit-demo":result=ai_edit
     if p=="/intelligence/jobs/review-demo":result=review_job
     if p=="/intelligence/jobs/review-demo/supplements":result=[review_suggestion]
+    if p=="/intelligence/jobs/review-clean":
+        if route.request.method=="PUT":
+            data=route.request.post_data_json
+            assert data["revision"]==review_clean["revision"]
+            review_clean.update(items=data["items"],reviewed_uids=data["reviewed_uids"],revision=review_clean["revision"]+1)
+        result=review_clean
+    if p=="/intelligence/jobs/review-clean/supplements":result=[]
     if p=="/files" and route.request.method=="POST":
         name=q.get("name",["demo.tex"])[0]
         result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}
@@ -654,6 +662,25 @@ with sync_playwright() as p:
         if GROUP in {'all','mobile'}:
             print('UI case: compact phone composition and production navigation',flush=True)
             page.set_viewport_size({"width":393,"height":873})
+            visit(page,"/work?job=review-clean&review=1",".wg-review-editor .katex")
+            expect(page.get_by_role("button",name="通过并继续",exact=True)).to_be_enabled()
+            expect(page.get_by_role("button",name="确认生成录入文档",exact=True)).to_be_disabled()
+            page.get_by_role("button",name="原始资料",exact=True).click()
+            expect(page.locator(".wg-review-source")).to_be_visible()
+            expect(page.locator(".wg-review-editor")).not_to_be_visible()
+            page.get_by_role("button",name="识别结果",exact=True).click()
+            page.get_by_role("button",name="通过并继续",exact=True).click()
+            expect(page.get_by_role("button",name="确认生成录入文档",exact=True)).to_be_enabled()
+            visit(page,"/work?job=review-clean&review=1",".wg-review-editor .katex")
+            expect(page.get_by_role("button",name="确认生成录入文档",exact=True)).to_be_enabled()
+            page.get_by_role("button",name="修改",exact=True).click()
+            page.get_by_label("标题",exact=True).fill("修订后的标题")
+            expect(page.get_by_role("button",name="确认生成录入文档",exact=True)).to_be_disabled()
+            page.get_by_role("button",name="保存审核",exact=True).click()
+            expect(page.get_by_role("button",name="保存审核",exact=True)).to_be_disabled()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+            page.get_by_role("button",name="返回上一步",exact=True).click()
+            expect(page.locator(".wg-work-result")).to_be_visible()
             visit(page,"/project/teaching",".project-hub")
             page.get_by_role("button",name="返回上一步",exact=True).click()
             expect(page).to_have_url("http://127.0.0.1:4173"+"/")
