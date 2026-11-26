@@ -153,6 +153,26 @@ export default function ManualIntakeCards({doc,selected,panel,subjects,dirty,bus
  const questionNumber=(b:Block)=>doc.blocks.slice(0,doc.blocks.indexOf(b)+1).filter(x=>x.kind==='question'||x.snapshot?.kind==='question').length
  useEffect(()=>{if(panel!=='list')setPreview(false)},[panel])
  useEffect(()=>{if(desktop&&!desktopPreview&&selected)document.getElementById('manual-word-'+selected)?.scrollIntoView({block:'nearest',inline:'nearest'})},[desktop,desktopPreview,selected])
+ // Listen across the workbench, not just the paper: the outline, gutters,
+ // and surrounding whitespace are all outside the active question card.
+ useEffect(()=>{
+  if(!desktop||desktopPreview||!selected||busy)return
+  const outside=(event:MouseEvent)=>{
+   const target=event.target instanceof Element?event.target:event.target instanceof Node?event.target.parentElement:null
+   if(!target)return
+   // Clicking another question switches directly to its editor. Keep
+   // toolbar, outline, duplicate-match actions and form controls functional.
+   if(target.closest('[data-word-block],button,a,input,select,textarea,label,summary,[role="button"],[role="link"],[contenteditable="true"]'))return
+   const active=document.activeElement
+   const card=document.getElementById('manual-word-'+selected)
+   if(active instanceof HTMLElement&&card?.contains(active))active.blur()
+   onSelect('')
+  }
+  // The click phase follows the formula editor's pointerdown/blur commit.
+  // Capture also handles surrounding UI which stops click propagation.
+  document.addEventListener('click',outside,true)
+  return()=>document.removeEventListener('click',outside,true)
+ },[desktop,desktopPreview,selected,busy,onSelect])
  function chooseMatch(r:MatchResource,reuse:boolean){
   if(block?.content.trim()&&block.content!==r.content&&!window.confirm('使用候选题的题干、答案和解析替换当前草稿？'))return
   onEdit({content:r.content,answer:r.answer,solution:r.solution,subject:r.subject,chapter:r.chapter,question_type:r.question_type||'',difficulty:r.difficulty??'',title:'',analysis:'',knowledge_tags:r.knowledge_tags??r.tags??[],reuse_resource_id:reuse?r.id:null,reuse_revision:reuse?r.revision:null,reuse_code:reuse?r.code:undefined,fork_from_id:reuse?null:r.id})
@@ -192,7 +212,7 @@ export default function ManualIntakeCards({doc,selected,panel,subjects,dirty,bus
    <div className="manual-word-toolbar manual-word-insert">{production?<button type="button" disabled={locked} onClick={onPick}>＋ 继续选题</button>:<>{questionTypes.map(t=><button key={t} type="button" disabled={locked} onClick={()=>{setDesktopPreview(false);newItem('question',t)}}>＋ {t}</button>)}<button type="button" disabled={locked} onClick={()=>{setDesktopPreview(false);newItem('knowledge')}}>＋ 知识单元</button></>}<button type="button" disabled={locked} onClick={()=>{setDesktopPreview(false);newItem('heading',undefined,1)}}>＋ 章</button><button type="button" disabled={locked} onClick={()=>{setDesktopPreview(false);newItem('heading',undefined,2)}}>＋ 节</button><button type="button" disabled={locked} onClick={()=>{setDesktopPreview(false);newItem('text')}}>＋ 正文</button>{onImage&&<><input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e=>{const f=e.target.files?.[0];if(f){setDesktopPreview(false);onImage(f)}e.target.value=''}}/><button type="button" disabled={locked} onClick={()=>imageInput.current?.click()}>图片</button></>}<button type="button" disabled={locked} onClick={()=>{setDesktopPreview(false);newItem('pagebreak')}}>分页</button><button type="button" disabled={!block||locked||i<=0} onClick={()=>onMove(-1)}>上移</button><button type="button" disabled={!block||locked||i+1>=doc.blocks.length} onClick={()=>onMove(1)}>下移</button></div>
    <div className="manual-word-layout">
     <aside className="manual-word-outline"><div className="manual-word-side-head"><strong>大纲</strong><small>{doc.blocks.length} 项</small></div><input aria-label="搜索文档大纲" placeholder="搜索题目或编号" value={outlineQuery} onChange={e=>setOutlineQuery(e.target.value)}/><nav aria-label="文档大纲">{doc.blocks.filter(b=>!outlineQuery.trim()||[blockLabel(b),b.title,b.snapshot?.code,effectiveBlock(b).content].join(' ').includes(outlineQuery.trim())).map(b=><button key={b.uid} type="button" aria-current={b.uid===selected?'true':undefined} draggable={!locked&&!!onReorder} onDragStart={e=>{e.dataTransfer.setData('application/x-wg-block',b.uid);e.dataTransfer.effectAllowed='move'}} onDragOver={e=>{if(!locked&&e.dataTransfer.types.includes('application/x-wg-block')){e.preventDefault();e.dataTransfer.dropEffect='move'}}} onDrop={e=>{e.preventDefault();const uid=e.dataTransfer.getData('application/x-wg-block');if(!locked&&uid&&onReorder){setDesktopPreview(false);onReorder(uid,b.uid)}}} onClick={()=>go(b.uid)}><span>{blockLabel(b)}</span><small><MathText compact content={b.snapshot?.code||b.title||effectiveBlock(b).content.slice(0,60)||'空白'}/></small></button>)}</nav><details><summary>文档设置</summary>{onTitle&&<label>标题<input value={doc.title} maxLength={200} disabled={locked} onChange={e=>onTitle(e.target.value)}/></label>}</details></aside>
-    <main className="manual-word-canvas" onClick={e=>{if(!desktopPreview&&selected&&e.target instanceof Element&&!e.target.closest('[data-word-block]'))closeEditor()}}>
+    <main className="manual-word-canvas">
      {desktopPreview?<section className="manual-intake-preview"><label className="manual-word-preview-toggle"><input type="checkbox" checked={stemOnly} onChange={e=>setStemOnly(e.target.checked)}/> 仅题目</label><SourcePreview doc={doc} stem={stemOnly}/></section>:<div className="manual-word-stage" aria-label="Word 文档">
       {sheets.map((sheet,index)=><section key={sheet.key} className="manual-word-paper" aria-label={'文档页 '+(index+1)}>
        {index===0&&<header className="manual-word-paper-header"><h1><MathText compact content={doc.title}/></h1>{(doc.subject||doc.kind==='paper')&&<p>{doc.subject}{doc.kind==='paper'?' 总分：'+doc.blocks.reduce((sum,b)=>sum+(b.score??0),0):''}</p>}</header>}
