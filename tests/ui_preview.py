@@ -400,7 +400,7 @@ with sync_playwright() as p:
                 page.get_by_role("button",name="下载 PNG",exact=True).click()
             with open(downloaded.value.path(),"rb") as png:
                 header=png.read(24)
-            assert header[:8]==b"\\x89PNG\\r\\n\\x1a\\n"
+            assert header[:8]==bytes.fromhex("89504e470d0a1a0a"), f"Invalid PNG signature: {header[:8].hex()}"
             assert struct.unpack(">II",header[16:24])==(500,500)
             page.get_by_role("navigation",name="发布平台").get_by_role("button",name="小红书",exact=True).click()
 
