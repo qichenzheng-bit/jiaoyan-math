@@ -12,6 +12,75 @@ concurrency:
   group: jiaoyan-release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    outputs:
+      backend_required: ${{ steps.scope.outputs.backend_required }}
+      baseline: ${{ steps.scope.outputs.baseline }}
+      mode: ${{ steps.scope.outputs.mode }}
+    steps:
+      - name: Publish pending release checks
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          for name in deployment-syntax backend frontend browser deploy; do
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=pending -f context="jiaoyan/$name" \
+              -f description="Queued or running" -f target_url="$RUN_URL" >/dev/null
+          done
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select validated test scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+
+          def git(*args):
+              return subprocess.check_output(["git", *args])
+
+          mode, baseline = "full", ""
+          try:
+              sha = os.environ["GITHUB_SHA"]
+              before = os.environ.get("BEFORE", "")
+              if (os.environ["GITHUB_EVENT_NAME"] == "push"
+                  and os.environ["GITHUB_REF"] == "refs/heads/main"
+                  and re.fullmatch(r"[a-f0-9]{40}", before)
+                  and before != "0" * 40
+                  and git("rev-list", "--parents", "-n", "1", sha).decode().split() == [sha, before]):
+                  paths = git("diff", "--name-only", "--no-renames", "-z", before, sha).split(b"\0")
+                  changed = [p.decode("utf-8") for p in paths if p]
+                  css_only = bool(changed) and all(
+                      re.fullmatch(r"frontend/src/[^\n]+\.css", p) for p in changed
+                  )
+                  if css_only:
+                      raw = subprocess.check_output(
+                          ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{before}/status"],
+                          timeout=20
+                      )
+                      states = {s["context"]: s["state"] for s in json.loads(raw)["statuses"]}
+                      required = ("deployment-syntax", "backend", "frontend", "browser", "deploy")
+                      if all(states.get("jiaoyan/" + name) == "success" for name in required):
+                          mode, baseline = "css-fast", before
+          except Exception as exc:
+              print("Cannot establish safe baseline; using full validation:", exc)
+          print("Validation mode:", mode, "baseline:", baseline or "none")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"mode={mode}\n")
+              out.write(f"baseline={baseline}\n")
+              out.write(f"backend_required={'false' if mode == 'css-fast' else 'true'}\n")
+          PY
   deployment-syntax:
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +100,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
   backend:
+    needs: plan
+    if: needs.plan.outputs.backend_required != 'false'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -155,8 +226,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
   deploy:
-    needs: [backend, frontend, deployment-syntax, browser]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.ENABLE_DEPLOY == 'true'
+    needs: [plan, backend, frontend, deployment-syntax, browser]
+    if: >-
+      ${{ always() && !cancelled() && github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' && vars.ENABLE_DEPLOY == 'true' &&
+      needs.plan.result == 'success' &&
+      (needs.backend.result == 'success' ||
+        (needs.backend.result == 'skipped' && needs.plan.outputs.backend_required == 'false' && needs.plan.outputs.mode == 'css-fast')) &&
+      needs.frontend.result == 'success' &&
+      needs.deployment-syntax.result == 'success' &&
+      needs.browser.result == 'success' }}
     runs-on: [self-hosted, Linux, X64]
     env:
       GIT_CONFIG_COUNT: "1"
@@ -192,7 +271,7 @@ jobs:
 
   report:
     # A separate hosted job publishes readable commit statuses for main deployments.
-    needs: [deployment-syntax, backend, frontend, browser, deploy]
+    needs: [plan, deployment-syntax, backend, frontend, browser, deploy]
     if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
@@ -206,6 +285,9 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SYNTAX_RESULT: ${{ needs.deployment-syntax.result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PLAN_MODE: ${{ needs.plan.outputs.mode }}
+          BASELINE: ${{ needs.plan.outputs.baseline }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           BROWSER_RESULT: ${{ needs.browser.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
@@ -223,7 +305,13 @@ jobs:
               -f description="$name: $result" -f target_url="$RUN_URL" >/dev/null
           }
           report deployment-syntax "$SYNTAX_RESULT"
-          report backend "$BACKEND_RESULT"
+          if [[ "$PLAN_RESULT" == success && "$PLAN_MODE" == css-fast && "$BACKEND_RESULT" == skipped && "$BASELINE" =~ ^[a-f0-9]{40}$ ]]; then
+            gh api --method POST "repos/$REPOSITORY/statuses/$SHA" \
+              -f state=success -f context=jiaoyan/backend \
+              -f description="backend: validated baseline ${BASELINE:0:7} (CSS only)" -f target_url="$RUN_URL" >/dev/null
+          else
+            report backend "$BACKEND_RESULT"
+          fi
           report frontend "$FRONTEND_RESULT"
           report browser "$BROWSER_RESULT"
           report deploy "$DEPLOY_RESULT"
