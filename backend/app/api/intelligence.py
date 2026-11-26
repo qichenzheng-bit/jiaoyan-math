@@ -30,6 +30,7 @@ class Start(BaseModel):
 class Review(BaseModel):
     revision:int=Field(ge=1)
     items:list[docs.Block]=Field(max_length=100)
+    reviewed_uids:list[str]|None=Field(default=None,max_length=100)
 class Confirm(BaseModel):
     revision:int=Field(ge=1)
 def parse_answer(text):
@@ -48,7 +49,7 @@ def parse_answer(text):
 def view(j,full=False):
     r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at","source_id")}
     r.update(provenance=j.provenance or {},retry_of=j.retry_of)
-    if full:r.update(items=j.items,input_text=j.input_text)
+    if full:r.update(items=j.items,input_text=j.input_text,reviewed_uids=(j.provenance or {}).get("reviewed_uids",[]))
     return r
 def get_job(db,id):
     j=db.scalar(select(Job).where(Job.id==id).with_for_update())
@@ -67,6 +68,7 @@ def sync(db,j):
             try:j.items=parse_answer(r.get("answer",""));j.state="review";j.detail="提取结果待人工核对，未入库"
             except (ValueError,TypeError):j.state="failed";j.detail="结构化结果无效，请缩小批次后重试"
         else:j.state="stopped" if s=="stopped" else "failed";j.detail=str(r.get("detail","执行失败"))[:400]
+    j.provenance={**(j.provenance or {}),"execution_finished_at":now()}
     j.revision+=1;j.updated_at=now();db.commit()
 @router.get("/jobs")
 def listing(db:Session=Depends(get_db)):
@@ -161,12 +163,25 @@ def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(curre
     j=get_job(db,id)
     if j.state!="review" or j.revision!=body.revision:raise HTTPException(409,"草稿版本冲突")
     if len({b.uid for b in body.items})!=len(body.items) or any(b.kind not in ("question","knowledge") or not b.title.strip() or not b.content.strip() or b.resource_id or b.file_id for b in body.items):raise HTTPException(422,"草稿条目无效")
-    j.items=[b.model_dump() for b in body.items];j.revision+=1;j.updated_at=now();audit(db,"intelligence.review",user.id);db.commit();return view(j,True)
+    items=[b.model_dump() for b in body.items]
+    valid={b["uid"] for b in items}
+    provenance=dict(j.provenance or {})
+    if body.reviewed_uids is not None:
+        if len(set(body.reviewed_uids))!=len(body.reviewed_uids) or not set(body.reviewed_uids)<=valid:
+            raise HTTPException(422,"审核条目无效")
+        provenance["reviewed_uids"]=body.reviewed_uids
+    elif "reviewed_uids" in provenance:
+        old={b["uid"]:b for b in j.items}
+        provenance["reviewed_uids"]=[b["uid"] for b in items if b["uid"] in provenance["reviewed_uids"] and old.get(b["uid"])==b]
+    j.provenance=provenance
+    j.items=items;j.revision+=1;j.updated_at=now();audit(db,"intelligence.review",user.id);db.commit();return view(j,True)
 @router.post("/jobs/{id}/document",dependencies=[Depends(require_origin)])
 def convert(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);j=get_job(db,id)
     if j.document_id:return {"document_id":j.document_id}
     if j.state!="review" or j.revision!=body.revision or not j.items:raise HTTPException(409,"请先审核草稿")
+    if "reviewed_uids" in (j.provenance or {}) and set(j.provenance["reviewed_uids"])!={b["uid"] for b in j.items}:
+        raise HTTPException(409,"请先逐条确认所有保留的条目")
     if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
         raise HTTPException(409,"请先处理或舍弃待审核的AI补充建议")
     draft=docs.Draft(title=j.title,subject=j.subject,source_id=j.source_id,blocks=j.items)
@@ -210,12 +225,13 @@ def import_detail(ident:str,db:Session=Depends(get_db)):
     return {**record.metadata_json,"import_id":record.id,"file_id":file.id,"file_name":file.name,"text":record.text}
 
 # Supplemental generation is separate from source-only extraction.
-SupplementField=Literal["answer","solution","analysis","proof","alternate"]
-LIMITS={"answer":20000,"solution":50000,"analysis":50000,"proof":50000,"alternate":20000}
+SupplementField=Literal["answer","solution","analysis","proof","alternate","title","content","subject","chapter","question_type","unit_type"]
+LIMITS={"answer":20000,"solution":50000,"analysis":50000,"proof":50000,"alternate":20000,"title":200,"content":50000,"subject":40,"chapter":120,"question_type":20,"unit_type":24}
 class SupplementStart(Confirm):
     item_uid:str=Field(min_length=1,max_length=36)
     fields:list[SupplementField]=Field(min_length=1,max_length=5)
     instruction:str=Field(default="",max_length=2000)
+    revise:bool=False
 class SupplementAccept(Confirm):
     fields:list[SupplementField]=Field(min_length=1,max_length=5)
 
@@ -224,6 +240,10 @@ def allowed_supplements(item):
     result=[k for k in fields if not item.get(k,"").strip()]
     if item["kind"]=="question" and parse_methods(item.get("solution")):result.append("alternate")
     return result
+
+def allowed_revisions(item):
+    common=["title","content","subject","chapter","analysis"]
+    return common+(["answer","solution","question_type"] if item["kind"]=="question" else ["proof","unit_type"])
 
 def parse_supplement(raw,fields):
     raw=raw.strip()
@@ -237,8 +257,9 @@ def parse_supplement(raw,fields):
         result[k]=v.strip()
     return result
 
-def apply_supplement(item,proposal,fields):
-    if len(set(fields))!=len(fields) or not set(fields)<=set(proposal) or not set(fields)<=set(allowed_supplements(item)):
+def apply_supplement(item,proposal,fields,revise=False):
+    allowed=allowed_revisions(item) if revise else allowed_supplements(item)
+    if len(set(fields))!=len(fields) or not set(fields)<=set(proposal) or not set(fields)<=set(allowed):
         raise HTTPException(409,"补充字段已变化或不是允许的缺失字段")
     result=dict(item)
     for k in fields:
@@ -259,7 +280,7 @@ def apply_supplement(item,proposal,fields):
     return docs.Block.model_validate(result).model_dump()
 
 def supplement_view(s):
-    return {k:getattr(s,k) for k in ("id","job_id","item_uid","base_revision","fields","instruction","model","state","detail","proposal","accepted","created_at","updated_at")}
+    return {**{k:getattr(s,k) for k in ("id","job_id","item_uid","base_revision","fields","instruction","model","state","detail","proposal","accepted","created_at","updated_at")},"revise":bool((s.base_item or {}).get("_wg_revision"))}
 
 def find_supplement(db,job_id,ident):
     s=db.scalar(select(IntakeSupplement).where(IntakeSupplement.job_id==job_id,IntakeSupplement.id==ident).with_for_update())
@@ -297,16 +318,23 @@ def supplement_start(id:str,body:SupplementStart,db:Session=Depends(get_db),user
     if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
         raise HTTPException(409,"请先处理当前AI补充建议")
     item=next((x for x in j.items if x["uid"]==body.item_uid),None)
-    if not item or len(set(body.fields))!=len(body.fields) or not set(body.fields)<=set(allowed_supplements(item)):
-        raise HTTPException(422,"只能补充缺失字段或追加不同解法")
+    if not item or len(set(body.fields))!=len(body.fields) or not set(body.fields)<=set(allowed_revisions(item) if body.revise else allowed_supplements(item)):
+        raise HTTPException(422,"请选择允许修改的条目字段")
+    if body.revise and not body.instruction.strip():
+        raise HTTPException(422,"请明确说明修改要求")
     payload=json.dumps({k:item.get(k,"") for k in ("kind","title","content","answer","solution","analysis","proof","chapter")},ensure_ascii=False)
     prompt=("你是微光数学教研助手。本任务是用户明确授权的AI补充，不属于原文。只针对提供的题目或知识单元生成指定字段，不修改题干或已有答案。"
         "缺少必要图形、条件或无法确定时不要猜测；可以省略无法完成的字段。解析要完整逐步推导；备选解法必须实质不同，保留已有解法。"
         "所有公式使用LaTeX定界符，JSON正确转义。仅输出JSON对象，键只能来自指定字段，值必须为非空字符串；不输出其他字段。"
         "\n指定字段："+json.dumps(body.fields)+"\n用户补充要求："+body.instruction+"\n【已审核草稿数据】\n"+payload+"\n【数据结束】")
+    if body.revise:
+        prompt=("你是数学资料审核助手。仅依据用户的明确修改要求和提供的当前草稿，生成指定字段的修订建议。"
+                "不得修改未指定字段，不得猜测缺失条件；无法确认时省略该字段。所有数学公式保留标准LaTeX定界符，JSON正确转义。"
+                "仅输出JSON对象，键只能来自指定字段，值为非空字符串。修订建议由用户审核后才会合并。"
+                "\n指定字段："+json.dumps(body.fields)+"\n用户要求："+body.instruction+"\n【当前条目】\n"+json.dumps(item,ensure_ascii=False)+"\n【数据结束】")
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"题目内容过长，请缩小补充范围")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"Qoder执行服务未就绪")
-    s=IntakeSupplement(id=str(uuid4()),job_id=j.id,item_uid=body.item_uid,base_revision=j.revision,base_item=item,
+    s=IntakeSupplement(id=str(uuid4()),job_id=j.id,item_uid=body.item_uid,base_revision=j.revision,base_item={**item,"_wg_revision":True} if body.revise else item,
         fields=body.fields,instruction=body.instruction,model=j.model,state="running",detail="",proposal={},accepted=[],created_at=now(),updated_at=now())
     db.add(s);audit(db,"intelligence.supplement.start",user.id);db.commit()
     try:qoder.request("POST","/chat/start",{"id":s.id,"model":s.model,"prompt":prompt,**qoder.assistant_effort(db,s.model)})
@@ -322,9 +350,13 @@ def supplement_accept(id:str,ident:str,body:SupplementAccept,db:Session=Depends(
     if j.state!="review" or j.revision!=body.revision or s.state!="review" or s.base_revision!=j.revision:
         raise HTTPException(409,"草稿已修改或建议不再有效，请舍弃后重新生成")
     item=next((x for x in j.items if x["uid"]==s.item_uid),None)
-    if item!=s.base_item:raise HTTPException(409,"原条目已变化")
-    replacement=apply_supplement(item,s.proposal,body.fields)
+    snapshot=dict(s.base_item or {})
+    revise=bool(snapshot.pop("_wg_revision",False))
+    if item!=snapshot:raise HTTPException(409,"原条目已变化")
+    replacement=apply_supplement(item,s.proposal,body.fields,revise=revise)
     j.items=[replacement if x["uid"]==s.item_uid else x for x in j.items]
+    if "reviewed_uids" in (j.provenance or {}):
+        j.provenance={**j.provenance,"reviewed_uids":[uid for uid in j.provenance["reviewed_uids"] if uid!=s.item_uid]}
     j.revision+=1;j.updated_at=now();s.accepted=body.fields;s.state="accepted";s.updated_at=now()
     audit(db,"intelligence.supplement.accept",user.id);db.commit();return view(j,True)
 

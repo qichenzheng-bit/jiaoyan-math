@@ -158,7 +158,7 @@ READY={
     "16-intake-document":".legacy-intake",
     "05-chat":".chat-home-recent",
     "19-intake-intent":".chat-intake-suggestion",
-    "22-intake-supplement":".supplement-proposal .katex",
+    "22-intake-supplement":".wg-work-result",
     "25-word-ai":".manual-word-work",
     "04-word":".manual-word-work .katex",
     "06-cover":".fc-art",
@@ -231,7 +231,10 @@ with sync_playwright() as p:
                     expect(page.get_by_text("已带入聊天正文")).to_be_visible()
                     visit(page,"/chat",".chat-home-recent")
                 if name=="22-intake-supplement":
+                    expect(page.get_by_role("link",name="进入审核工作台",exact=True)).to_be_visible()
+                    page.get_by_role("link",name="进入审核工作台",exact=True).click()
                     page.locator(".supplement-proposal .katex").first.wait_for()
+                    expect(page.locator(".wg-review-editor .katex").first).to_be_visible()
                     assert page.get_by_role("button",name="确认生成录入文档").is_disabled()
                     assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
                     expect(page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容")).to_be_visible()
@@ -253,6 +256,10 @@ with sync_playwright() as p:
                 if name=="19-intake-intent":
                     page.locator(".chat-intake-suggestion").wait_for()
                     expect(page.locator(".rich-reply table")).to_be_visible()
+                    trace=page.locator(".wg-execution-toggle").first
+                    expect(trace).to_be_visible()
+                    trace.click()
+                    expect(page.locator(".wg-execution-detail")).to_be_visible()
                     expect(page.locator(".rich-card").get_by_role("button",name="方法二")).to_be_visible()
                     page.locator(".rich-card").get_by_role("button",name="方法二").click()
                     expect(page.locator(".rich-card").get_by_text("定义法",exact=True)).to_be_visible()

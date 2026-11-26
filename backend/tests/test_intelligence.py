@@ -26,3 +26,11 @@ def test_supplement_only_fills_missing_or_appends():
     assert result["content"]==item["content"] and result["answer"]==item["answer"]
     assert "原解法" in result["solution"] and "另一解法" in result["solution"]
     assert result["analysis"]=="思路"
+
+
+def test_explicit_targeted_revision_does_not_change_other_fields():
+    item={"uid":"q1","kind":"question","title":"原题","content":"原文","answer":"旧答案","solution":"原解析"}
+    result=apply_supplement(item,{"answer":"新答案"},["answer"],revise=True)
+    assert result["answer"]=="新答案" and result["content"]=="原文" and result["solution"]=="原解析"
+    with pytest.raises(HTTPException):apply_supplement(item,{"answer":"新答案"},["answer"])
+    with pytest.raises(HTTPException):apply_supplement(item,{"proof":"证明"},["proof"],revise=True)

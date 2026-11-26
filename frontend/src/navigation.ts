@@ -52,6 +52,8 @@ export function workspaceParent(path:string,search:string):string{
  if(path.startsWith('/print/'))return '/teaching-library'
  if(path.startsWith('/resource-edit/'))return params.has('return_source')?'/source-print/'+encodeURIComponent(params.get('return_source')!):'/resources'
  if(path==='/intake-single')return '/intake'
+ if(path==='/work'&&params.has('job')&&params.has('review'))return '/work?job='+encodeURIComponent(params.get('job')!)
+ if(path==='/work'&&(params.has('job')||params.has('history')))return '/work'
  if(path==='/works')return '/project/creation'
  const group=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path===path)))
  return group?'/project/'+group.id:'/'
