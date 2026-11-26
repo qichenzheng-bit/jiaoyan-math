@@ -219,14 +219,18 @@ with sync_playwright() as p:
                 if name=="17-intake-knowledge":
                     assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
                 if name=="05-chat":
-                    assert page.locator(".compact-composer .reasoning-effort").count()==0
-                    page.get_by_role("button",name="更多选项",exact=True).click()
-                    effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
+                    assert page.locator("#mode-more-panel .reasoning-effort").count()==0
+                    page.get_by_role("button",name="打开模型选择",exact=True).click()
+                    effort=page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)
                     effort.wait_for()
                     effort.select_option("high")
                     assert effort.input_value()=="high"
-                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    page.get_by_role("button",name="完成",exact=True).click()
                     assert not effort.is_visible()
+                    page.get_by_role("button",name="打开模型选择",exact=True).click()
+                    expect(page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)).to_have_value("high")
+                    page.keyboard.press("Escape")
+                    expect(page.locator(".composer-inference-panel")).to_have_count(0)
                     assert page.locator(".intake-chat-prompts").count()==0
                     expect(page.locator(".chat-home-recent")).to_be_visible()
                     expect(page.get_by_role("heading",name="今天想研究什么？")).to_be_visible()
@@ -252,14 +256,18 @@ with sync_playwright() as p:
                     assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
                     expect(page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容")).to_be_visible()
                 if name=="18-intelligence":
-                    assert page.locator(".compact-composer .reasoning-effort").count()==0
-                    page.get_by_role("button",name="更多选项",exact=True).click()
-                    effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
+                    assert page.locator("#mode-more-panel .reasoning-effort").count()==0
+                    page.get_by_role("button",name="打开模型选择",exact=True).click()
+                    effort=page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)
                     effort.wait_for()
                     effort.select_option("high")
                     assert effort.input_value()=="high"
-                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    page.get_by_role("button",name="完成",exact=True).click()
                     assert not effort.is_visible()
+                    page.get_by_role("button",name="打开模型选择",exact=True).click()
+                    expect(page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)).to_have_value("high")
+                    page.keyboard.press("Escape")
+                    expect(page.locator(".composer-inference-panel")).to_have_count(0)
                     page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
                     page.get_by_role("button",name="发送资料").click()
                     page.locator(".work-review-preview .katex").first.wait_for()
@@ -884,6 +892,23 @@ with sync_playwright() as p:
             expect(page.get_by_role("heading",name="今天想研究什么？")).to_be_visible()
             assert page.locator("[data-chat-layout=v3] .compact-composer").evaluate("(el)=>el.getBoundingClientRect().bottom <= innerHeight")
             expect(page.locator(".mode-switch")).to_be_visible()
+            for path in ("/chat","/work"):
+                visit(page,path,"[data-chat-layout=v3] .compact-composer")
+                model_button=page.get_by_role("button",name="打开模型选择",exact=True)
+                send_button=page.locator(".compact-tools .composer-send")
+                expect(model_button).to_be_visible()
+                assert model_button.evaluate("(el)=>el.getBoundingClientRect().width")>45
+                assert page.locator(".compact-tools").evaluate("(el)=>getComputedStyle(el).display")=="flex"
+                assert model_button.evaluate("(el)=>el.getBoundingClientRect().right")<=send_button.evaluate("(el)=>el.getBoundingClientRect().left")+1
+                model_button.click()
+                panel=page.locator(".composer-inference-panel")
+                expect(panel).to_be_visible()
+                assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1}")
+                assert panel.evaluate("(el)=>el.getBoundingClientRect().bottom")<=model_button.evaluate("(el)=>el.getBoundingClientRect().top")+1
+                page.get_by_role("button",name="完成",exact=True).click()
+                expect(panel).to_have_count(0)
+                assert page.locator("#mode-more-panel .reasoning-effort").count()==0
+            visit(page,"/chat",".chat-home-recent")
             page.get_by_role("button",name="添加与工具").click()
             expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
             page.get_by_role("button",name="添加与工具").click()
