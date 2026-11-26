@@ -31,14 +31,14 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  const block=doc?.blocks.find(b=>b.uid===selected),locked=busy||Boolean(doc?.archived)
  const pending=!!doc?.blocks.some(b=>b.kind==='question'||b.kind==='knowledge'||b.edit_reference_revision)
  useEffect(()=>{const media=window.matchMedia('(max-width: 900px)');const change=()=>setNarrow(media.matches);change();media.addEventListener('change',change);return()=>media.removeEventListener('change',change)},[])
- useEffect(()=>{if(selected&&!doc?.blocks.some(b=>b.uid===selected))setSelected('')},[cardMode,doc?.blocks,selected])
+ useEffect(()=>{if(selected&&!doc?.blocks.some(b=>b.uid===selected)){setSelected('');if(intake)setCardPanel('list')}},[cardMode,doc?.blocks,selected])
  async function refresh(){const r=await api<{items:Summary[];total:number}>('/documents?'+new URLSearchParams({archived:'false',limit:'30',offset:String(page*30),kind:queryKind}));setDocs(r.items.filter(d=>d.kind===queryKind));setTotal(r.total)}
  useEffect(()=>{void refresh().catch(e=>setMessage(e.message))},[page,queryKind])
  useEffect(()=>{const c=new AbortController();api<string[]>('/resources/subjects',{signal:c.signal}).then(setSubjects).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});return()=>c.abort()},[])
  useEffect(()=>{if(requested&&requested!==doc?.id)void open(requested,false)},[requested])
  useEffect(()=>{if(!dirty||!doc)return;try{sessionStorage.setItem(recoveryKey(doc.id),JSON.stringify(doc))}catch{setMessage('浏览器草稿缓存空间不足，请立即保存到服务器。')}},[doc,dirty])
  useWorkspaceGuard({busy,dirty,message:'当前修改尚未保存，确认离开？'})
- function choose(uid:string){setCardPanel('card');setSelected(uid)}
+ function choose(uid:string){setCardPanel(intake&&!uid?'list':'card');setSelected(uid)}
  function update(p:Partial<Doc>){setDoc(d=>d&&({...d,...p}));setDirty(true)}
  function editBlock(p:Partial<Block>){if(!doc||!block||locked)return;const changed=['content','answer','solution','title','proof','subject','chapter','unit_type','question_type'].some(k=>Object.hasOwn(p,k));setDoc(d=>d&&({...d,blocks:d.blocks.map(b=>b.uid===selected?{...b,...(changed?{dedup_reason:''}:{}),...p}:b)}));setDirty(true)}
  function insert(b:Block){if(!doc||doc.archived)return;if(doc.blocks.length>=200){setMessage('文档已达到 200 个条目，请拆分。');return}const i=doc.blocks.findIndex(x=>x.uid===selected);const bs=[...doc.blocks];bs.splice(i<0?bs.length:i+1,0,b);update({blocks:bs});choose(b.uid)}
