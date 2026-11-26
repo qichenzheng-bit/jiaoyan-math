@@ -109,7 +109,7 @@ def build_provenance(db,body):
 def launch(db,user,body,provenance,retry_of=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     if body.source_id:bank.active_source(db,body.source_id,True)
-    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。仅输出JSON数组，每项kind(question或knowledge),title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n学科："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
     intent=provenance.get("intent","mixed")
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
     prompt+="\n【本次整理目标】"+focus
