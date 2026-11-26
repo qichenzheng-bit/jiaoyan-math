@@ -45,3 +45,25 @@
 .manual-word-preview-toggle{display:block;font-size:12px;margin-bottom:6px}
 @media(max-width:1150px){.manual-word-layout{grid-template-columns:minmax(90px,115px) minmax(0,1fr) minmax(185px,220px);gap:6px}}
 @media(max-width:900px){.manual-word-layout{grid-template-columns:minmax(0,1fr)}.manual-word-outline,.manual-word-matches{position:static;max-height:none;border:0;padding:0}.manual-word-outline nav{display:flex;overflow:auto;gap:4px}.manual-word-outline nav button{flex:0 0 auto;max-width:120px}.manual-word-outline details{display:none}.manual-word-canvas{grid-row:2}.manual-word-matches{grid-row:3}.manual-word-item{padding:7px}}
+
+/* Selection cart uses the same flat, compact workspace density. */
+.assembly-picker{display:grid;gap:8px;min-width:0;font-size:13px}
+.assembly-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:14px;align-items:start}
+.assembly-library,.assembly-cart{min-width:0}
+.assembly-cart{position:sticky;top:0;max-height:calc(100dvh - 150px);overflow:auto;border-left:1px solid var(--line);padding-left:12px;display:grid;gap:8px}
+.assembly-filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.legacy-shell .assembly-picker input,.legacy-shell .assembly-picker select{min-width:0;max-width:100%;font-size:13px;padding:5px 7px}
+.assembly-filters>input{flex:1 1 140px}
+.assembly-filters>select{flex:0 1 auto}
+.legacy-shell .assembly-picker button{min-height:29px;padding:4px 8px;font-size:12px;border-radius:5px}
+.assembly-result{padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
+.assembly-result .chat-rich{margin:4px 0}
+.assembly-result summary{font-size:12px;cursor:pointer;color:var(--muted)}
+.assembly-cart label{display:grid;gap:4px}
+.assembly-cart-item{display:flex;align-items:start;justify-content:space-between;gap:7px;padding:6px 0;border-bottom:1px solid var(--line)}
+.assembly-cart-item>div{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
+.assembly-cart-item small{font-size:11px;color:var(--muted)}
+.assembly-score{display:flex;gap:8px;align-items:center;font-size:12px}
+.legacy-shell .assembly-score input{width:80px;min-width:0;font-size:13px;padding:4px 6px}
+.assembly-word .manual-word-matches p{margin:4px 0;font-size:12px}
+@media(max-width:700px){.assembly-grid{grid-template-columns:minmax(0,1fr)}.assembly-cart{position:sticky;bottom:0;top:auto;max-height:36dvh;overflow:auto;border-left:0;border-top:1px solid var(--line);padding:8px 0;background:var(--surface)}}
