@@ -1,8 +1,13 @@
-.workspace-confirm{box-sizing:border-box;width:min(300px,calc(100vw - 32px));max-width:100%;padding:12px 14px;margin:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;background:var(--surface,#fff);color:var(--ink,#222);box-shadow:0 12px 40px #0002;font:13px/1.45 system-ui,sans-serif}
-.workspace-confirm::backdrop{background:rgba(0,0,0,.28)}
+.workspace-confirm{box-sizing:border-box;width:min(var(--dialog-width,300px),calc(100vw - 32px));max-width:100%;padding:12px 14px;margin:auto;border:1px solid var(--line,#e5e5e5);border-radius:var(--radius-dialog,8px);background:var(--surface,#fff);color:var(--ink,#222);box-shadow:var(--dialog-shadow,0 12px 40px #0002);font:13px/1.45 system-ui,sans-serif}
+.workspace-confirm::backdrop{background:var(--dialog-backdrop,rgba(0,0,0,.28))}
 .workspace-confirm h2{font-size:14px;margin:0 0 5px;font-weight:600}
 .workspace-confirm p{font-size:13px;color:var(--muted,#666);margin:0 0 10px;white-space:pre-wrap}
 .workspace-confirm-actions{display:flex;justify-content:flex-end;gap:6px}
-.workspace-confirm-actions button{font:inherit;font-size:13px;padding:3px 10px;min-height:26px;border:1px solid var(--line,#ddd);border-radius:5px;background:var(--surface,#fff);color:var(--ink,#222);cursor:pointer}
+.workspace-confirm-actions button{font:inherit;font-size:13px;padding:3px 10px;min-height:26px;border:1px solid var(--line,#ddd);border-radius:var(--radius-dialog-action,5px);background:var(--surface,#fff);color:var(--ink,#222);cursor:pointer}
 .workspace-confirm-actions .workspace-confirm-primary{background:var(--ink,#222);color:var(--surface,#fff);border-color:var(--ink,#222)}
-.workspace-confirm-actions button:focus-visible{outline:2px solid #888;outline-offset:2px}
+.workspace-confirm-actions button:focus-visible{outline:2px solid var(--dialog-focus,#888);outline-offset:2px}
+
+.workspace-confirm-input{display:block;width:100%;min-width:0;resize:vertical;min-height:70px;max-height:40dvh;margin:0 0 10px;padding:7px 9px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface);color:var(--ink);font:inherit;line-height:1.5}
+.workspace-confirm-input:focus-visible{outline:2px solid var(--dialog-focus,#888);outline-offset:2px}
+.workspace-confirm-actions button:disabled{opacity:.48;cursor:not-allowed}
+@media(max-width:760px){.workspace-confirm-input{font-size:16px}}

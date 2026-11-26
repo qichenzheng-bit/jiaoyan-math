@@ -235,6 +235,14 @@ with sync_playwright() as p:
                     assert page.get_by_text("今天想做什么？",exact=True).count()==0
                     expect(page.locator(".chat-home-recent")).to_be_visible()
                     assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
+                    # Dirty chat must stay put on cancel, and proceed only after explicit approval.
+                    page.get_by_label("输入消息").fill("尚未发送的教研草稿")
+                    page.locator(".mode-switch").get_by_role("link",name="工作").click()
+                    dialog=page.get_by_role("dialog",name="离开当前页面")
+                    expect(dialog).to_be_visible()
+                    dialog.get_by_role("button",name="取消",exact=True).click()
+                    expect(page.get_by_label("输入消息")).to_have_value("尚未发送的教研草稿")
+                    page.get_by_label("输入消息").fill("")
                     page.get_by_role("button",name="更多选项",exact=True).click()
                     assert page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型").get_attribute("href")=="/qoder"
                     page.get_by_role("button",name="更多选项",exact=True).click()
@@ -242,6 +250,13 @@ with sync_playwright() as p:
                     page.get_by_role("region",name="资料录入").wait_for()
                     expect(page.get_by_label("输入录入资料")).to_be_visible()
                     expect(page.get_by_role("button",name="添加录入资料")).to_be_visible()
+                    page.get_by_label("输入录入资料").fill("待提交的录入正文")
+                    page.locator(".mode-switch").get_by_role("link",name="聊天").click()
+                    dialog=page.get_by_role("dialog",name="离开当前页面")
+                    expect(dialog).to_be_visible()
+                    dialog.get_by_role("button",name="取消",exact=True).click()
+                    expect(page.get_by_label("输入录入资料")).to_have_value("待提交的录入正文")
+                    page.get_by_label("输入录入资料").fill("")
                     page.get_by_role("button",name="添加录入资料").click()
                     page.get_by_role("button",name="上传图片、PDF 或 Word").wait_for()
                     page.get_by_role("button",name="添加录入资料").click()

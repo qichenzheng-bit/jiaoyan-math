@@ -6,7 +6,7 @@ import {api} from '../auth'
 import ManualIntakeCards from '../components/ManualIntakeCards'
 import AssemblyPicker from '../components/AssemblyPicker'
 import {confirmAction} from '../components/WorkspaceConfirm'
-import type {CardPanel} from '../components/MobileDocWork'
+export type CardPanel='card'|'list'|'tools'
 export type Kind='heading'|'text'|'question'|'knowledge'|'reference'|'image'|'pagebreak'
 export type R={id:string;code:string;kind:string;revision?:number;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string;subject?:string;question_type?:string;difficulty?:string;tags?:string[]}
 export type Block={edit_reference_revision?:number|null;heading_level?:1|2|null;score?:number;uid:string;kind:Kind;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;subject?:string|null;knowledge_tags?:string[];reuse_resource_id?:string|null;reuse_revision?:number|null;reuse_code?:string;fork_from_id?:string|null;chapter:string;question_type:string;difficulty?:string;unit_type:string;resource_id:string|null;file_id:string|null;width:number;snapshot?:R}

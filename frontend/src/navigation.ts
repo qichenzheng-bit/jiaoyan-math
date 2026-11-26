@@ -1,15 +1,7 @@
 export type Module={path:string;name:string;desc:string;icon:string;group:string;ready:boolean}
-export const groups=[
- {id:'overview',label:'工作空间'},
- {id:'resources',label:'教学资源'},
- {id:'research',label:'教研创作'},
- {id:'production',label:'内容制作'},
- {id:'publishing',label:'自媒体运营'},
- {id:'tools',label:'系统工具'},
-]
 export const modules:Module[]=[
  {path:'/',name:'聊天',desc:'数学答疑与教研工作入口',icon:'home',group:'overview',ready:true},
- {path:'/products',name:'商品售卖',desc:'课程与资料商品、订单及收入（待接入）',icon:'works',group:'production',ready:true},
+ {path:'/products',name:'商品售卖',desc:'课程与资料商品、订单及收入（待接入）',icon:'works',group:'production',ready:false},
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
@@ -28,17 +20,6 @@ export const modules:Module[]=[
  {path:'/qoder',name:'AI 账号与模型',desc:'Qoder CN 授权及模型验证',icon:'spark',group:'tools',ready:true},
  {path:'/settings',name:'系统设置',desc:'账号、外观、存储及操作记录',icon:'settings',group:'tools',ready:true},
 ]
-
-export const mainSections=[
- {path:'/',name:'首页',icon:'home',children:[]},
- {path:'/chat',name:'AI 助手',icon:'spark',children:['/chat','/intelligence','/intake','/intake-single']},
- {path:'/library',name:'教学资源',icon:'resources',children:['/resources','/knowledge-library','/graph','/sources']},
- {path:'/create',name:'内容创作',icon:'research',children:['/videos','/handouts','/papers','/textbooks','/works']},
- {path:'/products',name:'商品售卖',icon:'works',children:[]},
- {path:'/operations',name:'内容发布',icon:'publishing',children:['/covers']},
-]
-export const utilitySection={path:'/settings',name:'系统设置',icon:'settings',children:['/settings','/qoder','/checkin']}
-export function sectionFor(path:string){return [...mainSections,utilitySection].find(s=>s.path===path||s.children.includes(path))}
 
 export type WorkspaceEntry={path:string;name:string;icon:string}
 export type WorkspaceGroup={id:string;name:string;icon:string;sections:{id:string;name:string;entries:WorkspaceEntry[]}[]}
