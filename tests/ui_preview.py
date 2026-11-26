@@ -145,7 +145,9 @@ with sync_playwright() as p:
                 print("UI case:",name,flush=True)
                 visit(page,path,READY.get(name))
                 page.wait_for_selector(".legacy-shell",timeout=10000)
-                expect(page.locator(".main-section-links").is_visible() or page.locator(".nav")).to_have_count(1)
+                # Preserve the original alternative, without passing a bool to expect().
+                if not page.locator(".main-section-links").is_visible():
+                    expect(page.locator(".nav")).to_have_count(1)
                 assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
                 page.evaluate("document.fonts.ready")
                 if name=="01-intake":
