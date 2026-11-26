@@ -310,7 +310,7 @@ with sync_playwright() as p:
                     page.get_by_role("button",name="待审核",exact=True).click()
                     expect(page.locator(".intake-record")).to_have_count(1)
                     expect(page.locator(".intake-record-name")).to_contain_text("AI 审核示例")
-                    page.get_by_role("button",name="全部",exact=True).click()
+                    page.locator(".intake-state-tabs").get_by_role("button",name="全部",exact=True).click()
                     page.get_by_label("搜索资料",exact=True).fill("考研")
                     expect(page.locator(".intake-record")).to_have_count(1)
                     page.get_by_label("搜索资料",exact=True).fill("")

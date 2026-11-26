@@ -9,6 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user,require_origin,now,audit
 from app.core.solution_methods import normalize_subject, parse_methods, format_methods
 from app.core.content_normalization import canonical_text
+from app.core.question_structure import resolve
 from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession, IntakeImport, IntakeSupplement, WorkBatch, WorkMaterial
 from app.services.pdf_text import extract_pdf
 from app.services import material_import, storage
@@ -72,7 +73,7 @@ def parse_answer(text,page_hints=None,bounds=None):
 def view(j,full=False):
     r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at","source_id")}
     r.update(provenance=j.provenance or {},retry_of=j.retry_of)
-    if full:r.update(items=j.items,input_text=j.input_text,reviewed_uids=(j.provenance or {}).get("reviewed_uids",[]))
+    if full:r.update(items=[{**b,"question_data":resolve(b.get("content",""),b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data")).model_dump()} if b.get("kind")=="question" else b for b in j.items],input_text=j.input_text,reviewed_uids=(j.provenance or {}).get("reviewed_uids",[]))
     return r
 def get_job(db,id):
     j=db.scalar(select(Job).where(Job.id==id).with_for_update())
@@ -137,7 +138,7 @@ def build_provenance(db,body):
 def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     if body.source_id:bank.active_source(db,body.source_id,True)
-    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。题目优先使用 question_data 对象（version:1,stem,options:[{label,content}],correct_options:[字母],subquestions:[{number,content,answer,methods:[{name,body,recommended}]}],blanks:[{number,answer}],answer,methods:[{name,body,recommended}]）。使用结构时不要重复输出外层 content/answer/solution，服务端生成兼容文本；填空空位使用标准 LaTeX 下划线，无法可靠对应的原文仍可使用外层字段。小问各自有答案和解法，不设置公共答案解析。仅提取原文实际提供的答案、解析，缺失留空。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
     intent=provenance.get("intent","mixed")
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
     prompt+="\n【本次整理目标】"+focus

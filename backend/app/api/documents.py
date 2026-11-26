@@ -3,7 +3,8 @@ import json
 from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from app.core.question_structure import QuestionData, normalize_payload, resolve
 from sqlalchemy import select, delete, func, or_
 from sqlalchemy.orm import Session
 from app.core.db import get_db
@@ -43,6 +44,10 @@ class Block(BaseModel):
     file_id:str|None=Field(default=None,max_length=36)
     width:int=Field(default=100,ge=20,le=100)
     score:float=Field(default=0,ge=0,le=1000)
+    question_data:QuestionData|None=None
+    @model_validator(mode="before")
+    @classmethod
+    def structure(cls,value):return normalize_payload(value)
 class Draft(BaseModel):
     title:str=Field(min_length=1,max_length=200)
     kind:Literal["intake","handout","paper","textbook"]="intake"
@@ -59,7 +64,9 @@ def row(db,id):
     if not d:raise HTTPException(404,"文档不存在")
     return d
 def summary(d):return {k:getattr(d,k) for k in ("id","title","kind","subject","source_id","revision","archived","created_at","updated_at")}
-def public(d):return {**summary(d),"blocks":d.blocks}
+def public(d):
+    blocks=[{**b,"question_data":resolve(b.get("content",""),b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data")).model_dump()} if b.get("kind")=="question" else b for b in d.blocks]
+    return {**summary(d),"blocks":blocks}
 def intake_summary(db,d):
     src=db.get(Resource,d.source_id) if d.source_id else None
     counts={k:sum(b.get("kind")==k or (b.get("kind")=="reference" and (b.get("snapshot") or {}).get("kind")==k) for b in d.blocks) for k in ("question","knowledge")}
@@ -248,7 +255,7 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
     if block["kind"]=="reference":return public(d)
     if block["kind"] not in ("question","knowledge") or not block["title"].strip() or not block["content"].strip():raise HTTPException(422,"只能将完整题目或知识单元入库")
     source=bank.active_source(db,d.source_id) if body.bind_source and d.source_id else None
-    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject if block.get("subject") is None else block["subject"],exam_type=source.exam_type if source else "",content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
+    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject if block.get("subject") is None else block["subject"],exam_type=source.exam_type if source else "",content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],question_data=block.get("question_data"),difficulty=block.get("difficulty",""),unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
     values=bank.clean(draft,db);bank.guard_duplicate(db,values)
     primary=values.pop("source_id")
     r=Resource(id=str(uuid4()),code=bank.new_code(db,draft.kind),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
@@ -477,7 +484,7 @@ def registration_values(db,d,b,bind=False,reason="",chapter=None):
     source=bank.active_source(db,d.source_id) if bind and d.source_id else None
     return bank.clean(bank.Draft(kind=b["kind"],title=b["title"],subject=d.subject if b.get("subject") is None else b["subject"],exam_type=source.exam_type if source else "",
         content=b["content"],answer=b.get("answer",""),solution=b.get("solution",""),analysis=b.get("analysis",""),proof=b.get("proof",""),
-        chapter=b.get("chapter","") if chapter is None else chapter,question_type=b.get("question_type",""),unit_type=b.get("unit_type",""),
+        chapter=b.get("chapter","") if chapter is None else chapter,question_type=b.get("question_type",""),question_data=b.get("question_data"),difficulty=b.get("difficulty",""),unit_type=b.get("unit_type",""),
         source_id=source.id if source else None,dedup_override=bool(reason.strip()),dedup_reason=reason),db)
 
 def review_blocks(d,revision,ids):
@@ -620,7 +627,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
                 if r.subject!=values["subject"]:raise HTTPException(422,"学科不同，不能追加解法")
                 r.solution=updated
                 if not r.answer.strip():r.answer=b.get("answer","")
-                r.fingerprint=question_fingerprint(r.content,r.solution,r.answer);changed=True
+                r.fingerprint=question_fingerprint(r.content,r.solution,r.answer);r.question_data=resolve(r.content,r.answer,r.solution,r.question_type).model_dump();changed=True
                 audit(db,"resource.methods.append",user.id)
             elif (match_kind(r,values)!="exact" or r.subject!=values["subject"] or answer_conflict(r,b) or canonical_text(r.analysis)!=canonical_text(b.get("analysis","")) or canonical_text(r.proof)!=canonical_text(b.get("proof",""))) and not decision.reason.strip():
                 raise HTTPException(422,"复用会保留已有资源内容，请填写确认原因；草稿保存在入库历史")
@@ -727,7 +734,7 @@ def apply_reference_edit(db,block,user):
             data["dedup_override"]=True
             data["dedup_reason"]="微调已有资源：保留原编号及来源"
         bank.guard_duplicate(db,data,r.id)
-    for key in (*fields,"fingerprint","stem_key","dedup_override","dedup_reason"):
+    for key in (*fields,"fingerprint","stem_key","dedup_override","dedup_reason","question_data"):
         setattr(r,key,data[key])
     r.revision+=1
     r.updated_at=now()
@@ -779,7 +786,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             raise HTTPException(422,f"第 {i+1} 个条目请选择科目")
         data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=item_subject,
             content=b["content"],answer=b["answer"],solution=b["solution"],analysis=b.get("analysis",""),proof=b.get("proof",""),
-            chapter=b["chapter"],question_type=question_type,difficulty=b["difficulty"],unit_type=b["unit_type"],
+            chapter=b["chapter"],question_type=question_type,question_data=b.get("question_data"),difficulty=b["difficulty"],unit_type=b["unit_type"],
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
         primary=data.pop("source_id")
         tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[]))

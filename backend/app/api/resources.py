@@ -2,7 +2,8 @@ from typing import Literal
 from uuid import uuid4
 from difflib import SequenceMatcher
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from app.core.question_structure import QuestionData, normalize_payload, resolve
 from sqlalchemy import select, func, or_, delete
 from sqlalchemy.orm import Session, object_session
 from app.core.db import get_db
@@ -42,6 +43,10 @@ class Draft(BaseModel):
     revision:int|None=Field(default=None,ge=1)
     dedup_override:bool=False
     dedup_reason:str=Field(default="",max_length=200)
+    question_data:QuestionData|None=None
+    @model_validator(mode="before")
+    @classmethod
+    def structure(cls,value):return normalize_payload(value)
 
 def clean(body,db):
     d=body.model_dump(exclude={"revision"})
@@ -75,6 +80,7 @@ def clean(body,db):
 FIELDS=("id","code","kind","title","subject","content","answer","solution","tags","source_id","archived","created_at","updated_at","revision","sources_revision","exam_type","chapter","question_type","difficulty","unit_type","analysis","proof","exams","source_type","authority_tier","cohort_year","series_key","edition","dedup_override","dedup_reason")
 def view(row):
     data={k:getattr(row,k) for k in FIELDS}
+    if row.kind=="question":data["question_data"]=resolve(row.content,row.answer,row.solution,row.question_type,getattr(row,"question_data",None)).model_dump()
     db=object_session(row) if hasattr(row,"_sa_instance_state") else None
     if db is not None and row.kind in ("question","knowledge"):
         pts=list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(ResourceKnowledgeLink.resource_id==row.id).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)))

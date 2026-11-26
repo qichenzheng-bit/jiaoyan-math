@@ -88,6 +88,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         draft={"kind":"question","title":"极限","subject":"高数","content":"求极限","solution":"方法"}
         created=client.post("/api/resources",headers=origin,json=draft)
         assert created.status_code==200,created.text
+        assert created.json()["question_data"]["version"]==1 and created.json()["question_data"]["stem"]==draft["content"]
         rid=created.json()["id"]
         assert created.json()["subject"]=="高等数学"
         assert client.post("/api/resources/duplicates",headers=origin,json=draft).json()[0]["id"]==rid

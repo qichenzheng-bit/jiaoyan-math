@@ -59,6 +59,7 @@ class TeachingResource(Base):
     content: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     solution: Mapped[str] = mapped_column(Text)
+    question_data: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     tags: Mapped[list] = mapped_column(JSON)
     source_id: Mapped[str | None] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
