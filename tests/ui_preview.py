@@ -1,5 +1,5 @@
+"""Actual compiled React UI tests with isolated synthetic API responses."""
 import os
-"""Actual compiled React screenshots with isolated, synthetic API responses. No production credentials."""
 from pathlib import Path
 import json
 from playwright.sync_api import sync_playwright, expect
@@ -96,6 +96,40 @@ def answer(route):
     if p.startswith("/knowledge/points/") and p.endswith("/resources"):result=[]
     if result is None:result={}
     route.fulfill(status=200,content_type="application/json",body=json.dumps(result,ensure_ascii=False))
+
+GROUP=os.environ.get("WG_UI_GROUP","all")
+if GROUP not in {"all","desktop","editors","mobile"}:
+    raise ValueError("Unknown UI test group: "+GROUP)
+SCREENSHOTS=os.environ.get("WG_UI_SCREENSHOTS","1")=="1"
+EDITOR_PAGES={"04-word","25-word-ai","06-cover"}
+
+def capture(page, *, path, full_page=False):
+    if SCREENSHOTS:
+        page.evaluate("document.fonts.ready")
+        page.screenshot(path=path,full_page=full_page)
+
+def visit(page, path, ready=None):
+    # A concrete UI readiness check replaces generic network idle when available.
+    page.goto("http://127.0.0.1:4173"+path,
+              wait_until="domcontentloaded" if ready else "networkidle")
+    if ready:
+        page.locator(ready).first.wait_for()
+
+READY={
+    "00-home":".chat-home-recent",
+    "29-overview":".chat-home-recent",
+    "12-create":".project-hub .project-link",
+    "13-video":".video-stage-track",
+    "01-intake":".intake-entry",
+    "16-intake-document":".legacy-intake",
+    "05-chat":".chat-home-recent",
+    "19-intake-intent":".chat-intake-suggestion",
+    "22-intake-supplement":".supplement-proposal .katex",
+    "25-word-ai":".manual-word-work",
+    "04-word":".manual-word-work .katex",
+    "06-cover":".math-cover-art",
+}
+
 with sync_playwright() as p:
     # Hosted CI already supplies Chrome; local developers can use Playwright Chromium.
     channel=os.environ.get('WG_BROWSER_CHANNEL')
@@ -103,597 +137,612 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
-    for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
-        page.goto("http://127.0.0.1:4173"+path,wait_until="networkidle")
-        page.wait_for_selector(".legacy-shell",timeout=10000)
-        assert page.locator(".main-section-links").is_visible() or page.locator(".nav").count()==1
-        assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
-        page.evaluate("document.fonts.ready")
-        page.wait_for_timeout(300)
-        if name=="01-intake":
-            assert page.locator(".intake-entry").count()==2
-            assert page.locator(".intake-entry[href='/work']").is_visible()
-            assert page.locator(".intake-entry[href='/intake?mode=document']").is_visible()
-            assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
-            assert page.locator(".intake-flow-steps > div").count()==4
-        if name=="16-intake-document":
-            assert page.get_by_text("试卷不限单一科目，逐题填写科目。",exact=True).is_visible()
-            assert page.get_by_label("默认科目",exact=True).count()==0
-            page.get_by_role("button",name="复用已有来源").click()
-            page.get_by_label("选择来源资料",exact=True).first.click()
-            page.locator(".math-choice-options").get_by_role("button").filter(has_text="SDEMO0001").click()
-            assert page.locator(".source-selected").is_visible()
-            assert page.get_by_label("录入批次名称").input_value()==source["title"]
-            page.screenshot(path=str(OUT/"21-source-reuse.png"),full_page=False)
-        if name=="17-intake-knowledge":
-            assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
-        if name=="05-chat":
-            assert page.locator(".compact-composer .reasoning-effort").count()==0
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
-            effort.wait_for()
-            effort.select_option("high")
-            assert effort.input_value()=="high"
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            assert not effort.is_visible()
-            assert page.locator(".intake-chat-prompts").count()==0
-            assert page.locator(".chat-home-recent").is_visible()
-            page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
+    try:
+        if GROUP in {'all','desktop','editors'}:
+            for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+                if GROUP!="all" and ((name in EDITOR_PAGES) != (GROUP=="editors")):
+                    continue
+                print("UI case:",name,flush=True)
+                visit(page,path,READY.get(name))
+                page.wait_for_selector(".legacy-shell",timeout=10000)
+                expect(page.locator(".main-section-links").is_visible() or page.locator(".nav")).to_have_count(1)
+                assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
+                page.evaluate("document.fonts.ready")
+                if name=="01-intake":
+                    expect(page.locator(".intake-entry")).to_have_count(2)
+                    expect(page.locator(".intake-entry[href='/work']")).to_be_visible()
+                    expect(page.locator(".intake-entry[href='/intake?mode=document']")).to_be_visible()
+                    assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
+                    expect(page.locator(".intake-flow-steps > div")).to_have_count(4)
+                if name=="16-intake-document":
+                    expect(page.get_by_text("试卷不限单一科目，逐题填写科目。",exact=True)).to_be_visible()
+                    assert page.get_by_label("默认科目",exact=True).count()==0
+                    page.get_by_role("button",name="复用已有来源").click()
+                    page.get_by_label("选择来源资料",exact=True).first.click()
+                    page.locator(".math-choice-options").get_by_role("button").filter(has_text="SDEMO0001").click()
+                    expect(page.locator(".source-selected")).to_be_visible()
+                    assert page.get_by_label("录入批次名称").input_value()==source["title"]
+                    capture(page,path=str(OUT/"21-source-reuse.png"),full_page=False)
+                if name=="17-intake-knowledge":
+                    assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
+                if name=="05-chat":
+                    assert page.locator(".compact-composer .reasoning-effort").count()==0
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
+                    effort.wait_for()
+                    effort.select_option("high")
+                    assert effort.input_value()=="high"
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    assert not effort.is_visible()
+                    assert page.locator(".intake-chat-prompts").count()==0
+                    expect(page.locator(".chat-home-recent")).to_be_visible()
+                    page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
+                    page.get_by_role("button",name="添加与工具").click()
+                    page.get_by_role("button",name="转录入",exact=True).click()
+                    page.wait_for_url("**/work")
+                    assert page.get_by_label("输入录入资料",exact=True).input_value().startswith("录入题目")
+                    expect(page.get_by_text("已带入聊天正文")).to_be_visible()
+                    visit(page,"/chat",".chat-home-recent")
+                if name=="22-intake-supplement":
+                    page.locator(".supplement-proposal .katex").first.wait_for()
+                    assert page.get_by_role("button",name="确认生成录入文档").is_disabled()
+                    assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
+                    expect(page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容")).to_be_visible()
+                if name=="18-intelligence":
+                    assert page.locator(".compact-composer .reasoning-effort").count()==0
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
+                    effort.wait_for()
+                    effort.select_option("high")
+                    assert effort.input_value()=="high"
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    assert not effort.is_visible()
+                    page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
+                    page.get_by_role("button",name="发送资料").click()
+                    page.locator(".work-review-preview .katex").first.wait_for()
+                    assert page.get_by_label("输入录入资料",exact=True).input_value()==r"求 $\frac{1}{x}$ 的导数。"
+                    assert page.locator(".intelligence-stages").count()==0
+                    assert page.locator(".material-import").count()==0
+                if name=="19-intake-intent":
+                    page.locator(".chat-intake-suggestion").wait_for()
+                    assert page.locator(".chat-message.user .chat-message-body").evaluate("(el)=>getComputedStyle(el).width !== getComputedStyle(el.parentElement).width")
+                    expect(page.locator(".chat-message-actions").get_by_role("button",name="复制",exact=True).first).to_be_visible()
+                    assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    page.locator("#chat-session-actions").get_by_role("button",name="管理",exact=True).wait_for()
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    capture(page,path=str(OUT/(name+".png")),full_page=False)
+                    page.get_by_role("button",name="使用本次用户原文").click()
+                    page.wait_for_url("**/work?from=msg-user&intent=question")
+                    page.get_by_label("输入录入资料",exact=True).wait_for()
+                    page.get_by_text("已带入聊天正文").wait_for()
+                    assert page.get_by_label("输入录入资料",exact=True).input_value()==demo_chat["messages"][0]["content"]
+                    page.get_by_role("button",name="添加录入资料").click()
+                    assert page.get_by_label("录入目标").input_value()=="question"
+                    page.get_by_role("button",name="添加录入资料").click()
+                    capture(page,path=str(OUT/"20-intake-linked.png"),full_page=False)
+                    continue
+                if name=="00-home":
+                    expect(page.get_by_label("输入消息")).to_be_visible()
+                    expect(page.locator(".clean-chat.chat-main-area")).to_have_count(1)
+                    assert page.locator(".clean-chat .chat-main-area").count()==0
+                    expect(page.locator(".workspace > header")).to_have_count(1)
+                    assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
+                    expect(page.locator(".clean-chat > .chat-composer > textarea")).to_have_count(1)
+                    assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px' && getComputedStyle(el).boxShadow === 'none'")
+                    assert page.get_by_text("今天想做什么？",exact=True).count()==0
+                    expect(page.locator(".chat-home-recent")).to_be_visible()
+                    assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    assert page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型").get_attribute("href")=="/qoder"
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    page.locator(".mode-switch").get_by_role("link",name="工作").click()
+                    page.get_by_role("region",name="资料录入").wait_for()
+                    expect(page.get_by_label("输入录入资料")).to_be_visible()
+                    expect(page.get_by_role("button",name="添加录入资料")).to_be_visible()
+                    page.get_by_role("button",name="添加录入资料").click()
+                    page.get_by_role("button",name="上传图片、PDF 或 Word").wait_for()
+                    page.get_by_role("button",name="添加录入资料").click()
+                    page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
+                    page.get_by_role("button",name="发送资料").click()
+                    page.locator(".work-review-preview .katex").first.wait_for()
+                    page.once("dialog",lambda dialog:dialog.accept())
+                    page.get_by_role("button",name="移除资料").click()
+                    assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    expect(page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型")).to_be_visible()
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    assert page.locator(".workflow-board").count()==0
+                    page.locator(".mode-switch").get_by_role("link",name="聊天").click()
+                    page.locator(".chat-home-recent").wait_for()
+                    assert page.locator(".chat-history").count()==0
+                    assert page.locator(".workflow-step").count()==0
+                    expect(page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True)).to_be_visible()
+                    page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).click()
+                    page.locator(".chat-intake-suggestion").wait_for()
+                    page.locator("#workspace-navigation").get_by_role("link",name="新建对话").click()
+                    page.locator(".chat-home-recent").wait_for()
+                    page.locator(".clean-recent").first.get_by_role("button",name="全部",exact=True).click()
+                    page.locator("#workspace-navigation").get_by_label("搜索会话").wait_for()
+                    page.locator("#workspace-navigation").get_by_label("会话范围").select_option("archived")
+                    page.locator("#workspace-navigation").get_by_text("暂无已归档会话").wait_for()
+                    assert page.locator(".chat-history").count()==0
+                    page.locator(".clean-recent").first.get_by_role("button",name="收起",exact=True).click()
+                if name=="29-overview":
+                    page.wait_for_url("**/")
+                    assert page.locator(".workflow-step").count()==0
+                    assert page.locator("#workspace-navigation").get_by_role("link",name="首页",exact=True).count()==0
+                if name=="12-create":
+                    page.wait_for_url("**/project/creation")
+                    page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
+                    expect(page.locator(".project-hub .project-link")).to_have_count(4)
+                    page.locator("#workspace-navigation").get_by_role("link",name="教学教研",exact=True).click()
+                    page.wait_for_url("**/project/teaching")
+                    page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
+                    expect(page.locator(".project-hub .project-link")).to_have_count(4)
+                    for label in ("题库","知识库","知识图谱","来源库"):
+                        expect(page.locator(".project-hub").get_by_role("link",name=label,exact=True)).to_be_visible()
+                    assert page.locator(".project-hub").get_by_role("link",name="视频制作",exact=True).count()==0
+                    page.locator("#workspace-navigation").get_by_role("link",name="资料录入",exact=True).click()
+                    page.wait_for_url("**/project/intake")
+                    page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
+                    intake_section=page.locator(".project-hub")
+                    assert intake_section.locator(".project-link").count()==2
+                    assert intake_section.get_by_role("link",name="AI 录入",exact=True).get_attribute("href")=="/work"
+                    assert intake_section.get_by_role("link",name="整套资料录入",exact=True).get_attribute("href")=="/intake?mode=document"
+                    page.locator("#workspace-navigation").get_by_role("link",name="教学制作",exact=True).click()
+                    page.wait_for_url("**/project/creation")
+                    page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
+                    for label in ("视频制作","组卷","组讲义","组教材"):
+                        expect(page.locator(".project-hub").get_by_role("link",name=label,exact=True)).to_be_visible()
+                    assert page.locator("#workspace-navigation .clean-nav-children").count()==0
+                    page.locator("#workspace-navigation").get_by_role("link",name="内容发布",exact=True).click()
+                    page.wait_for_url("**/project/publishing")
+                    page.locator(".project-hub").get_by_role("heading",name="内容发布",exact=True).wait_for()
+                    expect(page.locator(".project-hub .project-link")).to_have_count(1)
+                    expect(page.locator(".project-hub").get_by_role("link",name="封面设计",exact=True)).to_be_visible()
+                    page.locator("#workspace-navigation").get_by_role("link",name="商品售卖",exact=True).click()
+                    page.wait_for_url("**/project/sales")
+                    page.locator(".project-hub").get_by_role("heading",name="商品售卖",exact=True).wait_for()
+                    page.locator(".project-hub").get_by_role("link",name="商品售卖",exact=True).click()
+                    page.get_by_text("商品上架",exact=True).wait_for()
+                    assert page.locator(".module-hub").get_by_role("link",name="教学作品",exact=True).count()==0
+                    visit(page,"/create",".project-hub .project-link")
+                    assert page.locator(".clean-context-menu").count()==0
+                if name=="13-video":
+                    expect(page.locator(".video-stage-track > div")).to_have_count(5)
+                    assert page.locator(".video-detail .reasoning-effort").count()==0
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
+                    effort.wait_for()
+                    effort.select_option("high")
+                    assert effort.input_value()=="high"
+                    page.get_by_role("button",name="更多选项",exact=True).click()
+                if name=="02-bank":
+                    page.get_by_role("button",name="高级筛选").click()
+                    expect(page.get_by_label("章节",exact=True)).to_be_visible()
+                    page.get_by_role("button",name="收起筛选").click()
+                    page.locator(".bank-detail .katex").first.wait_for()
+                    assert page.locator(".bank-list .katex").count()>0
+                if name=="25-word-ai":
+                    page.locator(".manual-word-work").wait_for()
+                    expect(page.locator(".manual-word-matches")).to_be_visible()
+                    assert page.get_by_role("button",name="批量审核入库").count()==0
+                    assert page.get_by_role("button",name="AI协作",exact=True).count()==0
+                    assert page.get_by_role("button",name="原文",exact=True).count()==0
+                    assert page.get_by_role("link",name="AI 录入",exact=True).count()==0
+                    expect(page.locator(".manual-word-paper")).to_have_count(1)
+                    expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+                    page.get_by_label("题目",exact=True).fill(r"测试查重 $x^2$ 与 $y^2$")
+                    page.get_by_label("难度",exact=True).click()
+                    tokens=page.get_by_label("题目",exact=True).locator(".inline-math-token")
+                    expect(tokens).to_have_count(2)
+                    tokens.nth(1).evaluate("(el)=>el.dataset.localRenderProbe='unchanged'")
+                    tokens.nth(0).click()
+                    page.get_by_label("编辑 LaTeX 公式",exact=True).fill("$x^3$")
+                    page.get_by_label("难度",exact=True).click()
+                    expect(tokens.nth(0)).to_have_attribute("data-math-source","$x^3$")
+                    expect(tokens.nth(1)).to_have_attribute("data-local-render-probe","unchanged")
+                    page.locator(".manual-word-matches").get_by_text("相似度 80.0%",exact=False).wait_for()
+                    expect(page.locator(".manual-word-matches .manual-match")).to_have_count(2)
+                    page.locator(".manual-word-paper-tail").first.click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    expect(page.locator(".manual-word-paper .manual-word-stem .katex").first).to_be_visible()
+                    expect(page.locator(".manual-word-paper .manual-word-stem").first.locator(".katex")).to_have_count(2)
+                    page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+                    expect(page.get_by_label("题目",exact=True).locator(".inline-math-token").nth(0)).to_have_attribute("data-math-source","$x^3$")
+                    # Clicking a non-interactive area outside the canvas must also collapse.
+                    page.locator(".manual-word-outline .manual-word-side-head").click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+                    expect(page.get_by_label("题目",exact=True).locator(".inline-math-token").nth(0)).to_have_attribute("data-math-source","$x^3$")
+                    page.locator(".manual-word-matches .manual-word-side-head").first.click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+                    page.locator(".manual-word-editor").get_by_role("button",name="移除",exact=True).click()
+                    expect(page.get_by_role("dialog",name="移除条目")).to_be_visible()
+                    page.get_by_role("dialog",name="移除条目").get_by_role("button",name="取消",exact=True).click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(1)
+                    page.get_by_role("button",name="完成编辑",exact=True).click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    page.get_by_role("button",name="整套预览",exact=True).click()
+                    page.locator(".manual-intake-preview .katex").first.wait_for()
+                    capture(page,path=str(OUT/"25-word-intake-preview.png"),full_page=False)
+                    page.get_by_role("button",name="编辑",exact=True).click()
+                    page.get_by_role("button",name="保存整套资料",exact=True).click()
+                    page.get_by_text("已保存并直接入库",exact=True).wait_for()
+                if name=="04-word":
+                    page.locator(".manual-word-work .katex").first.wait_for()
+                    outline=page.locator(".manual-word-outline nav button")
+                    assert outline.count()==4
+                    outline.first.click()
+                    expect(page.locator(".manual-word-item.active")).to_have_count(1)
+                    outline.first.click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    outline.first.click()
+                    expect(page.locator(".manual-word-editor")).to_have_count(1)
+                    page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
+                    page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
+                    page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
+                    page.get_by_role("button",name="取消微调",exact=True).click()
+                    page.get_by_role("button",name="下移",exact=True).click()
+                    assert outline.nth(1).get_attribute("aria-current")=="true"
+                    page.get_by_role("button",name="上移",exact=True).click()
+                    assert outline.first.get_attribute("aria-current")=="true"
+                    page.get_by_role("button",name="整套预览",exact=True).click()
+                    expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(4)
+                    page.get_by_role("button",name="编辑",exact=True).click()
+                    page.set_viewport_size({"width":393,"height":873})
+                    page.locator(".mobile-doc-card").wait_for()
+                    page.locator(".manual-render .katex").first.wait_for()
+                    assert page.locator(".manual-word-canvas").count()==0
+                    assert page.get_by_role("button",name="AI 修改",exact=True).count()==0
+                    assert page.get_by_role("button",name="原文对照",exact=True).count()==0
+                    assert page.get_by_role("link",name="导出 PDF",exact=True).count()==0
+                    page.get_by_role("button",name="下一条",exact=True).click()
+                    assert page.locator(".mobile-doc-card h2").inner_text()=="第 2 题"
+                    page.get_by_role("button",name="全部题目",exact=True).click()
+                    expect(page.locator(".manual-list-row")).to_have_count(4)
+                    page.get_by_role("button",name="整套预览",exact=True).click()
+                    assert page.locator(".manual-intake-preview .katex").count()>0
+                    page.get_by_role("button",name="全部题目",exact=True).click()
+                    page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    capture(page,path=str(OUT/"27-mobile-card.png"),full_page=False)
+                    page.get_by_role("button",name="切换 Word 版").click()
+                    expect(page.locator(".manual-word-canvas")).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    capture(page,path=str(OUT/"24-word-mobile.png"),full_page=False)
+                    page.set_viewport_size({"width":1600,"height":900})
+                    page.get_by_role("button",name="保存整套资料",exact=True).click()
+                    page.get_by_text("已保存并直接入库",exact=True).wait_for()
+                if name=="06-cover":
+                    page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
+                    page.locator(".math-cover-art .katex").first.wait_for()
+                    for platform,variant,w,h in [
+                        ("B站","bilibili",1200,900),("B站","bilibili_wide",1920,1080),
+                        ("抖音","douyin",1080,1440),("抖音","douyin_wide",1440,1080),("抖音","douyin_full",1080,1920),
+                        ("小红书","xiaohongshu",1080,1440),("视频号","wechat_channels",1080,1260),
+                        ("视频号","wechat_channels_wide",1920,1080),("公众号","wechat_top",900,383),("公众号","wechat_sub",500,500)
+                    ]:
+                        page.get_by_role("navigation",name="发布平台").get_by_role("button",name=platform,exact=True).click()
+                        page.get_by_label("封面比例",exact=True).select_option(variant)
+                        expect(page.get_by_text(f"{w} × {h} px",exact=True)).to_be_visible()
+                        assert page.locator(".math-cover-art").evaluate("(el)=>[el.offsetWidth,el.offsetHeight]")==[w,h]
+                        assert page.locator(".math-cover-art .katex").count()>0
+                        assert page.locator(".math-cover-art .cover-safe").count()==0
+                    # Confirm the downloaded PNG uses native pixels, not preview pixels.
+                    import struct
+                    with page.expect_download(timeout=60000) as downloaded:
+                        page.get_by_role("button",name="下载 PNG",exact=True).click()
+                    with open(downloaded.value.path(),"rb") as png:
+                        header=png.read(24)
+                    assert header[:8]==bytes.fromhex("89504e470d0a1a0a"), f"Invalid PNG signature: {header[:8].hex()}"
+                    assert struct.unpack(">II",header[16:24])==(500,500)
+                    page.get_by_role("navigation",name="发布平台").get_by_role("button",name="小红书",exact=True).click()
+
+                capture(page,path=str(OUT/(name+".png")),full_page=False)
+        if GROUP in {'all','editors'}:
+            print('UI case: document assembly',flush=True)
+            # Compose from the question bank, preserve original resources, and save layout only.
+            page.set_viewport_size({"width":1600,"height":900})
+            visit(page,"/papers",".assembly-result")
+            page.locator(".assembly-result").first.wait_for()
+            page.get_by_role("button",name="＋ 选入",exact=True).first.click()
+            page.get_by_role("button",name="＋ 选入",exact=True).first.click()
+            expect(page.locator(".assembly-cart-item")).to_have_count(2)
+            page.get_by_label("文档名称",exact=True).fill("组卷测试")
+            with page.expect_request(lambda req:req.url.endswith("/api/documents") and req.method=="POST") as created:
+                page.get_by_role("button",name="进入 Word 工作台",exact=True).click()
+            assert [b["kind"] for b in created.value.post_data_json["blocks"]]==["reference","reference"]
+            page.locator(".assembly-word").wait_for()
+            assert page.get_by_role("button",name="AI 协作",exact=True).count()==0
+            assert page.get_by_role("button",name="批量审核入库",exact=True).count()==0
+            expect(page.locator(".manual-word-item")).to_have_count(2)
+            expect(page.locator(".manual-word-editor")).to_have_count(0)
+            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+            page.get_by_label("本题分值",exact=True).fill("10")
+            page.get_by_role("button",name="下移",exact=True).click()
+            page.get_by_role("button",name="＋ 正文",exact=True).click()
+            page.get_by_label("正文",exact=True).fill("作答说明")
+            page.get_by_role("button",name="整套预览",exact=True).click()
+            expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(2)
+            assert page.locator(".manual-intake-preview").get_by_text("作答说明",exact=True).count()>0
+            with page.expect_request(lambda req:req.url.endswith("/documents/assembly-demo") and req.method=="PUT") as saved:
+                page.get_by_role("button",name="保存编排",exact=True).click()
+            assert [b["kind"] for b in saved.value.post_data_json["blocks"]]==["reference","reference","text"]
+            assert [b["resource_id"] for b in saved.value.post_data_json["blocks"][:2]]==[items[1]["id"],items[0]["id"]]
+            page.get_by_text("编排已保存到服务器",exact=True).wait_for()
+            capture(page,path=str(OUT/"30-assembly-paper.png"),full_page=False)
+            for route in ("handouts","textbooks"):
+                visit(page,"/"+route,".assembly-picker")
+                page.locator(".assembly-picker").wait_for()
+                expect(page.get_by_role("button",name="知识库",exact=True)).to_be_visible()
+
+        if GROUP in {'all','mobile'}:
+            print('UI case: phone intake and mobile navigation',flush=True)
+            # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
+            page.set_viewport_size({"width":393,"height":873})
+            visit(page,"/intake?doc=ai-demo",".mobile-doc-card")
+            page.locator(".mobile-doc-card").wait_for()
+            page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")
+            # select_option changes value but does not reliably move keyboard focus.
+            # Click outside as a real user would, then assert rendered math.
+            page.get_by_label("难度",exact=True).click()
+            page.get_by_label("难度",exact=True).select_option("中等")
+            page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
+            page.get_by_label("题目",exact=True).locator(".inline-math-token").click()
+            page.get_by_label("编辑 LaTeX 公式",exact=True).fill(r"$\frac{1}{x^2}$")
+            page.get_by_label("难度",exact=True).click()
+            page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
+            expect(page.get_by_label("编辑 LaTeX 公式",exact=True)).to_have_count(0)
+            expect(page.get_by_role("button",name="保存整套资料",exact=True)).to_be_enabled()
+            expect(page.get_by_label("条目标题",exact=True)).to_have_count(0)
+            page.get_by_role("button",name="切换 Word 版").click()
+            expect(page.locator(".manual-word-canvas")).to_be_visible()
+            assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
+            page.get_by_role("button",name="切换卡片版").click()
+            assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
+            expect(page.get_by_role("button",name="＋ 选择题",exact=True)).to_have_count(0)
+            page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+            expect(page.get_by_label("题目",exact=True)).to_have_count(0)
+            page.get_by_role("button",name="＋ 选择题",exact=True).click()
+            expect(page.get_by_label("科目",exact=True)).to_have_value("")
+            page.get_by_label("科目",exact=True).select_option("线性代数")
+            page.get_by_label("题目",exact=True).fill("选择正确答案")
+            page.get_by_label("A 选项",exact=True).fill("$1$")
+            page.get_by_label("B 选项",exact=True).fill("$2$")
+            page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
+            expect(page.get_by_text("正确选项 · 单选题",exact=True)).to_be_visible()
+            page.locator(".manual-answer-choices").get_by_role("button",name="B",exact=True).click()
+            expect(page.get_by_text("正确选项 · 多选题",exact=True)).to_be_visible()
+            page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+            page.get_by_role("button",name="＋ 填空题",exact=True).click()
+            expect(page.get_by_label("科目",exact=True)).to_have_value("")
+            page.get_by_label("科目",exact=True).select_option("概率论与数理统计")
+            page.get_by_label("题目",exact=True).fill("计算")
+            page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
+            assert "underline" in page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")
+            page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+            page.get_by_role("button",name="＋ 综合题",exact=True).click()
+            page.get_by_label("科目",exact=True).select_option("高等数学")
+            page.get_by_label("题目",exact=True).fill("已知函数")
+            expect(page.get_by_label("第 1 小问题目",exact=True)).to_have_count(0)
+            expect(page.get_by_label("答案",exact=True)).to_be_visible()
+            expect(page.get_by_label("解析",exact=True)).to_be_visible()
+            page.get_by_label("答案",exact=True).fill("原答案")
+            page.get_by_label("解析",exact=True).fill("原解析")
+            page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
+            page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
+            # The dialog close event and React commit occur asynchronously.
+            expect(page.get_by_label("第 1 小问题目",exact=True)).to_be_visible()
+            expect(page.get_by_label("答案",exact=True)).to_have_count(0)
+            expect(page.get_by_label("解析",exact=True)).to_have_count(0)
+            expect(page.get_by_label("第 1 小问答案",exact=True)).to_have_text("原答案")
+            expect(page.get_by_label("第 1 小问解析",exact=True)).to_have_text("原解析")
+            page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
+            expect(page.get_by_label("第 2 小问题目",exact=True)).to_be_visible()
+            page.locator(".manual-subquestion").nth(1).get_by_role("button",name="移除",exact=True).click()
+            expect(page.get_by_label("第 2 小问题目",exact=True)).to_have_count(0)
+            page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
+            page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
+            page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
+            page.get_by_role("button",name="选择已有知识点",exact=True).click()
+            catalog=page.locator(".manual-tag-catalog")
+            catalog.locator(".manual-tag-category").wait_for()
+            assert catalog.get_by_role("button",name="导数",exact=True).count()==0
+            catalog.locator(".manual-tag-category").filter(has_text="微积分").click()
+            catalog.get_by_role("button",name="展开 微积分",exact=True).click()
+            catalog.get_by_role("button",name="展开 一元函数微分学",exact=True).click()
+            catalog.get_by_role("button",name="导数",exact=True).click()
+            assert catalog.get_by_role("button",name="定积分",exact=True).count()==0
+            page.get_by_label("搜索已有知识点").fill("定积分")
+            catalog.get_by_role("button",name="定积分",exact=False).first.wait_for()
+
+            page.get_by_label("知识标签",exact=True).fill("新知识点")
+            page.get_by_role("button",name="新增标签",exact=True).click()
+            expect(page.get_by_role("button",name="移除知识标签 新知识点",exact=True)).to_be_visible()
+            expect(page.get_by_role("button",name="移除知识标签 导数",exact=True)).to_be_visible()
+            page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+            page.get_by_role("button",name="＋ 综合题",exact=True).click()
+            page.get_by_label("题目",exact=True).fill("测试查重")
+            page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.wait_for()
+            expect(page.locator(".manual-match")).to_have_count(2)
+            expect(page.get_by_text("相似度 80.0%",exact=False)).to_be_visible()
+            page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.click()
+            page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
+            expect(page.get_by_label("题目",exact=True)).to_have_attribute("contenteditable","false")
+            expect(page.get_by_text("已选择原题 QDEMO0002",exact=False)).to_be_visible()
+            page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
+            expect(page.get_by_label("题目",exact=True)).to_have_attribute("contenteditable","true")
+            page.get_by_label("题目",exact=True).fill("修改为新题")
+            page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+            page.get_by_role("button",name="＋ 章",exact=True).click()
+            page.get_by_label("章标题",exact=True).fill("第一章 函数与极限")
+            page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+            page.get_by_role("button",name="＋ 节",exact=True).click()
+            page.get_by_label("节标题",exact=True).fill("第一节 函数")
+            page.get_by_role("button",name="整套预览",exact=True).click()
+            expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(5)
+            chapter=page.locator(".manual-intake-preview .print-heading-level-1 h2")
+            section=page.locator(".manual-intake-preview .print-heading-level-2 h3")
+            assert chapter.inner_text()=="第一章 函数与极限"
+            assert section.inner_text()=="第一节 函数"
+            assert chapter.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > section.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > page.locator(".manual-intake-preview .chat-rich").first.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)")
+            assert page.locator(".manual-intake-preview .katex").count()>0
+            expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_have_count(0)
+            expect(page.get_by_text("已保存并直接入库",exact=True)).to_have_count(0)
+            with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-save") and req.method=="POST") as request_info:
+                page.get_by_role("button",name="保存整套资料",exact=True).click()
+            submitted=request_info.value.post_data_json
+            assert len(submitted["blocks"])==7
+            assert [b["heading_level"] for b in submitted["blocks"] if b["kind"]=="heading"]==[1,2]
+            assert submitted["blocks"][0]["difficulty"]=="中等"
+            assert submitted["blocks"][1]["question_type"]=="多选题"
+            assert submitted["blocks"][1]["subject"]=="线性代数"
+            assert submitted["blocks"][2]["subject"]=="概率论与数理统计"
+            assert submitted["blocks"][3]["subject"]=="高等数学"
+            assert submitted["blocks"][3]["content"]=="已知函数\n(1) 求导数"
+            assert submitted["blocks"][3]["answer"]=="(1) $2x$"
+            assert submitted["blocks"][3]["solution"]=="(1) 利用导数公式"
+            page.get_by_text("已保存并直接入库",exact=True).wait_for()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            capture(page,path=str(OUT/"28-mobile-review.png"),full_page=False)
+            page.set_viewport_size({"width":1600,"height":900})
+            # Theme and mobile smoke checks use the same compiled application.
+            visit(page,"/",".chat-home-recent")
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#ffffff"
+            page.evaluate("document.documentElement.dataset.theme='dark'")
+            capture(page,path=str(OUT/"09-home-dark.png"),full_page=False)
+            page.evaluate("document.documentElement.dataset.theme='light'")
+            page.set_viewport_size({"width":393,"height":873})
+            capture(page,path=str(OUT/"10-home-mobile.png"),full_page=False)
+            expect(page.locator(".mobile-tabs")).to_have_count(0)
+            expect(page.get_by_label("输入消息")).to_be_visible()
+            expect(page.locator(".clean-chat > .compact-composer")).to_be_visible()
+            expect(page.locator(".mode-switch")).to_be_visible()
             page.get_by_role("button",name="添加与工具").click()
-            page.get_by_role("button",name="转录入",exact=True).click()
-            page.wait_for_url("**/work")
-            assert page.get_by_label("输入录入资料",exact=True).input_value().startswith("录入题目")
-            assert page.get_by_text("已带入聊天正文").is_visible()
-            page.goto("http://127.0.0.1:4173/chat",wait_until="networkidle")
-        if name=="22-intake-supplement":
-            page.locator(".supplement-proposal .katex").first.wait_for()
-            assert page.get_by_role("button",name="确认生成录入文档").is_disabled()
-            assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
-            assert page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容").is_visible()
-        if name=="18-intelligence":
-            assert page.locator(".compact-composer .reasoning-effort").count()==0
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
-            effort.wait_for()
-            effort.select_option("high")
-            assert effort.input_value()=="high"
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            assert not effort.is_visible()
-            page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
-            page.get_by_role("button",name="发送资料").click()
-            page.locator(".work-review-preview .katex").first.wait_for()
-            assert page.get_by_label("输入录入资料",exact=True).input_value()==r"求 $\frac{1}{x}$ 的导数。"
-            assert page.locator(".intelligence-stages").count()==0
-            assert page.locator(".material-import").count()==0
-        if name=="19-intake-intent":
-            page.locator(".chat-intake-suggestion").wait_for()
-            assert page.locator(".chat-message.user .chat-message-body").evaluate("(el)=>getComputedStyle(el).width !== getComputedStyle(el.parentElement).width")
-            assert page.locator(".chat-message-actions").get_by_role("button",name="复制",exact=True).first.is_visible()
-            assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            page.locator("#chat-session-actions").get_by_role("button",name="管理",exact=True).wait_for()
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            page.screenshot(path=str(OUT/(name+".png")),full_page=False)
-            page.get_by_role("button",name="使用本次用户原文").click()
-            page.wait_for_url("**/work?from=msg-user&intent=question")
-            page.get_by_label("输入录入资料",exact=True).wait_for()
-            page.get_by_text("已带入聊天正文").wait_for()
-            assert page.get_by_label("输入录入资料",exact=True).input_value()==demo_chat["messages"][0]["content"]
-            page.get_by_role("button",name="添加录入资料").click()
-            assert page.get_by_label("录入目标").input_value()=="question"
-            page.get_by_role("button",name="添加录入资料").click()
-            page.screenshot(path=str(OUT/"20-intake-linked.png"),full_page=False)
-            continue
-        if name=="00-home":
-            assert page.get_by_label("输入消息").is_visible()
-            assert page.locator(".clean-chat.chat-main-area").count()==1
-            assert page.locator(".clean-chat .chat-main-area").count()==0
-            assert page.locator(".workspace > header").count()==1
-            assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
-            assert page.locator(".clean-chat > .chat-composer > textarea").count()==1
-            assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px' && getComputedStyle(el).boxShadow === 'none'")
-            assert page.get_by_text("今天想做什么？",exact=True).count()==0
-            assert page.locator(".chat-home-recent").is_visible()
-            assert page.locator(".mode-switch").get_by_role("link",name="聊天").get_attribute("aria-current")=="page"
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            assert page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型").get_attribute("href")=="/qoder"
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            page.locator(".mode-switch").get_by_role("link",name="工作").click()
-            page.get_by_role("region",name="资料录入").wait_for()
-            assert page.get_by_label("输入录入资料").is_visible()
-            assert page.get_by_role("button",name="添加录入资料").is_visible()
-            page.get_by_role("button",name="添加录入资料").click()
-            page.get_by_role("button",name="上传图片、PDF 或 Word").wait_for()
-            page.get_by_role("button",name="添加录入资料").click()
-            page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
-            page.get_by_role("button",name="发送资料").click()
-            page.locator(".work-review-preview .katex").first.wait_for()
-            page.once("dialog",lambda dialog:dialog.accept())
-            page.get_by_role("button",name="移除资料").click()
-            assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            assert page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型").is_visible()
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            assert page.locator(".workflow-board").count()==0
-            page.locator(".mode-switch").get_by_role("link",name="聊天").click()
-            page.locator(".chat-home-recent").wait_for()
-            assert page.locator(".chat-history").count()==0
-            assert page.locator(".workflow-step").count()==0
-            assert page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).is_visible()
-            page.locator(".clean-recent").get_by_text(demo_chat["title"],exact=True).click()
-            page.locator(".chat-intake-suggestion").wait_for()
-            page.locator("#workspace-navigation").get_by_role("link",name="新建对话").click()
-            page.locator(".chat-home-recent").wait_for()
-            page.locator(".clean-recent").first.get_by_role("button",name="全部",exact=True).click()
-            page.locator("#workspace-navigation").get_by_label("搜索会话").wait_for()
-            page.locator("#workspace-navigation").get_by_label("会话范围").select_option("archived")
-            page.locator("#workspace-navigation").get_by_text("暂无已归档会话").wait_for()
-            assert page.locator(".chat-history").count()==0
-            page.locator(".clean-recent").first.get_by_role("button",name="收起",exact=True).click()
-        if name=="29-overview":
-            page.wait_for_url("**/")
-            assert page.locator(".workflow-step").count()==0
-            assert page.locator("#workspace-navigation").get_by_role("link",name="首页",exact=True).count()==0
-        if name=="12-create":
-            page.wait_for_url("**/project/creation")
-            page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
-            assert page.locator(".project-hub .project-link").count()==4
-            page.locator("#workspace-navigation").get_by_role("link",name="教学教研",exact=True).click()
+            expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
+            page.get_by_role("button",name="添加与工具").click()
+            expect(page.locator(".workspace > header")).to_have_count(1)
+            expect(page.locator(".clean-chat header,.clean-chat .chat-top")).to_have_count(0)
+            assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            menu=page.get_by_role("button",name="打开导航",exact=True)
+            menu.click()
+            # React commits the drawer state asynchronously; require the open state
+            # and visible, actionable navigation before continuing.
+            from playwright.sync_api import expect
+            expect(menu).to_have_attribute("aria-expanded","true")
+            drawer=page.locator("#workspace-navigation.nav.open")
+            expect(drawer).to_be_visible()
+            expect(drawer.get_by_role("link",name="教学教研",exact=True)).to_be_visible()
+            drawer.get_by_role("link",name="教学教研",exact=True).click()
             page.wait_for_url("**/project/teaching")
             page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
-            assert page.locator(".project-hub .project-link").count()==4
-            for label in ("题库","知识库","知识图谱","来源库"):
-                assert page.locator(".project-hub").get_by_role("link",name=label,exact=True).is_visible()
-            assert page.locator(".project-hub").get_by_role("link",name="视频制作",exact=True).count()==0
-            page.locator("#workspace-navigation").get_by_role("link",name="资料录入",exact=True).click()
+            expect(drawer).to_have_count(0)
+            expect(page.locator(".project-hub").get_by_role("link",name="来源库",exact=True)).to_be_visible()
+            menu.click()
+            expect(drawer).to_be_visible()
+            drawer.get_by_role("link",name="资料录入",exact=True).click()
             page.wait_for_url("**/project/intake")
             page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
-            intake_section=page.locator(".project-hub")
-            assert intake_section.locator(".project-link").count()==2
-            assert intake_section.get_by_role("link",name="AI 录入",exact=True).get_attribute("href")=="/work"
-            assert intake_section.get_by_role("link",name="整套资料录入",exact=True).get_attribute("href")=="/intake?mode=document"
-            page.locator("#workspace-navigation").get_by_role("link",name="教学制作",exact=True).click()
-            page.wait_for_url("**/project/creation")
-            page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
-            for label in ("视频制作","组卷","组讲义","组教材"):
-                assert page.locator(".project-hub").get_by_role("link",name=label,exact=True).is_visible()
-            assert page.locator("#workspace-navigation .clean-nav-children").count()==0
-            page.locator("#workspace-navigation").get_by_role("link",name="内容发布",exact=True).click()
-            page.wait_for_url("**/project/publishing")
-            page.locator(".project-hub").get_by_role("heading",name="内容发布",exact=True).wait_for()
-            assert page.locator(".project-hub .project-link").count()==1
-            assert page.locator(".project-hub").get_by_role("link",name="封面设计",exact=True).is_visible()
-            page.locator("#workspace-navigation").get_by_role("link",name="商品售卖",exact=True).click()
-            page.wait_for_url("**/project/sales")
-            page.locator(".project-hub").get_by_role("heading",name="商品售卖",exact=True).wait_for()
-            page.locator(".project-hub").get_by_role("link",name="商品售卖",exact=True).click()
-            page.get_by_text("商品上架",exact=True).wait_for()
-            assert page.locator(".module-hub").get_by_role("link",name="教学作品",exact=True).count()==0
-            page.goto("http://127.0.0.1:4173/create",wait_until="networkidle")
-            assert page.locator(".clean-context-menu").count()==0
-        if name=="13-video":
-            assert page.locator(".video-stage-track > div").count()==5
-            assert page.locator(".video-detail .reasoning-effort").count()==0
-            page.get_by_role("button",name="更多选项",exact=True).click()
-            effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
-            effort.wait_for()
-            effort.select_option("high")
-            assert effort.input_value()=="high"
-            page.get_by_role("button",name="更多选项",exact=True).click()
-        if name=="02-bank":
-            page.get_by_role("button",name="高级筛选").click()
-            assert page.get_by_label("章节",exact=True).is_visible()
-            page.get_by_role("button",name="收起筛选").click()
+            expect(drawer).to_have_count(0)
+            page.locator(".project-hub").get_by_role("link",name="整套资料录入",exact=True).click()
+            page.wait_for_url("**/intake?mode=document")
+            page.locator(".legacy-intake").wait_for()
+            assert not page.locator(".nav.open").count()
+            visit(page,"/sources",".bank-row")
+            page.locator(".bank-row").first.click()
+            page.get_by_role("link",name="导出 PDF",exact=True).click()
+            page.wait_for_url("**/source-print/source-preview")
+            page.locator(".print-document .katex").first.wait_for()
+            expect(page.locator(".print-question-number")).to_have_count(4)
+            expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_be_enabled()
+            page.get_by_label("仅题目").check()
+            expect(page.locator(".print-document").get_by_text("答案：",exact=False)).to_have_count(0)
+            visit(page,"/resources",".bank-row")
+            page.locator(".bank-row").first.wait_for()
+            expect(page.locator(".bank-detail")).to_be_hidden()
+            page.locator(".bank-row").first.click()
             page.locator(".bank-detail .katex").first.wait_for()
-            assert page.locator(".bank-list .katex").count()>0
-        if name=="25-word-ai":
-            page.locator(".manual-word-work").wait_for()
-            assert page.locator(".manual-word-matches").is_visible()
-            assert page.get_by_role("button",name="批量审核入库").count()==0
-            assert page.get_by_role("button",name="AI协作",exact=True).count()==0
-            assert page.get_by_role("button",name="原文",exact=True).count()==0
-            assert page.get_by_role("link",name="AI 录入",exact=True).count()==0
-            expect(page.locator(".manual-word-paper")).to_have_count(1)
-            expect(page.locator(".manual-word-editor")).to_have_count(0)
-            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
-            page.get_by_label("题目",exact=True).fill(r"测试查重 $x^2$ 与 $y^2$")
-            page.get_by_label("难度",exact=True).click()
-            tokens=page.get_by_label("题目",exact=True).locator(".inline-math-token")
-            expect(tokens).to_have_count(2)
-            tokens.nth(1).evaluate("(el)=>el.dataset.localRenderProbe='unchanged'")
-            tokens.nth(0).click()
-            page.get_by_label("编辑 LaTeX 公式",exact=True).fill("$x^3$")
-            page.get_by_label("难度",exact=True).click()
-            expect(tokens.nth(0)).to_have_attribute("data-math-source","$x^3$")
-            expect(tokens.nth(1)).to_have_attribute("data-local-render-probe","unchanged")
-            page.locator(".manual-word-matches").get_by_text("相似度 80.0%",exact=False).wait_for()
-            assert page.locator(".manual-word-matches .manual-match").count()==2
-            page.locator(".manual-word-paper-tail").first.click()
-            expect(page.locator(".manual-word-editor")).to_have_count(0)
-            expect(page.locator(".manual-word-paper .manual-word-stem .katex").first).to_be_visible()
-            expect(page.locator(".manual-word-paper .manual-word-stem").first.locator(".katex")).to_have_count(2)
-            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
-            expect(page.get_by_label("题目",exact=True).locator(".inline-math-token").nth(0)).to_have_attribute("data-math-source","$x^3$")
-            # Clicking a non-interactive area outside the canvas must also collapse.
-            page.locator(".manual-word-outline .manual-word-side-head").click()
-            expect(page.locator(".manual-word-editor")).to_have_count(0)
-            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
-            expect(page.get_by_label("题目",exact=True).locator(".inline-math-token").nth(0)).to_have_attribute("data-math-source","$x^3$")
-            page.locator(".manual-word-matches .manual-word-side-head").first.click()
-            expect(page.locator(".manual-word-editor")).to_have_count(0)
-            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
-            page.locator(".manual-word-editor").get_by_role("button",name="移除",exact=True).click()
-            expect(page.get_by_role("dialog",name="移除条目")).to_be_visible()
-            page.get_by_role("dialog",name="移除条目").get_by_role("button",name="取消",exact=True).click()
-            expect(page.locator(".manual-word-editor")).to_have_count(1)
-            page.get_by_role("button",name="完成编辑",exact=True).click()
-            expect(page.locator(".manual-word-editor")).to_have_count(0)
-            page.get_by_role("button",name="整套预览",exact=True).click()
-            page.locator(".manual-intake-preview .katex").first.wait_for()
-            page.screenshot(path=str(OUT/"25-word-intake-preview.png"),full_page=False)
-            page.get_by_role("button",name="编辑",exact=True).click()
-            page.get_by_role("button",name="保存整套资料",exact=True).click()
-            page.get_by_text("已保存并直接入库",exact=True).wait_for()
-        if name=="04-word":
-            page.locator(".manual-word-work .katex").first.wait_for()
-            outline=page.locator(".manual-word-outline nav button")
-            assert outline.count()==4
-            outline.first.click()
-            assert page.locator(".manual-word-item.active").count()==1
-            outline.first.click()
-            expect(page.locator(".manual-word-editor")).to_have_count(0)
-            outline.first.click()
-            expect(page.locator(".manual-word-editor")).to_have_count(1)
-            page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
-            page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
-            page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
-            page.get_by_role("button",name="取消微调",exact=True).click()
-            page.get_by_role("button",name="下移",exact=True).click()
-            assert outline.nth(1).get_attribute("aria-current")=="true"
-            page.get_by_role("button",name="上移",exact=True).click()
-            assert outline.first.get_attribute("aria-current")=="true"
-            page.get_by_role("button",name="整套预览",exact=True).click()
-            assert page.locator(".manual-intake-preview .print-question-number").count()==4
-            page.get_by_role("button",name="编辑",exact=True).click()
-            page.set_viewport_size({"width":393,"height":873})
-            page.locator(".mobile-doc-card").wait_for()
-            page.locator(".manual-render .katex").first.wait_for()
-            assert page.locator(".manual-word-canvas").count()==0
-            assert page.get_by_role("button",name="AI 修改",exact=True).count()==0
-            assert page.get_by_role("button",name="原文对照",exact=True).count()==0
-            assert page.get_by_role("link",name="导出 PDF",exact=True).count()==0
-            page.get_by_role("button",name="下一条",exact=True).click()
-            assert page.locator(".mobile-doc-card h2").inner_text()=="第 2 题"
-            page.get_by_role("button",name="全部题目",exact=True).click()
-            assert page.locator(".manual-list-row").count()==4
-            page.get_by_role("button",name="整套预览",exact=True).click()
-            assert page.locator(".manual-intake-preview .katex").count()>0
-            page.get_by_role("button",name="全部题目",exact=True).click()
-            page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
+            expect(page.locator(".bank-list")).to_be_hidden()
+            capture(page,path=str(OUT/"30-resource-mobile.png"),full_page=False)
+            page.get_by_role("button",name="返回资源列表",exact=False).click()
+            expect(page.locator(".bank-list")).to_be_visible()
+            visit(page,"/works",".studio-library")
+            expect(page.locator(".studio-library")).to_be_visible()
+            page.get_by_role("button",name="新建",exact=True).click()
+            expect(page.locator(".clean-studio .resource-form")).to_be_visible()
+            expect(page.locator(".studio-library")).to_be_hidden()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-            page.screenshot(path=str(OUT/"27-mobile-card.png"),full_page=False)
-            page.get_by_role("button",name="切换 Word 版").click()
-            assert page.locator(".manual-word-canvas").is_visible()
-            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-            page.screenshot(path=str(OUT/"24-word-mobile.png"),full_page=False)
-            page.set_viewport_size({"width":1600,"height":900})
-            page.get_by_role("button",name="保存整套资料",exact=True).click()
-            page.get_by_text("已保存并直接入库",exact=True).wait_for()
-        if name=="06-cover":
-            page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
-            page.locator(".math-cover-art .katex").first.wait_for()
-            for platform,variant,w,h in [
-                ("B站","bilibili",1200,900),("B站","bilibili_wide",1920,1080),
-                ("抖音","douyin",1080,1440),("抖音","douyin_wide",1440,1080),("抖音","douyin_full",1080,1920),
-                ("小红书","xiaohongshu",1080,1440),("视频号","wechat_channels",1080,1260),
-                ("视频号","wechat_channels_wide",1920,1080),("公众号","wechat_top",900,383),("公众号","wechat_sub",500,500)
-            ]:
-                page.get_by_role("navigation",name="发布平台").get_by_role("button",name=platform,exact=True).click()
-                page.get_by_label("封面比例",exact=True).select_option(variant)
-                expect(page.get_by_text(f"{w} × {h} px",exact=True)).to_be_visible()
-                assert page.locator(".math-cover-art").evaluate("(el)=>[el.offsetWidth,el.offsetHeight]")==[w,h]
-                assert page.locator(".math-cover-art .katex").count()>0
-                assert page.locator(".math-cover-art .cover-safe").count()==0
-            # Confirm the downloaded PNG uses native pixels, not preview pixels.
-            import struct
-            with page.expect_download(timeout=60000) as downloaded:
-                page.get_by_role("button",name="下载 PNG",exact=True).click()
-            with open(downloaded.value.path(),"rb") as png:
-                header=png.read(24)
-            assert header[:8]==bytes.fromhex("89504e470d0a1a0a"), f"Invalid PNG signature: {header[:8].hex()}"
-            assert struct.unpack(">II",header[16:24])==(500,500)
-            page.get_by_role("navigation",name="发布平台").get_by_role("button",name="小红书",exact=True).click()
-
-        page.screenshot(path=str(OUT/(name+".png")),full_page=False)
-    # Compose from the question bank, preserve original resources, and save layout only.
-    page.set_viewport_size({"width":1600,"height":900})
-    page.goto("http://127.0.0.1:4173/papers",wait_until="networkidle")
-    page.locator(".assembly-result").first.wait_for()
-    page.get_by_role("button",name="＋ 选入",exact=True).first.click()
-    page.get_by_role("button",name="＋ 选入",exact=True).first.click()
-    assert page.locator(".assembly-cart-item").count()==2
-    page.get_by_label("文档名称",exact=True).fill("组卷测试")
-    with page.expect_request(lambda req:req.url.endswith("/api/documents") and req.method=="POST") as created:
-        page.get_by_role("button",name="进入 Word 工作台",exact=True).click()
-    assert [b["kind"] for b in created.value.post_data_json["blocks"]]==["reference","reference"]
-    page.locator(".assembly-word").wait_for()
-    assert page.get_by_role("button",name="AI 协作",exact=True).count()==0
-    assert page.get_by_role("button",name="批量审核入库",exact=True).count()==0
-    assert page.locator(".manual-word-item").count()==2
-    expect(page.locator(".manual-word-editor")).to_have_count(0)
-    page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
-    page.get_by_label("本题分值",exact=True).fill("10")
-    page.get_by_role("button",name="下移",exact=True).click()
-    page.get_by_role("button",name="＋ 正文",exact=True).click()
-    page.get_by_label("正文",exact=True).fill("作答说明")
-    page.get_by_role("button",name="整套预览",exact=True).click()
-    assert page.locator(".manual-intake-preview .print-question-number").count()==2
-    assert page.locator(".manual-intake-preview").get_by_text("作答说明",exact=True).count()>0
-    with page.expect_request(lambda req:req.url.endswith("/documents/assembly-demo") and req.method=="PUT") as saved:
-        page.get_by_role("button",name="保存编排",exact=True).click()
-    assert [b["kind"] for b in saved.value.post_data_json["blocks"]]==["reference","reference","text"]
-    assert [b["resource_id"] for b in saved.value.post_data_json["blocks"][:2]]==[items[1]["id"],items[0]["id"]]
-    page.get_by_text("编排已保存到服务器",exact=True).wait_for()
-    page.screenshot(path=str(OUT/"30-assembly-paper.png"),full_page=False)
-    for route in ("handouts","textbooks"):
-        page.goto("http://127.0.0.1:4173/"+route,wait_until="networkidle")
-        page.locator(".assembly-picker").wait_for()
-        assert page.get_by_role("button",name="知识库",exact=True).is_visible()
-
-    # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
-    page.set_viewport_size({"width":393,"height":873})
-    page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
-    page.locator(".mobile-doc-card").wait_for()
-    page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")
-    # select_option changes value but does not reliably move keyboard focus.
-    # Click outside as a real user would, then assert rendered math.
-    page.get_by_label("难度",exact=True).click()
-    page.get_by_label("难度",exact=True).select_option("中等")
-    page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
-    page.get_by_label("题目",exact=True).locator(".inline-math-token").click()
-    page.get_by_label("编辑 LaTeX 公式",exact=True).fill(r"$\frac{1}{x^2}$")
-    page.get_by_label("难度",exact=True).click()
-    page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
-    expect(page.get_by_label("编辑 LaTeX 公式",exact=True)).to_have_count(0)
-    expect(page.get_by_role("button",name="保存整套资料",exact=True)).to_be_enabled()
-    expect(page.get_by_label("条目标题",exact=True)).to_have_count(0)
-    page.get_by_role("button",name="切换 Word 版").click()
-    expect(page.locator(".manual-word-canvas")).to_be_visible()
-    assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
-    page.get_by_role("button",name="切换卡片版").click()
-    assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
-    expect(page.get_by_role("button",name="＋ 选择题",exact=True)).to_have_count(0)
-    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    expect(page.get_by_label("题目",exact=True)).to_have_count(0)
-    page.get_by_role("button",name="＋ 选择题",exact=True).click()
-    expect(page.get_by_label("科目",exact=True)).to_have_value("")
-    page.get_by_label("科目",exact=True).select_option("线性代数")
-    page.get_by_label("题目",exact=True).fill("选择正确答案")
-    page.get_by_label("A 选项",exact=True).fill("$1$")
-    page.get_by_label("B 选项",exact=True).fill("$2$")
-    page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
-    expect(page.get_by_text("正确选项 · 单选题",exact=True)).to_be_visible()
-    page.locator(".manual-answer-choices").get_by_role("button",name="B",exact=True).click()
-    expect(page.get_by_text("正确选项 · 多选题",exact=True)).to_be_visible()
-    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 填空题",exact=True).click()
-    expect(page.get_by_label("科目",exact=True)).to_have_value("")
-    page.get_by_label("科目",exact=True).select_option("概率论与数理统计")
-    page.get_by_label("题目",exact=True).fill("计算")
-    page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
-    assert "underline" in page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")
-    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 综合题",exact=True).click()
-    page.get_by_label("科目",exact=True).select_option("高等数学")
-    page.get_by_label("题目",exact=True).fill("已知函数")
-    expect(page.get_by_label("第 1 小问题目",exact=True)).to_have_count(0)
-    expect(page.get_by_label("答案",exact=True)).to_be_visible()
-    expect(page.get_by_label("解析",exact=True)).to_be_visible()
-    page.get_by_label("答案",exact=True).fill("原答案")
-    page.get_by_label("解析",exact=True).fill("原解析")
-    page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
-    page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
-    # The dialog close event and React commit occur asynchronously.
-    expect(page.get_by_label("第 1 小问题目",exact=True)).to_be_visible()
-    expect(page.get_by_label("答案",exact=True)).to_have_count(0)
-    expect(page.get_by_label("解析",exact=True)).to_have_count(0)
-    expect(page.get_by_label("第 1 小问答案",exact=True)).to_have_text("原答案")
-    expect(page.get_by_label("第 1 小问解析",exact=True)).to_have_text("原解析")
-    page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
-    expect(page.get_by_label("第 2 小问题目",exact=True)).to_be_visible()
-    page.locator(".manual-subquestion").nth(1).get_by_role("button",name="移除",exact=True).click()
-    expect(page.get_by_label("第 2 小问题目",exact=True)).to_have_count(0)
-    page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
-    page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
-    page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
-    page.get_by_role("button",name="选择已有知识点",exact=True).click()
-    catalog=page.locator(".manual-tag-catalog")
-    catalog.locator(".manual-tag-category").wait_for()
-    assert catalog.get_by_role("button",name="导数",exact=True).count()==0
-    catalog.locator(".manual-tag-category").filter(has_text="微积分").click()
-    catalog.get_by_role("button",name="展开 微积分",exact=True).click()
-    catalog.get_by_role("button",name="展开 一元函数微分学",exact=True).click()
-    catalog.get_by_role("button",name="导数",exact=True).click()
-    assert catalog.get_by_role("button",name="定积分",exact=True).count()==0
-    page.get_by_label("搜索已有知识点").fill("定积分")
-    catalog.get_by_role("button",name="定积分",exact=False).first.wait_for()
-
-    page.get_by_label("知识标签",exact=True).fill("新知识点")
-    page.get_by_role("button",name="新增标签",exact=True).click()
-    expect(page.get_by_role("button",name="移除知识标签 新知识点",exact=True)).to_be_visible()
-    expect(page.get_by_role("button",name="移除知识标签 导数",exact=True)).to_be_visible()
-    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 综合题",exact=True).click()
-    page.get_by_label("题目",exact=True).fill("测试查重")
-    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.wait_for()
-    expect(page.locator(".manual-match")).to_have_count(2)
-    expect(page.get_by_text("相似度 80.0%",exact=False)).to_be_visible()
-    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.click()
-    page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
-    expect(page.get_by_label("题目",exact=True)).to_have_attribute("contenteditable","false")
-    expect(page.get_by_text("已选择原题 QDEMO0002",exact=False)).to_be_visible()
-    page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
-    expect(page.get_by_label("题目",exact=True)).to_have_attribute("contenteditable","true")
-    page.get_by_label("题目",exact=True).fill("修改为新题")
-    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 章",exact=True).click()
-    page.get_by_label("章标题",exact=True).fill("第一章 函数与极限")
-    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 节",exact=True).click()
-    page.get_by_label("节标题",exact=True).fill("第一节 函数")
-    page.get_by_role("button",name="整套预览",exact=True).click()
-    expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(5)
-    chapter=page.locator(".manual-intake-preview .print-heading-level-1 h2")
-    section=page.locator(".manual-intake-preview .print-heading-level-2 h3")
-    assert chapter.inner_text()=="第一章 函数与极限"
-    assert section.inner_text()=="第一节 函数"
-    assert chapter.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > section.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > page.locator(".manual-intake-preview .chat-rich").first.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)")
-    assert page.locator(".manual-intake-preview .katex").count()>0
-    expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_have_count(0)
-    expect(page.get_by_text("已保存并直接入库",exact=True)).to_have_count(0)
-    with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-save") and req.method=="POST") as request_info:
-        page.get_by_role("button",name="保存整套资料",exact=True).click()
-    submitted=request_info.value.post_data_json
-    assert len(submitted["blocks"])==7
-    assert [b["heading_level"] for b in submitted["blocks"] if b["kind"]=="heading"]==[1,2]
-    assert submitted["blocks"][0]["difficulty"]=="中等"
-    assert submitted["blocks"][1]["question_type"]=="多选题"
-    assert submitted["blocks"][1]["subject"]=="线性代数"
-    assert submitted["blocks"][2]["subject"]=="概率论与数理统计"
-    assert submitted["blocks"][3]["subject"]=="高等数学"
-    assert submitted["blocks"][3]["content"]=="已知函数\n(1) 求导数"
-    assert submitted["blocks"][3]["answer"]=="(1) $2x$"
-    assert submitted["blocks"][3]["solution"]=="(1) 利用导数公式"
-    page.get_by_text("已保存并直接入库",exact=True).wait_for()
-    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    page.screenshot(path=str(OUT/"28-mobile-review.png"),full_page=False)
-    page.set_viewport_size({"width":1600,"height":900})
-    # Theme and mobile smoke checks use the same compiled application.
-    page.goto("http://127.0.0.1:4173/",wait_until="networkidle")
-    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#ffffff"
-    page.evaluate("document.documentElement.dataset.theme='dark'")
-    page.screenshot(path=str(OUT/"09-home-dark.png"),full_page=False)
-    page.evaluate("document.documentElement.dataset.theme='light'")
-    page.set_viewport_size({"width":393,"height":873})
-    page.screenshot(path=str(OUT/"10-home-mobile.png"),full_page=False)
-    expect(page.locator(".mobile-tabs")).to_have_count(0)
-    expect(page.get_by_label("输入消息")).to_be_visible()
-    expect(page.locator(".clean-chat > .compact-composer")).to_be_visible()
-    expect(page.locator(".mode-switch")).to_be_visible()
-    page.get_by_role("button",name="添加与工具").click()
-    expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
-    page.get_by_role("button",name="添加与工具").click()
-    expect(page.locator(".workspace > header")).to_have_count(1)
-    expect(page.locator(".clean-chat header,.clean-chat .chat-top")).to_have_count(0)
-    assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
-    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    menu=page.get_by_role("button",name="打开导航",exact=True)
-    menu.click()
-    # React commits the drawer state asynchronously; require the open state
-    # and visible, actionable navigation before continuing.
-    from playwright.sync_api import expect
-    expect(menu).to_have_attribute("aria-expanded","true")
-    drawer=page.locator("#workspace-navigation.nav.open")
-    expect(drawer).to_be_visible()
-    expect(drawer.get_by_role("link",name="教学教研",exact=True)).to_be_visible()
-    drawer.get_by_role("link",name="教学教研",exact=True).click()
-    page.wait_for_url("**/project/teaching")
-    page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
-    expect(drawer).to_have_count(0)
-    expect(page.locator(".project-hub").get_by_role("link",name="来源库",exact=True)).to_be_visible()
-    menu.click()
-    expect(drawer).to_be_visible()
-    drawer.get_by_role("link",name="资料录入",exact=True).click()
-    page.wait_for_url("**/project/intake")
-    page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
-    expect(drawer).to_have_count(0)
-    page.locator(".project-hub").get_by_role("link",name="整套资料录入",exact=True).click()
-    page.wait_for_url("**/intake?mode=document")
-    page.locator(".legacy-intake").wait_for()
-    assert not page.locator(".nav.open").count()
-    page.goto("http://127.0.0.1:4173/sources",wait_until="networkidle")
-    page.locator(".bank-row").first.click()
-    page.get_by_role("link",name="导出 PDF",exact=True).click()
-    page.wait_for_url("**/source-print/source-preview")
-    page.locator(".print-document .katex").first.wait_for()
-    expect(page.locator(".print-question-number")).to_have_count(4)
-    expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_be_enabled()
-    page.get_by_label("仅题目").check()
-    expect(page.locator(".print-document").get_by_text("答案：",exact=False)).to_have_count(0)
-    page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
-    page.locator(".bank-row").first.wait_for()
-    expect(page.locator(".bank-detail")).to_be_hidden()
-    page.locator(".bank-row").first.click()
-    page.locator(".bank-detail .katex").first.wait_for()
-    expect(page.locator(".bank-list")).to_be_hidden()
-    page.screenshot(path=str(OUT/"30-resource-mobile.png"),full_page=False)
-    page.get_by_role("button",name="返回资源列表",exact=False).click()
-    expect(page.locator(".bank-list")).to_be_visible()
-    page.goto("http://127.0.0.1:4173/works",wait_until="networkidle")
-    expect(page.locator(".studio-library")).to_be_visible()
-    page.get_by_role("button",name="新建",exact=True).click()
-    expect(page.locator(".clean-studio .resource-form")).to_be_visible()
-    expect(page.locator(".studio-library")).to_be_hidden()
-    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    # Qoder login must visibly report unavailable services and expose a real
-    # authorization link even if the browser blocks automatic popups.
-    login_fixture={"available":False,"detail":"执行服务未连接"}
-    def login_api(route):
-        route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture,ensure_ascii=False))
-    context.route("**/api/qoder/status",login_api)
-    page.goto("http://127.0.0.1:4173/qoder",wait_until="networkidle")
-    page.get_by_role("button",name="获取授权链接",exact=True).click()
-    page.get_by_role("alert").filter(has_text="Qoder CN 暂不可用").wait_for()
-    login_fixture.update(available=True,detail="CLI 已安装",auth_ui=False,model_discovery=True)
-    page.get_by_role("button",name="刷新状态").click()
-    page.get_by_text("服务器执行服务版本过旧，不支持网页授权。",exact=True).wait_for()
-    page.get_by_role("button",name="获取授权链接",exact=True).click()
-    page.get_by_role("alert").filter(has_text="尚不支持网页授权").wait_for()
-    login_fixture.update(auth_ui=True)
-    page.get_by_role("button",name="刷新状态").click()
-    page.get_by_text("服务器执行服务版本过旧，不支持网页授权。",exact=True).wait_for(state="detached")
-    # Observe the real browser, not a patched window.open counter. Patching
-    # window.open would itself prevent detecting an actual popup.
-    authorization_pages=[]
-    context.on("page", lambda opened: authorization_pages.append(opened))
-    authorization_origin=page.url
-    existing_pages=len(context.pages)
-    def start_login(route):
-        login_fixture["login"]={"state":"waiting","url":"https://qoder.com.cn/auth/login?state=preview","detail":"请在浏览器完成官方授权"}
-        route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture["login"],ensure_ascii=False))
-    context.route("**/api/qoder/login/start",start_login)
-    page.get_by_role("button",name="获取授权链接",exact=True).click()
-    page.locator(".auth-inline-row").wait_for()
-    expect(page.locator(".auth-inline-row input")).to_have_count(1)
-    expect(page.locator(".auth-inline-row textarea")).to_have_count(0)
-    expect(page.get_by_label("授权链接",exact=True)).to_have_value("https://qoder.com.cn/auth/login?state=preview")
-    # The URL must be visible, authorization must remain on the same page,
-    # and no new browser tab/window may be opened by requesting the link.
-    expect(page.get_by_role("button",name="复制授权链接",exact=True)).to_be_enabled()
-    expect(page.get_by_role("button",name="刷新状态",exact=True)).to_be_enabled()
-    expect(page.get_by_role("button",name="取消本次授权",exact=True)).to_be_enabled()
-    assert page.url==authorization_origin, f"Unexpected navigation: {page.url}"
-    assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected automatic authorization popup"
-    expect(page.get_by_text("等待授权",exact=True)).to_be_visible()
-    page.screenshot(path=str(OUT/"31-qoder-auth-mobile.png"),full_page=False)
-    # Complete the simulated official login: the current account's actual
-    # catalog must be fetched automatically, not the compatibility defaults.
-    model_requests=[]
-    live_catalog={"models":[{"id":"Auto","label":"Auto","efforts":["default"]},{"id":"preview-new-model","label":"Preview New Model","efforts":["default"]}],"source":"cli","updated_at":1}
-    def latest_models(route):
-        model_requests.append(route.request.method)
-        route.fulfill(status=200,content_type="application/json",body=json.dumps(live_catalog))
-    context.route("**/api/qoder/models/refresh",latest_models)
-    login_fixture["login"]={"state":"finished","url":"","detail":"CLI 登录流程已结束"}
-    page.get_by_text("最新模型清单已更新（2 个）",exact=True).wait_for(timeout=15000)
-    assert model_requests==["POST"]
-    expect(page.get_by_text("可用模型：2",exact=True)).to_be_visible()
-    assert page.url==authorization_origin
-    assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected popup during authorization polling"
-    page.get_by_role("button",name="模型配置",exact=True).click()
-    page.get_by_role("button",name="修改",exact=True).click()
-    page.get_by_label("AI 助手模型",exact=True).locator("option[value='preview-new-model']").wait_for(state="attached")
-    assert page.get_by_label("AI 助手模型",exact=True).evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
-    assert page.get_by_label("视频制作与微调模型",exact=True).evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
-    browser.close()
+            # Qoder login must visibly report unavailable services and expose a real
+            # authorization link even if the browser blocks automatic popups.
+            login_fixture={"available":False,"detail":"执行服务未连接"}
+            def login_api(route):
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture,ensure_ascii=False))
+            context.route("**/api/qoder/status",login_api)
+            page.goto("http://127.0.0.1:4173/qoder",wait_until="networkidle")
+            page.get_by_role("button",name="获取授权链接",exact=True).click()
+            page.get_by_role("alert").filter(has_text="Qoder CN 暂不可用").wait_for()
+            login_fixture.update(available=True,detail="CLI 已安装",auth_ui=False,model_discovery=True)
+            page.get_by_role("button",name="刷新状态").click()
+            page.get_by_text("服务器执行服务版本过旧，不支持网页授权。",exact=True).wait_for()
+            page.get_by_role("button",name="获取授权链接",exact=True).click()
+            page.get_by_role("alert").filter(has_text="尚不支持网页授权").wait_for()
+            login_fixture.update(auth_ui=True)
+            page.get_by_role("button",name="刷新状态").click()
+            page.get_by_text("服务器执行服务版本过旧，不支持网页授权。",exact=True).wait_for(state="detached")
+            # Observe the real browser, not a patched window.open counter. Patching
+            # window.open would itself prevent detecting an actual popup.
+            authorization_pages=[]
+            context.on("page", lambda opened: authorization_pages.append(opened))
+            authorization_origin=page.url
+            existing_pages=len(context.pages)
+            def start_login(route):
+                login_fixture["login"]={"state":"waiting","url":"https://qoder.com.cn/auth/login?state=preview","detail":"请在浏览器完成官方授权"}
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(login_fixture["login"],ensure_ascii=False))
+            context.route("**/api/qoder/login/start",start_login)
+            page.get_by_role("button",name="获取授权链接",exact=True).click()
+            page.locator(".auth-inline-row").wait_for()
+            expect(page.locator(".auth-inline-row input")).to_have_count(1)
+            expect(page.locator(".auth-inline-row textarea")).to_have_count(0)
+            expect(page.get_by_label("授权链接",exact=True)).to_have_value("https://qoder.com.cn/auth/login?state=preview")
+            # The URL must be visible, authorization must remain on the same page,
+            # and no new browser tab/window may be opened by requesting the link.
+            expect(page.get_by_role("button",name="复制授权链接",exact=True)).to_be_enabled()
+            expect(page.get_by_role("button",name="刷新状态",exact=True)).to_be_enabled()
+            expect(page.get_by_role("button",name="取消本次授权",exact=True)).to_be_enabled()
+            assert page.url==authorization_origin, f"Unexpected navigation: {page.url}"
+            assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected automatic authorization popup"
+            expect(page.get_by_text("等待授权",exact=True)).to_be_visible()
+            capture(page,path=str(OUT/"31-qoder-auth-mobile.png"),full_page=False)
+            # Complete the simulated official login: the current account's actual
+            # catalog must be fetched automatically, not the compatibility defaults.
+            model_requests=[]
+            live_catalog={"models":[{"id":"Auto","label":"Auto","efforts":["default"]},{"id":"preview-new-model","label":"Preview New Model","efforts":["default"]}],"source":"cli","updated_at":1}
+            def latest_models(route):
+                model_requests.append(route.request.method)
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(live_catalog))
+            context.route("**/api/qoder/models/refresh",latest_models)
+            login_fixture["login"]={"state":"finished","url":"","detail":"CLI 登录流程已结束"}
+            page.get_by_text("最新模型清单已更新（2 个）",exact=True).wait_for(timeout=15000)
+            assert model_requests==["POST"]
+            expect(page.get_by_text("可用模型：2",exact=True)).to_be_visible()
+            assert page.url==authorization_origin
+            assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected popup during authorization polling"
+            page.get_by_role("button",name="模型配置",exact=True).click()
+            page.get_by_role("button",name="修改",exact=True).click()
+            page.get_by_label("AI 助手模型",exact=True).locator("option[value='preview-new-model']").wait_for(state="attached")
+            assert page.get_by_label("AI 助手模型",exact=True).evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
+            assert page.get_by_label("视频制作与微调模型",exact=True).evaluate("(el) => Array.from(el.options).some(o => o.value === 'preview-new-model')")
+    except Exception:
+        try:
+            page.screenshot(path=str(OUT/("failure-"+GROUP+".png")),full_page=False,timeout=5000)
+        except Exception as screenshot_error:
+            print("Failure screenshot unavailable:",screenshot_error)
+        raise
+    finally:
+        browser.close()
 (OUT/"README.txt").write_text("Compiled React UI, isolated synthetic fixtures. Not production data or a production deployment screenshot.\n",encoding="utf-8")

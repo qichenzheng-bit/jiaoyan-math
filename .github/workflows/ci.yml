@@ -89,16 +89,6 @@ jobs:
           persist-credentials: false
       - run: for f in deploy/*.sh; do bash -n "$f"; done
       - run: bash deploy/unpack-video-source.sh "$RUNNER_TEMP/video-source-check"
-      - name: Package exact source revision for deployment
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: git archive --format=tar.gz --output="$RUNNER_TEMP/release-source.tar.gz" "$GITHUB_SHA"
-      - uses: actions/upload-artifact@v6
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        with:
-          name: release-source-${{ github.sha }}
-          path: ${{ runner.temp }}/release-source.tar.gz
-          if-no-files-found: error
-          retention-days: 3
   backend:
     needs: plan
     if: needs.plan.outputs.backend_required != 'false'
@@ -135,7 +125,7 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -145,9 +135,72 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package.json
-      - run: npm install --prefer-offline --no-audit --no-fund
-      - run: npm run build
+          cache-dependency-path: |
+            frontend/package.json
+            frontend/package-lock.json
+      - name: Fingerprint frontend build inputs
+        id: build-key
+        run: |
+          set -euo pipefail
+          # Include the entire tracked frontend tree, build workflow and exact toolchain.
+          # Periodically refresh unlocked transitive dependencies until a lockfile is committed.
+          key=$({
+            git rev-parse HEAD:frontend
+            git rev-parse HEAD:.github/workflows/ci.yml
+            node --version
+            npm --version
+            printf '%s\n' "${ImageOS:-ubuntu24}" "${ImageVersion:-unknown}" "$(date -u +%G-%V)"
+          } | sha256sum | cut -d' ' -f1)
+          echo "key=frontend-build-v1-$key" >> "$GITHUB_OUTPUT"
+      - name: Restore exact frontend build
+        id: compiled
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/frontend-build-cache
+          key: ${{ steps.build-key.outputs.key }}
+      - name: Reuse identical compiled frontend
+        if: steps.compiled.outputs.cache-hit == 'true'
+        run: |
+          set -euo pipefail
+          cache="$RUNNER_TEMP/frontend-build-cache"
+          test "$(cat "$cache/key.txt")" = "${{ steps.build-key.outputs.key }}"
+          (cd "$cache" && sha256sum -c dist.sha256)
+          mkdir -p dist
+          tar -xzf "$cache/dist.tar.gz" -C dist
+          test -s dist/index.html
+          echo "Reusing matching frontend build; browser tests still required."
+      - name: Install dependencies and compile
+        if: steps.compiled.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then
+            npm ci --prefer-offline --no-audit --no-fund
+          else
+            npm install --prefer-offline --no-audit --no-fund
+          fi
+          npm run build
+          test -s dist/index.html
+          cache="$RUNNER_TEMP/frontend-build-cache"
+          mkdir -p "$cache"
+          tar -czf "$cache/dist.tar.gz" -C dist .
+          (cd "$cache" && sha256sum dist.tar.gz > dist.sha256)
+          printf '%s\n' "${{ steps.build-key.outputs.key }}" > "$cache/key.txt"
+          cp package-lock.json "$cache/package-lock.json"
+      - name: Save compiled frontend cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiled.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/frontend-build-cache
+          key: ${{ steps.build-key.outputs.key }}
+      - name: Retain generated dependency lock for review
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-dependency-lock
+          path: frontend/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
       - run: printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
       - uses: actions/upload-artifact@v6
         with:
@@ -155,12 +208,36 @@ jobs:
           path: frontend/dist/
           if-no-files-found: error
           retention-days: 3
+      - name: Package exact source and compiled frontend
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          bundle=$(mktemp -d "$RUNNER_TEMP/jiaoyan-bundle.XXXXXX")
+          trap 'rm -rf "$bundle"' EXIT
+          git archive "$GITHUB_SHA" | tar -xf - -C "$bundle"
+          mkdir -p "$bundle/frontend/dist"
+          cp -a dist/. "$bundle/frontend/dist/"
+          test "$(cat "$bundle/frontend/dist/release-sha.txt")" = "$GITHUB_SHA"
+          tar -czf "$RUNNER_TEMP/release-bundle.tar.gz" -C "$bundle" .
+      - uses: actions/upload-artifact@v6
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: release-bundle-${{ github.sha }}
+          path: ${{ runner.temp }}/release-bundle.tar.gz
+          if-no-files-found: error
+          retention-days: 3
   browser:
     needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [desktop, editors, mobile]
     env:
       WG_BROWSER_CHANNEL: chrome
+      WG_UI_GROUP: ${{ matrix.group }}
+      WG_UI_SCREENSHOTS: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -192,7 +269,7 @@ jobs:
           # Hosted Ubuntu already has Chrome and its runtime libraries.
           # Only install a Chinese font if no suitable font is present.
           fontdir="$HOME/.local/share/fonts/jiaoyan-cjk"
-          if [[ -d "$fontdir" ]]; then fc-cache -f "$fontdir"; fi
+          if [[ -z "$(fc-list :lang=zh-cn family)" && -d "$fontdir" ]]; then fc-cache "$fontdir"; fi
           if [[ -z "$(fc-list :lang=zh-cn family)" ]]; then
             tmp=$(mktemp -d)
             sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
@@ -203,25 +280,20 @@ jobs:
             fc-cache -f "$fontdir"
           fi
           test -n "$(fc-list :lang=zh-cn family)"
-          python - <<'PY'
-          from playwright.sync_api import sync_playwright
-          with sync_playwright() as p:
-              browser = p.chromium.launch(channel="chrome", headless=True)
-              page = browser.new_page()
-              page.set_content("<p>微光数学</p>")
-              assert page.locator("p").inner_text() == "微光数学"
-              browser.close()
-          PY
-      - run: |
+      - name: Test compiled frontend
+        run: |
+          set -euo pipefail
           python tests/serve_frontend.py &
-          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do curl -fsS http://127.0.0.1:4173/ >/dev/null 2>&1 && break; sleep 0.1; done
           curl -fsS http://127.0.0.1:4173/ >/dev/null
           python tests/ui_preview.py
       - uses: actions/upload-artifact@v6
-        if: always()
+        if: failure() || github.event_name == 'workflow_dispatch'
         continue-on-error: true
         with:
-          name: clean-workspace-screenshots
+          name: clean-workspace-screenshots-${{ matrix.group }}
           path: ui-screenshots/
           if-no-files-found: ignore
           retention-days: 3
@@ -245,27 +317,19 @@ jobs:
       group: jiaoyan-production
       cancel-in-progress: false
     steps:
-      # Avoid the production runner's unreliable GitHub git/TLS connection.
-      # Download only the exact archive from this trusted, gated workflow run.
+      # One archive: exact source revision and the frontend tested by all browser groups.
       - uses: actions/download-artifact@v7
         with:
-          name: release-source-${{ github.sha }}
+          name: release-bundle-${{ github.sha }}
           path: ${{ runner.temp }}/release-download-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: actions/download-artifact@v7
-        with:
-          name: frontend-dist-${{ github.sha }}
-          path: ${{ runner.temp }}/release-download-${{ github.run_id }}-${{ github.run_attempt }}/frontend-dist
       - name: Deploy validated source and frontend
         run: |
           set -euo pipefail
           work=$(mktemp -d "$RUNNER_TEMP/jiaoyan-release.XXXXXX")
           trap 'rm -rf "$work"' EXIT
-          tar -xzf "$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/release-source.tar.gz" -C "$work"
-          dist="$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/frontend-dist"
-          test -s "$dist/index.html"
-          test "$(cat "$dist/release-sha.txt")" = "$GITHUB_SHA"
-          mkdir -p "$work/frontend/dist"
-          cp -a "$dist/." "$work/frontend/dist/"
+          tar -xzf "$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/release-bundle.tar.gz" -C "$work"
+          test -s "$work/frontend/dist/index.html"
+          test "$(cat "$work/frontend/dist/release-sha.txt")" = "$GITHUB_SHA"
           cd "$work"
           JIAOYAN_PREBUILT_FRONTEND=1 bash deploy/release.sh
 
