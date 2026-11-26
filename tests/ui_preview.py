@@ -161,7 +161,7 @@ READY={
     "22-intake-supplement":".supplement-proposal .katex",
     "25-word-ai":".manual-word-work",
     "04-word":".manual-word-work .katex",
-    "06-cover":".math-cover-art",
+    "06-cover":".fc-art",
 }
 
 with sync_playwright() as p:
@@ -522,29 +522,65 @@ with sync_playwright() as p:
                     page.get_by_role("button",name="保存草稿",exact=True).click()
                     page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
                 if name=="06-cover":
-                    page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
-                    page.locator(".math-cover-art .katex").first.wait_for()
-                    for platform,variant,w,h in [
-                        ("B站","bilibili",1200,900),("B站","bilibili_wide",1920,1080),
-                        ("抖音","douyin",1080,1440),("抖音","douyin_wide",1440,1080),("抖音","douyin_full",1080,1920),
-                        ("小红书","xiaohongshu",1080,1440),("视频号","wechat_channels",1080,1260),
-                        ("视频号","wechat_channels_wide",1920,1080),("公众号","wechat_top",900,383),("公众号","wechat_sub",500,500)
+                    # Freeform canvas: mathematical layers remain rendered while editing.
+                    page.get_by_role("button",name="＋ 公式",exact=True).click()
+                    page.locator(".fc-art .katex").first.wait_for()
+                    page.get_by_label("LaTeX 源码",exact=True).fill(r"\lim\limits_{x\to0}\frac{\sin x}{x}")
+                    page.get_by_role("button",name="＋ 文字",exact=True).click()
+                    page.get_by_label("内容（支持 LaTeX）",exact=True).fill("极限计算")
+                    page.get_by_label("Y",exact=True).fill("100")
+                    assert page.locator(".fc-art > div").count()==2
+                    page.locator(".fc-toolbar").get_by_role("button",name="多选",exact=True).click()
+                    # Multi-select adds the formula to the currently selected text.
+                    page.locator(".fc-layer-name").filter(has_text="公式").click()
+                    expect(page.get_by_text("已选 2 个元素",exact=True)).to_be_visible()
+                    page.get_by_role("button",name="左对齐",exact=True).click()
+                    positions=page.locator(".fc-art > div").evaluate_all("(els)=>els.map(e=>parseFloat(e.style.left))")
+                    assert abs(positions[0]-positions[1])<=1
+                    page.get_by_role("button",name="组合",exact=True).click()
+                    page.get_by_role("button",name="取消组合",exact=True).click()
+                    page.get_by_role("button",name="撤销",exact=True).click()
+                    page.get_by_role("button",name="重做",exact=True).click()
+                    for variant,w,h in [
+                        ("bilibili",1200,900),("bilibili_wide",1920,1080),
+                        ("douyin",1080,1440),("douyin_wide",1440,1080),("douyin_full",1080,1920),
+                        ("xiaohongshu",1080,1440),("wechat_top",900,383),("wechat_sub",500,500)
                     ]:
-                        page.get_by_role("navigation",name="发布平台").get_by_role("button",name=platform,exact=True).click()
-                        page.get_by_label("封面比例",exact=True).select_option(variant)
-                        expect(page.get_by_text(f"{w} × {h} px",exact=True)).to_be_visible()
-                        assert page.locator(".math-cover-art").evaluate("(el)=>[el.offsetWidth,el.offsetHeight]")==[w,h]
-                        assert page.locator(".math-cover-art .katex").count()>0
-                        assert page.locator(".math-cover-art .cover-safe").count()==0
-                    # Confirm the downloaded PNG uses native pixels, not preview pixels.
+                        page.get_by_label("画布比例",exact=True).select_option(variant)
+                        expect(page.get_by_text(f"{w} × {h}",exact=True)).to_be_visible()
+                        assert page.locator(".fc-art").evaluate("(el)=>[el.offsetWidth,el.offsetHeight]")==[w,h]
+                        assert page.locator(".fc-art .katex").count()>0
+                        assert page.locator(".fc-art .fc-guide,.fc-art .fc-snap,.fc-art .fc-hit").count()==0
+                    # Native-size PNG, using one clean formula and a known geometry.
+                    page.locator(".fc-inspector").get_by_role("button",name="删除",exact=True).click()
+                    page.get_by_label("画布比例",exact=True).select_option("wechat_sub")
+                    page.get_by_role("button",name="＋ 公式",exact=True).click()
+                    page.locator(".fc-art .katex").first.wait_for()
+                    # Give the fraction enough room for its display math line box.
+                    page.get_by_label("高度",exact=True).fill("200")
+                    page.get_by_label("Y",exact=True).fill("100")
+                    page.get_by_label("字号",exact=True).fill("24")
                     import struct
                     with page.expect_download(timeout=60000) as downloaded:
-                        page.get_by_role("button",name="下载 PNG",exact=True).click()
+                        page.get_by_role("button",name="导出 PNG",exact=True).click()
                     with open(downloaded.value.path(),"rb") as png:
                         header=png.read(24)
-                    assert header[:8]==bytes.fromhex("89504e470d0a1a0a"), f"Invalid PNG signature: {header[:8].hex()}"
+                    assert header[:8]==bytes.fromhex("89504e470d0a1a0a")
                     assert struct.unpack(">II",header[16:24])==(500,500)
-                    page.get_by_role("navigation",name="发布平台").get_by_role("button",name="小红书",exact=True).click()
+                    # Touch-sized bottom toolbar and drawer are independent of desktop panels.
+                    page.set_viewport_size({"width":390,"height":844})
+                    tools=page.get_by_role("navigation",name="手机封面工具")
+                    expect(tools).to_be_visible()
+                    tools.get_by_role("button",name="图层",exact=True).click()
+                    expect(page.locator(".fc-add")).to_be_visible()
+                    page.locator(".fc-add").get_by_role("button",name="完成",exact=True).click()
+                    expect(page.locator(".fc-add")).not_to_be_visible()
+                    tools.get_by_role("button",name="属性",exact=True).click()
+                    expect(page.locator(".fc-inspector")).to_be_visible()
+                    page.locator(".fc-inspector").get_by_role("button",name="完成",exact=True).click()
+                    expect(page.locator(".fc-inspector")).not_to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth<=window.innerWidth+2")
+                    page.set_viewport_size({"width":1440,"height":900"})
 
                 capture(page,path=str(OUT/(name+".png")),full_page=False)
         if GROUP in {'all','editors'}:
