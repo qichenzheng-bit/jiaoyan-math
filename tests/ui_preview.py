@@ -476,7 +476,20 @@ with sync_playwright() as p:
     page.get_by_label("科目",exact=True).select_option("高等数学")
     page.get_by_label("题目",exact=True).fill("已知函数")
     assert page.get_by_label("第 1 小问题目",exact=True).count()==0
+    assert page.get_by_label("答案",exact=True).is_visible()
+    assert page.get_by_label("解析",exact=True).is_visible()
+    page.get_by_label("答案",exact=True).fill("原答案")
+    page.get_by_label("解析",exact=True).fill("原解析")
+    page.once("dialog",lambda dialog:dialog.accept())
     page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
+    assert page.get_by_label("答案",exact=True).count()==0
+    assert page.get_by_label("解析",exact=True).count()==0
+    assert page.get_by_label("第 1 小问答案",exact=True).inner_text()=="原答案"
+    assert page.get_by_label("第 1 小问解析",exact=True).inner_text()=="原解析"
+    page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
+    assert page.get_by_label("第 2 小问题目",exact=True).is_visible()
+    page.locator(".manual-subquestion").nth(1).get_by_role("button",name="移除",exact=True).click()
+    assert page.get_by_label("第 2 小问题目",exact=True).count()==0
     page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
     page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
     page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
