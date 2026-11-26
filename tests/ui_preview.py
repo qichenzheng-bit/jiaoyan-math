@@ -19,6 +19,7 @@ demo_chat={"id":"chat-demo","title":"录入建议示例","project":"","pinned":F
  {"id":"msg-ai","role":"assistant","content":"可以整理为题目草稿，请确认。\n\n### 解法说明\n\n| 方法 | 结果 |\n| --- | --- |\n| 幂函数 | $2x$ |\n\n"+'```wg-card\n{"type":"comparison","title":"解法对比","items":[{"label":"方法一","text":"直接求导"},{"label":"方法二","text":"定义法"}]}\n```',"state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[],"intake_intent":"question"}]}
 review_job={"id":"review-demo","title":"补充示例","state":"review","detail":"待人工核对","revision":1,"document_id":None,"input_text":"求导数","items":[{"uid":"review-item","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"","solution":"","analysis":"","proof":"","chapter":"","question_type":"","unit_type":""}]}
 review_clean={**review_job,"id":"review-clean","reviewed_uids":[],"items":[{**review_job["items"][0],"answer":"$2x$","solution":"幂函数求导"}]}
+review_match={**review_clean,"id":"review-match","items":[{**review_clean["items"][0],"content":r"测试查重：求 $x^2$ 的导数。"}],"reviewed_uids":[]}
 review_suggestion={"id":"supplement-demo","job_id":"review-demo","item_uid":"review-item","base_revision":1,"fields":["answer","solution"],"state":"review","detail":"AI生成待确认","proposal":{"answer":"$2x$","solution":r"利用幂函数求导公式，$(x^2)'=2x$。"},"accepted":[],"model":"Auto"}
 ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"$2x$","solution":"","analysis":"","proof":"","chapter":"","question_type":"解答题","unit_type":"","resource_id":None,"file_id":None,"width":100}]}
 ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["solution"],"instruction":"逐步推导","model":"Auto","state":"review","detail":"待确认","change_count":1,"changes":[{"uid":"ai-q1","field":"solution","before":"","after":r"由幂函数求导公式，$(x^2)'=2x$。"}],"accepted":[]}
@@ -96,13 +97,17 @@ def answer(route):
     if p=="/documents/ai-demo/ai-edits/edit-demo":result=ai_edit
     if p=="/intelligence/jobs/review-demo":result=review_job
     if p=="/intelligence/jobs/review-demo/supplements":result=[review_suggestion]
-    if p=="/intelligence/jobs/review-clean":
+    if p in ("/intelligence/jobs/review-clean","/intelligence/jobs/review-match"):
+        row=review_clean if p.endswith("review-clean") else review_match
         if route.request.method=="PUT":
             data=route.request.post_data_json
-            assert data["revision"]==review_clean["revision"]
-            review_clean.update(items=data["items"],reviewed_uids=data["reviewed_uids"],revision=review_clean["revision"]+1)
-        result=review_clean
-    if p=="/intelligence/jobs/review-clean/supplements":result=[]
+            assert data["revision"]==row["revision"]
+            if any(x["uid"] in data["reviewed_uids"] and "测试查重" in x["content"] and not (x.get("dedup_reason") or x.get("reuse_resource_id")) for x in data["items"]):
+                route.fulfill(status=409,content_type="application/json",body=json.dumps({"detail":"存在重复候选，请查看查重结果"}))
+                return
+            row.update(items=data["items"],reviewed_uids=data["reviewed_uids"],revision=row["revision"]+1)
+        result=row
+    if p in ("/intelligence/jobs/review-clean/supplements","/intelligence/jobs/review-match/supplements"):result=[]
     if p=="/files" and route.request.method=="POST":
         name=q.get("name",["demo.tex"])[0]
         result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}
@@ -681,6 +686,19 @@ with sync_playwright() as p:
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             page.get_by_role("button",name="返回上一步",exact=True).click()
             expect(page.locator(".wg-work-result")).to_be_visible()
+            visit(page,"/work?job=review-match&review=1",".wg-review-editor .katex")
+            page.get_by_role("button",name="查重结果",exact=True).click()
+            expect(page.locator(".wg-review-matches").get_by_text("相似度 80.0%",exact=False)).to_be_visible()
+            expect(page.locator(".wg-review-matches").get_by_role("button",name="使用原题 · 编号不变",exact=True).first).to_be_visible()
+            page.get_by_role("button",name="识别结果",exact=True).click()
+            page.get_by_role("button",name="通过并继续",exact=True).click()
+            expect(page.get_by_role("alert").get_by_text("存在重复候选",exact=False)).to_be_visible()
+            page.get_by_role("button",name="查重结果",exact=True).click()
+            page.locator(".wg-review-matches").get_by_placeholder("例如：条件不同").fill("条件不同，保留独立题目")
+            page.get_by_role("button",name="保留当前录入内容",exact=True).click()
+            page.get_by_role("button",name="识别结果",exact=True).click()
+            page.get_by_role("button",name="通过并继续",exact=True).click()
+            expect(page.get_by_role("button",name="确认生成录入文档",exact=True)).to_be_enabled()
             visit(page,"/project/teaching",".project-hub")
             page.get_by_role("button",name="返回上一步",exact=True).click()
             expect(page).to_have_url("http://127.0.0.1:4173"+"/")

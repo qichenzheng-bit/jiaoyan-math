@@ -97,7 +97,7 @@ export function QuestionFields({value,subject,subjects,locked,onChange,knowledge
  </div>
 }
 
-type MatchResource={id:string;kind?:string;proof?:string;unit_type?:string;code:string;revision:number;subject:string;chapter:string;question_type:string;difficulty?:string;title:string;content:string;answer:string;solution:string;tags:string[];knowledge_tags?:string[]}
+export type MatchResource={id:string;kind?:string;proof?:string;unit_type?:string;code:string;revision:number;subject:string;chapter:string;question_type:string;difficulty?:string;title:string;content:string;answer:string;solution:string;tags:string[];knowledge_tags?:string[]}
 type Match={resource:MatchResource;match_kind:'exact'|'same_stem'|'similar'|'same_title';similarity:number}
 type Point={id:string;name:string;chapter:string;child_count:number}
 type Chapter={chapter:string;count:number}
@@ -128,7 +128,7 @@ export function KnowledgePoints({value,subject,locked,onChange}:{value:string[];
  {total>size&&<div className="button-row"><button type="button" disabled={page===0||loading} onClick={()=>setPage(v=>v-1)}>上一页</button><small>{page+1}/{Math.ceil(total/size)}</small><button type="button" disabled={(page+1)*size>=total||loading} onClick={()=>setPage(v=>v+1)}>下一页</button></div>}</div>}
  <div className="manual-tag-entry"><input aria-label="知识点" value={text} disabled={disabled} maxLength={60} placeholder="输入新知识点名称" onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();add(text)}}}/><button type="button" disabled={disabled||!text.trim()} onClick={()=>add(text)}>新增知识点</button></div><small className="muted">按当前科目、章节和知识图谱父子关系逐级选择；新知识点随整套资料入库。</small></section>
 }
-function DuplicateMatches({block,locked,onChoose,excludeId,onKeep}:{block:Block;locked:boolean;onChoose?:(resource:MatchResource,reuse:boolean)=>void;excludeId?:string;onKeep?:(reason:string)=>void}){
+export function DuplicateMatches({block,locked,onChoose,excludeId,onKeep}:{block:Pick<Block,'kind'|'title'|'content'|'answer'|'solution'|'reuse_resource_id'|'dedup_reason'>;locked:boolean;onChoose?:(resource:MatchResource,reuse:boolean)=>void;excludeId?:string;onKeep?:(reason:string)=>void}){
  const [matches,setMatches]=useState<Match[]>([]),[status,setStatus]=useState(''),[scanned,setScanned]=useState<number>(),[attempt,setAttempt]=useState(0)
  const [reason,setReason]=useState(block.dedup_reason??'');const knowledge=block.kind==='knowledge'
  const content=block.content,answer=block.answer,solution=block.solution

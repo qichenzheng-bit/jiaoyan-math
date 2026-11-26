@@ -158,6 +158,19 @@ def stop(id:str,db:Session=Depends(get_db)):
             if e.status_code!=404:raise
         sync(db,j)
     return view(j,True)
+def verify_duplicate_choice(db,item,subject):
+    if item.get("reuse_resource_id"):
+        r=bank.existing(db,item["reuse_resource_id"])
+        if r.archived or r.kind!=item["kind"] or r.revision!=item.get("reuse_revision"):
+            raise HTTPException(409,"候选资源已变化，请重新查重")
+        fields=("content","answer","solution","subject","chapter","question_type","difficulty") if item["kind"]=="question" else ("title","content","proof","subject","chapter","unit_type")
+        if any((normalize_subject(subject if item.get("subject") is None else item["subject"]) if k=="subject" else item.get(k,""))!=getattr(r,k) for k in fields):
+            raise HTTPException(409,"复用资源的内容或属性已变化，请重新选择或另存为新题")
+    elif not item.get("dedup_reason","").strip():
+        result=docs.manual_matches(docs.ManualSearch(kind=item["kind"],title=item["title"],content=item["content"],answer=item["answer"],solution=item["solution"]),db)
+        if result["total"]:
+            raise HTTPException(409,"存在重复候选，请查看查重结果，选择复用原题、编辑为新题或填写独立保留原因")
+
 @router.put("/jobs/{id}",dependencies=[Depends(require_origin)])
 def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(current_user)):
     j=get_job(db,id)
@@ -169,6 +182,11 @@ def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(curre
     if body.reviewed_uids is not None:
         if len(set(body.reviewed_uids))!=len(body.reviewed_uids) or not set(body.reviewed_uids)<=valid:
             raise HTTPException(422,"审核条目无效")
+        old={x["uid"]:x for x in j.items}
+        previous=set(provenance.get("reviewed_uids",[]))
+        for item in items:
+            if item["uid"] in body.reviewed_uids and (item["uid"] not in previous or old.get(item["uid"])!=item):
+                verify_duplicate_choice(db,item,j.subject)
         provenance["reviewed_uids"]=body.reviewed_uids
     elif "reviewed_uids" in provenance:
         old={b["uid"]:b for b in j.items}
@@ -184,6 +202,8 @@ def convert(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(cur
         raise HTTPException(409,"请先逐条确认所有保留的条目")
     if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
         raise HTTPException(409,"请先处理或舍弃待审核的AI补充建议")
+    if "reviewed_uids" in (j.provenance or {}):
+        for item in j.items:verify_duplicate_choice(db,item,j.subject)
     draft=docs.Draft(title=j.title,subject=j.subject,source_id=j.source_id,blocks=j.items)
     d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=j.source_id,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.convert",user.id);db.commit();return {"document_id":d.id}
@@ -318,7 +338,7 @@ def supplement_start(id:str,body:SupplementStart,db:Session=Depends(get_db),user
     if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
         raise HTTPException(409,"请先处理当前AI补充建议")
     item=next((x for x in j.items if x["uid"]==body.item_uid),None)
-    if not item or len(set(body.fields))!=len(body.fields) or not set(body.fields)<=set(allowed_revisions(item) if body.revise else allowed_supplements(item)):
+    if not item or item.get("reuse_resource_id") or len(set(body.fields))!=len(body.fields) or not set(body.fields)<=set(allowed_revisions(item) if body.revise else allowed_supplements(item)):
         raise HTTPException(422,"请选择允许修改的条目字段")
     if body.revise and not body.instruction.strip():
         raise HTTPException(422,"请明确说明修改要求")
@@ -354,6 +374,7 @@ def supplement_accept(id:str,ident:str,body:SupplementAccept,db:Session=Depends(
     revise=bool(snapshot.pop("_wg_revision",False))
     if item!=snapshot:raise HTTPException(409,"原条目已变化")
     replacement=apply_supplement(item,s.proposal,body.fields,revise=revise)
+    replacement["dedup_reason"]=""
     j.items=[replacement if x["uid"]==s.item_uid else x for x in j.items]
     if "reviewed_uids" in (j.provenance or {}):
         j.provenance={**j.provenance,"reviewed_uids":[uid for uid in j.provenance["reviewed_uids"] if uid!=s.item_uid]}
