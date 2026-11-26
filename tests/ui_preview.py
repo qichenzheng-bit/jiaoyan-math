@@ -590,6 +590,26 @@ with sync_playwright() as p:
                 expect(page.get_by_role("button",name="知识库",exact=True)).to_be_visible()
 
         if GROUP in {'all','mobile'}:
+            print('UI case: compact phone composition and production navigation',flush=True)
+            page.set_viewport_size({"width":393,"height":873})
+            for route in ("papers","handouts","textbooks"):
+                visit(page,"/"+route,".assembly-result")
+                expect(page.locator(".doc-selector")).to_have_count(0)
+                expect(page.locator(".doc-mode-switch")).to_have_count(0)
+                expect(page.locator(".assembly-pages")).to_have_count(0)
+                expect(page.locator(".assembly-cart-bar")).to_be_visible()
+                assert page.locator(".assembly-search input").evaluate("el=>el.getBoundingClientRect().height")<=44
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                page.locator(".compact-resource-main").first.click()
+                expect(page.get_by_role("dialog",name="资源详情")).to_be_visible()
+                assert page.locator(".assembly-preview details[open]").count()==0
+                page.get_by_role("button",name="关闭详情").click()
+                page.get_by_role("button",name="＋ 选入",exact=True).first.click()
+                page.get_by_role("button",name="查看选题车").click()
+                expect(page.locator(".assembly-cart.cart-open")).to_be_visible()
+                expect(page.locator(".assembly-cart-item")).to_have_count(1)
+                page.get_by_role("button",name="关闭选题车").click()
+                expect(page.locator(".assembly-cart")).not_to_be_visible()
             print('UI case: phone intake and mobile navigation',flush=True)
             # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
             page.set_viewport_size({"width":393,"height":873})
