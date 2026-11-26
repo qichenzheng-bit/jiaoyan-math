@@ -469,11 +469,26 @@ with sync_playwright() as p:
                 if name=="02-bank":
                     page.get_by_role("button",name="高级筛选").click()
                     expect(page.get_by_label("章节",exact=True)).to_be_visible()
+                    # Existing API multi-source filter, not a simulated client-side filter.
+                    picker=page.locator(".resource-multi").filter(has_text="具体来源")
+                    picker.locator("summary").click()
+                    checkbox=picker.get_by_role("checkbox").first
+                    expect(checkbox).to_be_visible()
+                    with page.expect_request(lambda req:"/api/resources?" in req.url and "source_ids=" in req.url):
+                        checkbox.check()
+                    expect(picker).to_contain_text("已选 1 项")
+                    page.get_by_role("button",name="重置",exact=True).click()
                     page.get_by_role("button",name="收起筛选").click()
                     page.locator(".bank-detail .katex").first.wait_for()
                     # Inline limit notation uses an under-script, not a side subscript.
                     assert page.locator(".bank-list .katex .op-limits").count()>0
                     assert page.locator(".bank-list .katex").count()>0
+                    assert page.locator(".bank-detail details:not(:first-child)[open]").count()==0
+                    page.locator(".bank-row").first.hover()
+                    expect(page.get_by_role("dialog",name="资源悬停预览")).to_be_visible()
+                    assert page.locator(".resource-hover-preview details[open]").count()==0
+                    page.keyboard.press("Escape")
+                    expect(page.get_by_role("dialog",name="资源悬停预览")).to_have_count(0)
                 if name=="25-word-ai":
                     page.locator(".manual-word-work").wait_for()
                     expect(page.locator(".manual-word-matches")).to_have_count(0)

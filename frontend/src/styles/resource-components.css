@@ -1,0 +1,24 @@
+/* Resource-specific components. No general button or layout overrides. */
+.resource-compact-excerpt{display:block;min-width:0;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-height:2.8em}
+.resource-compact-excerpt .stored-inline-image{max-height:1.8em}
+.resource-content-sections{min-width:0;overflow-wrap:anywhere}
+.resource-content-sections details{margin:0}
+.resource-content-sections details>summary{cursor:pointer}
+.resource-association-filters{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;min-width:0}
+.resource-multi{max-width:100%;min-width:0}
+.resource-multi-panel{min-width:min(210px,100%);max-width:100%;margin-top:6px}
+.resource-multi-panel label>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.resource-multi-panel label small{display:block;color:var(--muted)}
+.resource-multi-selected{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.resource-selected-chip{display:inline-flex;gap:5px;align-items:center;max-width:100%;font-size:11px;background:var(--selected);border:1px solid var(--line);border-radius:6px;padding:4px}
+.resource-related-toggle{display:flex;align-items:center;gap:5px;font-size:12px}
+.resource-hover-preview{position:fixed;z-index:1201;width:min(500px,calc(100vw - 24px));max-height:min(70dvh,600px);display:flex;flex-direction:column;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px #0004;overflow:hidden}
+.resource-hover-preview header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line)}
+.resource-hover-body{overflow:auto;min-height:0;padding:12px;overscroll-behavior:contain}
+.resource-hover-body details{border-top:1px solid var(--line);padding:8px 0}
+.legacy-shell .bank-workspace .bank-row.resource-shared-row,.legacy-shell .bank-workspace .bank-row.resource-shared-row:first-of-type,.legacy-shell .bank-workspace .bank-row.resource-shared-row:last-of-type{border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important;margin:0!important;padding:8px!important;gap:4px;text-align:left;min-width:0}
+.legacy-shell .bank-workspace .bank-row.resource-shared-row.selected{background:var(--selected)}
+.resource-shared-row .bank-meta{gap:5px}
+@media(max-width:760px){.resource-hover-preview{display:none}.resource-association-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.resource-related-toggle{grid-column:1/-1}.resource-multi-panel{min-width:0}.resource-shared-row .resource-compact-excerpt{max-height:2.8em}}
+
+.resource-association-filters>.resource-association-filters{flex:1 1 100%;width:100%}

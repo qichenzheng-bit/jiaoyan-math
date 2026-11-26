@@ -39,6 +39,7 @@ import './styles/compat/resource-and-production-hubs.css'
 import './styles/compat/composition.css'
 import './styles/compat/navigation-and-desktop.css'
 import './styles/compat/production-desktop.css'
+import './styles/resource-components.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(
