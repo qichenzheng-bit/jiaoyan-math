@@ -28,6 +28,7 @@ class Draft(BaseModel):
     exam_type:str=Field(default="",max_length=80)
     chapter:str=Field(default="",max_length=120)
     question_type:str=Field(default="",max_length=20)
+    difficulty:Literal["","简单","中等","困难"]|None=None
     unit_type:str=Field(default="",max_length=24)
     analysis:str=Field(default="",max_length=50000)
     proof:str=Field(default="",max_length=50000)
@@ -43,6 +44,7 @@ class Draft(BaseModel):
 
 def clean(body,db):
     d=body.model_dump(exclude={"revision"})
+    d["difficulty"]=body.difficulty or ""
     for key in ("title","content"):
         if not d[key].strip(): raise HTTPException(422,"标题和内容不能为空")
     d["title"]=d["title"].strip()
@@ -51,7 +53,7 @@ def clean(body,db):
         if any(len(t)>60 for t in d[field]): raise HTTPException(422,"标签或考试类别最多60字")
         d[field]=list(dict.fromkeys(t.strip() for t in d[field] if t.strip()))
     if body.kind!="question":
-        for key in ("answer","solution","analysis","question_type"): d[key]=""
+        for key in ("answer","solution","analysis","question_type","difficulty"): d[key]=""
     if body.kind!="knowledge":
         d.update(unit_type="",proof="",exams=[])
     if body.kind=="source":
@@ -68,7 +70,7 @@ def clean(body,db):
     d["dedup_reason"]=d["dedup_reason"].strip() if d["dedup_override"] else ""
     return d
 
-FIELDS=("id","code","kind","title","subject","content","answer","solution","tags","source_id","archived","created_at","updated_at","revision","sources_revision","exam_type","chapter","question_type","unit_type","analysis","proof","exams","source_type","authority_tier","cohort_year","series_key","edition","dedup_override","dedup_reason")
+FIELDS=("id","code","kind","title","subject","content","answer","solution","tags","source_id","archived","created_at","updated_at","revision","sources_revision","exam_type","chapter","question_type","difficulty","unit_type","analysis","proof","exams","source_type","authority_tier","cohort_year","series_key","edition","dedup_override","dedup_reason")
 def view(row): return {k:getattr(row,k) for k in FIELDS}
 def existing(db,ident,lock=False):
     stmt=select(TeachingResource).where(TeachingResource.id==ident)
@@ -190,6 +192,7 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if row.kind!="source" and d["fingerprint"]!=row.fingerprint: guard_duplicate(db,d,id)
     if row.kind=="source" and any(d[k]!=getattr(row,k) for k in ("title","source_type","cohort_year","exam_type","edition","series_key")):guard_source_identity(db,d,id)
     primary=d.pop("source_id")
+    if body.difficulty is None:d.pop("difficulty",None)
     for k,v in d.items(): setattr(row,k,v)
     if row.source_id!=primary: change_primary(db,row,primary)
     row.revision+=1;row.updated_at=now();snapshot(db,row);audit(db,"resource.update",user.id);db.commit()

@@ -65,6 +65,7 @@ class TeachingResource(Base):
     exam_type: Mapped[str] = mapped_column(String(80), default="", server_default="")
     chapter: Mapped[str] = mapped_column(String(120), default="", server_default="")
     question_type: Mapped[str] = mapped_column(String(20), default="", server_default="")
+    difficulty: Mapped[str] = mapped_column(String(16), default="", server_default="")
     unit_type: Mapped[str] = mapped_column(String(24), default="", server_default="")
     source_type: Mapped[str] = mapped_column(String(16), default="", server_default="")
     authority_tier: Mapped[str] = mapped_column(String(24), default="", server_default="")

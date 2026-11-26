@@ -33,6 +33,7 @@ class Block(BaseModel):
     reuse_code:str|None=Field(default=None,max_length=16)
     fork_from_id:str|None=Field(default=None,max_length=36)
     question_type:str=Field(default="",max_length=20)
+    difficulty:Literal["","简单","中等","困难"]=""
     unit_type:str=Field(default="",max_length=24)
     resource_id:str|None=Field(default=None,max_length=36)
     file_id:str|None=Field(default=None,max_length=36)
@@ -650,9 +651,14 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
         count+=1
         title=b["title"].strip() or ("题目" if b["kind"]=="question" else "知识单元")+f" {i+1}"
         source=bank.active_source(db,d.source_id) if d.source_id else None
+        question_type=b["question_type"]
+        if not b.get("reuse_resource_id") and question_type in ("选择题","单选题","多选题"):
+            letters={c for c in b["answer"] if c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+            if letters and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ ,，、\t\n" for c in b["answer"]):
+                question_type="多选题" if len(letters)>1 else "单选题"
         data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=body.subject if b.get("subject") is None else b["subject"],
             content=b["content"],answer=b["answer"],solution=b["solution"],analysis=b.get("analysis",""),proof=b.get("proof",""),
-            chapter=b["chapter"],question_type=b["question_type"],unit_type=b["unit_type"],
+            chapter=b["chapter"],question_type=question_type,difficulty=b["difficulty"],unit_type=b["unit_type"],
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
         primary=data.pop("source_id")
         tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[])) if b["kind"]=="question" else ([],[])
@@ -662,7 +668,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             if r.archived or r.kind!="question" or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
             # Prevent an edited draft from silently reusing a different question.
-            if any(data[k]!=getattr(r,k) for k in ("kind","content","answer","solution","subject","chapter","question_type")):
+            if any(data[k]!=getattr(r,k) for k in ("kind","content","answer","solution","subject","chapter","question_type","difficulty")):
                 raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
             before=bank.view(r)
             changed=attach_review_source(db,r,primary)
