@@ -29,6 +29,7 @@ class Block(BaseModel):
     chapter:str=Field(default="",max_length=120)
     subject:str|None=Field(default=None,max_length=40)
     knowledge_tags:list[str]=Field(default_factory=list,max_length=20)
+    edit_reference_revision:int|None=Field(default=None,ge=1)
     reuse_resource_id:str|None=Field(default=None,max_length=36)
     reuse_revision:int|None=Field(default=None,ge=1)
     reuse_code:str|None=Field(default=None,max_length=16)
@@ -57,7 +58,7 @@ def row(db,id):
     return d
 def summary(d):return {k:getattr(d,k) for k in ("id","title","kind","subject","source_id","revision","archived","created_at","updated_at")}
 def public(d):return {**summary(d),"blocks":d.blocks}
-def validate(db,body,previous):
+def validate(db,body,previous,*,allow_reference_edits=False):
     if not body.title.strip():raise HTTPException(422,"文档标题不能为空")
     if body.source_id:
         src=db.get(Resource,body.source_id)
@@ -69,6 +70,10 @@ def validate(db,body,previous):
     result=[]
     for b in body.blocks:
         data=b.model_dump()
+        if b.edit_reference_revision is not None:
+            prior=old.get(b.uid,{})
+            if not allow_reference_edits or b.kind!="reference" or prior.get("kind")!="reference" or prior.get("resource_id")!=b.resource_id or (prior.get("snapshot") or {}).get("revision")!=b.edit_reference_revision:
+                raise HTTPException(409,"引用微调版本冲突，请重新加载原题")
         if b.kind=="reference":
             prior=old.get(b.uid,{})
             if prior.get("kind")=="reference" and prior.get("resource_id")==b.resource_id and prior.get("snapshot"):
@@ -633,20 +638,57 @@ def manual_knowledge(db,subject,chapter,names):
             tags.append(point.name);ids.append(point.id)
     return tags,ids
 
+def apply_reference_edit(db,block,user):
+    """Explicit content correction of an existing reference; preserve ID and provenance."""
+    r=bank.existing(db,block["resource_id"],True)
+    if r.archived or r.kind not in ("question","knowledge") or r.revision!=block["edit_reference_revision"]:
+        raise HTTPException(409,"原资源已修改或归档，请重新加载；不会覆盖其他版本")
+    before=bank.view(r)
+    fields=("content","answer","solution","analysis","question_type") if r.kind=="question" else ("title","content","proof")
+    if not block["content"].strip():
+        raise HTTPException(422,"正文不能为空")
+    patch={key:block[key] for key in fields}
+    data=bank.clean(bank.Draft.model_validate({**before,**patch}),db)
+    if data["fingerprint"]!=r.fingerprint:
+        # Explicit in-place corrections retain the existing identity, like resource editing.
+        if db.scalar(bank.exact(db,data,r.id).limit(1)):
+            data["dedup_override"]=True
+            data["dedup_reason"]="微调已有资源：保留原编号及来源"
+        bank.guard_duplicate(db,data,r.id)
+    for key in (*fields,"fingerprint","stem_key","dedup_override","dedup_reason"):
+        setattr(r,key,data[key])
+    r.revision+=1
+    r.updated_at=now()
+    bank.snapshot(db,r)
+    audit(db,"resource.update",user.id)
+    db.flush()
+    return before,r
+
 @router.post("/{id}/manual-save",dependencies=[Depends(require_origin)])
 def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
-    """Save the phone intake document and register entered items in one transaction."""
+    """Save manual intake, including explicit corrections to existing references, in one transaction."""
     bank.admin_lock(db,user)
     d=row(db,id)
     if d.archived or body.revision!=d.revision or d.kind!="intake" or body.kind!="intake":
         raise HTTPException(409,"录入文档已归档、类型错误或版本变化，请重新加载")
     if body.source_id!=d.source_id:
         raise HTTPException(422,"不能在卡片录入中更换资料来源")
-    blocks=validate(db,body,d.blocks)
+    blocks=validate(db,body,d.blocks,allow_reference_edits=True)
     history=[]
     original_revisions={}
     count=0
+    edited_refs=set()
     for i,b in enumerate(blocks):
+        if b.get("edit_reference_revision") is not None:
+            if b["resource_id"] in edited_refs:
+                raise HTTPException(409,"同一原题存在多处微调，请只修改一次")
+            edited_refs.add(b["resource_id"])
+            before,r=apply_reference_edit(db,b,user)
+            replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
+            replacement["snapshot"]=bank.view(r)
+            blocks[i]=replacement
+            history.append({"uid":b["uid"],"action":"update","reason":"手动微调已有资源","input":b,"before":before,"after":bank.view(r),"knowledge_ids":[],"source_id":r.source_id})
+            continue
         if b["kind"] not in ("question","knowledge"):continue
         if not b["content"].strip():
             raise HTTPException(422,f"第 {i+1} 个条目的正文不能为空")
