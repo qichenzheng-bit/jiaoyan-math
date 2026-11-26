@@ -32,7 +32,7 @@ export default function Settings({preferences,onChange}:{preferences:Preferences
   return <div className="legacy-settings"><aside className="panel settings-side">{[['model','模型与 AI'],['appearance','外观与显示'],['account','账号安全'],['storage','数据与存储'],['audit','操作记录']].map(([id,t])=><a key={id} href={'#settings-'+id}>{t}</a>)}</aside><div className="settings-content">
     <section className="panel" id="settings-model"><h2>模型与 AI</h2><p className="muted">当前使用 Qoder CN，其他平台尚未接入。</p><Link className="button-link" to="/qoder">账号授权 / 刷新模型</Link></section><form id="settings-appearance" className="login-card" onSubmit={save}><h2>常规设置</h2>
       <label>系统名称<input required maxLength={60} value={draft.display_name} onChange={e=>setDraft({...draft,display_name:e.target.value})}/></label>
-      <label>主题<select value={draft.theme} onChange={e=>setDraft({...draft,theme:e.target.value as Preferences['theme']})}><option value="light">浅色</option><option value="dark">深色</option><option value="system">跟随系统</option></select></label>
+      <label>主题<select value={draft.theme} onChange={e=>setDraft({...draft,theme:e.target.value as Preferences['theme']})}><option value="light">浅松石绿（浅色）</option><option value="dark">深色</option><option value="system">跟随系统</option></select></label>
       <button disabled={busy}>保存设置</button>{message&&<p role="status">{message}</p>}
     </form>
     <div id="settings-account"><PasswordSettings/></div>

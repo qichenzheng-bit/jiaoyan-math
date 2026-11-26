@@ -1,20 +1,20 @@
-/* 微光数学：stone / ink blue. Printed paper and brand assets remain independent. */
+/* 微光数学：浅松石绿 / sage green. Printed paper and brand assets remain independent. */
 :root{
  color-scheme:light;
- --bg:#E9E7E2;--sidebar:#E1E3E5;--surface:#F6F4EF;--subtle:#E8EDF3;--line:#D0D5DC;
- --ink:#233447;--muted:#526478;--gold:#6B8FBA;--accent:#2F4A6B;--accent-ink:#FFFFFF;
- --accent-soft:#E4EBF4;--selected:#CEDCED;--hover:#DCE5F0;--highlight:#7DA6D6;--header:#2F4A6B;--header-ink:#FFFFFF;
- --primary:#2F4A6B;--primary-ink:#FFFFFF;--shadow:0 1px 3px #243b5510;
- --danger:#A13C3C;--success:#316746;--success-soft:#EAF3ED;--warning:#805B25;--warning-soft:#F8F2E8;--info:#345D87;--info-soft:#EFF4F9;
+ --bg:#E8EEE8;--sidebar:#D7E2D9;--surface:#F1F5F0;--subtle:#E0E9E1;--line:#C6D5C8;
+ --ink:#30453A;--muted:#65786B;--gold:#52765F;--accent:#52765F;--accent-ink:#FFFFFF;
+ --accent-soft:#E0EBE2;--selected:#C6D9CA;--hover:#D7E5D9;--highlight:#52765F;--header:#D7E2D9;--header-ink:#30453A;--header-hover:#C6D9CA;--accent-hover:#42644E;
+ --primary:#52765F;--primary-ink:#FFFFFF;--shadow:0 1px 3px #30453a10;--shadow-floating:0 3px 14px #30453a10;
+ --danger:#B65353;--success:#316746;--success-soft:#EAF3ED;--warning:#805B25;--warning-soft:#F8F2E8;--info:#345D87;--info-soft:#EFF4F9;
  --radius-control:8px;--radius-panel:10px;--space-page:26px;--space-panel:16px;
- --dialog-width:300px;--radius-dialog:8px;--radius-dialog-action:5px;--dialog-backdrop:rgba(0,0,0,.28);--dialog-shadow:0 12px 40px #0002;--dialog-focus:#7DA6D6;
+ --dialog-width:300px;--radius-dialog:8px;--radius-dialog-action:5px;--dialog-backdrop:rgba(0,0,0,.28);--dialog-shadow:0 12px 40px #0002;--dialog-focus:#52765F;
  --sidebar-width:210px;--sidebar-compact-width:186px;--sidebar-collapsed-width:58px;--sidebar-mobile-width:300px;
 }
 :root[data-theme="dark"]{
  color-scheme:dark;
  --bg:#1D2733;--sidebar:#18212D;--surface:#273443;--subtle:#303F51;--line:#435469;
  --ink:#E6EDF6;--muted:#AFC0D3;--gold:#7DA6D6;--accent:#B9D5F5;--accent-ink:#18212D;
- --accent-soft:#33465D;--selected:#3B526F;--hover:#34465B;--highlight:#7DA6D6;--header:#233A54;--header-ink:#F1F6FC;
+ --accent-soft:#33465D;--selected:#3B526F;--hover:#34465B;--highlight:#7DA6D6;--header:#233A54;--header-ink:#F1F6FC;--header-hover:#ffffff20;--accent-hover:#A7C7EC;
  --primary:#A7C7EC;--primary-ink:#18212D;--dialog-focus:#A7C7EC;
  --danger:#F1A4A4;--success:#A3D2AA;--success-soft:#2D4133;--warning:#E7C083;--warning-soft:#453827;--info:#A6C7EB;--info-soft:#303E50;
 }
