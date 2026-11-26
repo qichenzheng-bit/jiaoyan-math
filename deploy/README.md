@@ -36,10 +36,8 @@ sudo bash deploy/upgrade-qoder-usage.sh
 ## Qoder CN 签到助手（实验性 PAT 适配）
 参考原 V5 qiandao 模块及公开项目 G57651/dsh-dual-checkin、dingminhua/dsh-connect-qoder 的状态优先和轮次逻辑。仅支持一个本人 CN 账号，不与 AI CLI 登录或旧手工别名历史自动绑定。自动领取默认关闭，平台若拒绝或未提供明确活动，不视为成功。官方规则：https://docs.qoder.cn/events/100credits 。建议优先使用官方领取渠道。
 
-从本人 Qoder CN 账号设置创建 PAT。不要发到聊天、GitHub 或命令行参数。服务器执行：
+从本人 Qoder CN 账号设置创建 PAT。部署新版本后，打开微光数学的「签到助手 → 账号设置」，粘贴 PAT 并点击「验证并保存」。无需登录服务器终端。保存前验证 PAT 授权，使用 0600 权限文件原子写入服务器配置目录，令牌不回显、不写数据库、不进入 GitHub 或日志。PAT 与 AI CLI 登录独立。更换凭据关闭自动领取、建立新余额基线，旧历史保留在内部归档中；当前页面不混合不同凭据的数据。
 
-```bash
-sudo -u jiaoyan -H bash -c 'umask 077; read -rsp "Qoder CN PAT: " pat; echo; if [[ "$pat" == pt-* ]]; then tmp=$(mktemp "$HOME/jiaoyan-app/config/.qoder-checkin.XXXXXX") && printf "%s\n" "$pat" > "$tmp" && mv -f "$tmp" "$HOME/jiaoyan-app/config/qoder-checkin.pat"; else echo "Invalid PAT"; exit 1; fi; unset pat'
-```
+后台每分钟查询 PAT 所属账号的实际额度包，网页每 30 秒读取后台状态。积分流水记录相邻可比较快照的净变化（非官方交易明细），不把余额增加直接标记为签到，也不把减少全部解释成模型消耗。首个快照及额度包集合改变时只建立基线。每日增减按北京时间统计，保留最近 200 条余额变化记录。原 AI SDK 实时积分保留为独立折叠区域。
 
-先确认网页部署完成，再进入签到助手：点击立即领取，查看实际平台结果；如符合条件且平台允许，再自行开启定时领取。后台北京时间 10:05 起检查本轮，网络异常间隔 15 分钟最多尝试三次。关闭页面不影响后台任务。关闭自动领取不撤销已经提交的请求。更换账号前关闭自动领取；历史按单账号维护，不支持自动切换。仅记录明确活动回包；额度变化不作为签到证明。PAT 保存在现有配置目录下的 0600 文件中，不写数据库、日志、GitHub 或浏览器。撤销 PAT 时通过官方账号管理撤销，并删除服务器对应文件。无须更新已验证的独立积分 worker。
+先点击立即领取，查看真实平台结果；符合条件且平台允许时，再自行开启自动领取。后台北京时间 10:05 起检查本轮，网络异常间隔 15 分钟最多尝试三次。删除 PAT 会关闭自动领取；应同时在官方账号管理撤销不再使用的 PAT。无需更新已验证的独立积分 worker。
