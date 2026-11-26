@@ -405,6 +405,39 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/studio/qoder-checkin/confirm",headers=origin,json=confirm).json()["id"]==first.json()["id"]
         assert client.get("/api/studio/qoder-checkin").json()["accounts"][0]["current"]["data"]["state"]=="success"
 
+        # Manual image paste is durable in the draft, formal resource, and printed source.
+        import base64
+        png=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII=")
+        pasted=client.post("/api/files?name=diagram.png",headers=origin,content=png)
+        assert pasted.status_code==200,pasted.text
+        file_id=pasted.json()["id"]
+        marker="[[img:"+file_id+":75]]"
+        setup_image=client.post("/api/documents/setup",headers=origin,json={"title":"图片录入专项验证","source_type":"other"})
+        assert setup_image.status_code==200,setup_image.text
+        image_doc=setup_image.json();image_path="/api/documents/"+image_doc["id"]
+        image_text="图示参数曲线的专用验证题。"+marker
+        image_blocks=[{"uid":"image-q","kind":"question","title":"图示参数曲线","subject":"高等数学","question_type":"综合题","content":image_text,"answer":"1","solution":"按图计算"}]
+        initial_count=client.get("/api/resources?kind=question").json()["total"]
+        draft_image=client.put(image_path+"/manual-draft",headers=origin,json={**image_doc,"blocks":image_blocks})
+        assert draft_image.status_code==200,draft_image.text
+        assert client.get("/api/resources?kind=question").json()["total"]==initial_count
+        assert client.post("/api/files/"+file_id+"/archive",headers=origin).status_code==409
+        image_review=client.post(image_path+"/manual-review",headers=origin,json={"revision":draft_image.json()["revision"]})
+        assert image_review.status_code==200,image_review.text
+        assert not image_review.json()["rows"][0]["errors"],image_review.text
+        image_commit=client.post(image_path+"/manual-commit",headers=origin,json={"revision":draft_image.json()["revision"],"accept_warnings":True})
+        assert image_commit.status_code==200,image_commit.text
+        saved_image_doc=image_commit.json()["document"]
+        saved_image_id=saved_image_doc["blocks"][0]["resource_id"]
+        assert client.get("/api/resources/"+saved_image_id).json()["content"]==image_text
+        assert client.get("/api/files/"+file_id+"/preview").content==png
+        assert marker in json.dumps(client.get("/api/documents/source-export/"+image_doc["source_id"]).json(),ensure_ascii=False)
+        with session_factory()() as db:
+            from app.models import FileReference
+            assert db.get(FileReference,(file_id,"teaching_resource",saved_image_id)) is not None
+        assert client.request("DELETE",image_path+"/manual",headers=origin,json={"revision":saved_image_doc["revision"]}).status_code==200
+        assert client.post("/api/files/"+file_id+"/archive",headers=origin).status_code==409
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

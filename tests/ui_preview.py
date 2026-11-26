@@ -432,7 +432,9 @@ with sync_playwright() as p:
                     page.locator(".manual-intake-preview .katex").first.wait_for()
                     capture(page,path=str(OUT/"25-word-intake-preview.png"),full_page=False)
                     page.get_by_role("button",name="编辑",exact=True).click()
-                    page.get_by_role("button",name="保存草稿",exact=True).click()
+                    with page.expect_request(lambda req:req.url.endswith("/documents/ai-demo/manual-draft") and req.method=="PUT") as saved_image:
+                        page.get_by_role("button",name="保存草稿",exact=True).click()
+                    assert "[[img:12345678-1234-4321-8765-123456789abc:75]]" in saved_image.value.post_data_json["blocks"][0]["content"]
                     page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
                 if name=="04-word":
                     page.locator(".manual-word-work .katex").first.wait_for()
