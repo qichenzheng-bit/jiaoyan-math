@@ -19,10 +19,13 @@ function show({message,title,accept,prompt=false}:Options):Promise<string|null>{
   modal.append(actions);document.body.append(modal)
   let result:string|null=null
   const previous=document.activeElement
-  cancel.onclick=()=>modal.close()
-  ok.onclick=()=>{if(input&&!input.value.trim())return;result=input?input.value.trim():'';modal.close()}
-  modal.addEventListener('close',()=>{modal.remove();if(previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});resolve(result)},{once:true})
-  modal.addEventListener('click',e=>{if(e.target!==modal)return;const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)modal.close()})
+  let finished=false
+  function finish(){if(finished)return;finished=true;if(modal.open)modal.close();modal.remove();if(previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});resolve(result)}
+  cancel.onclick=finish
+  ok.onclick=()=>{if(input&&!input.value.trim())return;result=input?input.value.trim():'';finish()}
+  modal.addEventListener('cancel',e=>{e.preventDefault();finish()})
+  modal.addEventListener('close',finish,{once:true})
+  modal.addEventListener('click',e=>{if(e.target!==modal)return;const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)finish()})
   try{modal.showModal();(input??cancel).focus()}catch{modal.remove();resolve(null)}
  })
 }
