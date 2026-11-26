@@ -26,7 +26,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  const block=doc?.blocks.find(b=>b.uid===selected),locked=busy||Boolean(doc?.archived)
  const pending=!!doc?.blocks.some(b=>b.kind==='question'||b.kind==='knowledge'||b.edit_reference_revision)
  useEffect(()=>{const media=window.matchMedia('(max-width: 900px)');const change=()=>setNarrow(media.matches);change();media.addEventListener('change',change);return()=>media.removeEventListener('change',change)},[])
- useEffect(()=>{if(doc?.blocks.length&&!doc.blocks.some(b=>b.uid===selected))setSelected(doc.blocks[0].uid)},[doc?.blocks,selected])
+ useEffect(()=>{if(cardMode&&doc?.blocks.length&&!doc.blocks.some(b=>b.uid===selected))setSelected(doc.blocks[0].uid);else if(!cardMode&&selected&&!doc?.blocks.some(b=>b.uid===selected))setSelected('')},[cardMode,doc?.blocks,selected])
  async function refresh(){const r=await api<{items:Summary[];total:number}>('/documents?'+new URLSearchParams({archived:String(archived),limit:'30',offset:String(page*30),kind:queryKind}));setDocs(r.items.filter(d=>d.kind===queryKind));setTotal(r.total)}
  useEffect(()=>{void refresh().catch(e=>setMessage(e.message))},[archived,page,queryKind])
  useEffect(()=>{const c=new AbortController();api<string[]>('/resources/subjects',{signal:c.signal}).then(setSubjects).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});return()=>c.abort()},[])
@@ -60,7 +60,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
    const blocks=chosen.map(r=>({...make('reference'),resource_id:r.id,snapshot:r}))
    const saved=await api<Doc>('/documents',{method:'POST',body:JSON.stringify({kind,title,subject:'',source_id:null,blocks})})
    if(saved.kind!==kind)throw Error('服务器返回的文档类型不正确')
-   setDoc(saved);choose(saved.blocks[0]?.uid??'');setDirty(false);setPicker(null);syncUrl(saved.id);window.dispatchEvent(new Event('wg-recent-changed'));await refresh()
+   setDoc(saved);choose('');setDirty(false);setPicker(null);syncUrl(saved.id);window.dispatchEvent(new Event('wg-recent-changed'));await refresh()
   })
  }
  async function save(){await act(async()=>{if(!doc)throw Error('请先打开文档');if(!dirty&&(!intake||!pending))return;const saved=await api<Doc>('/documents/'+doc.id+(intake?'/manual-save':''),{method:intake?'POST':'PUT',body:JSON.stringify(doc)});setDoc(saved);removeRecovery(saved.id);setDirty(false);setMessage(intake?'已保存并直接入库':'编排已保存到服务器');window.dispatchEvent(new Event('wg-recent-changed'));await refresh()})}
