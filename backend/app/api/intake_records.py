@@ -5,7 +5,7 @@ from typing import Literal
 from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, case
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit
@@ -30,7 +30,7 @@ def build_records(db):
     # Select only the fields needed by the index, never original file contents or job input text.
     sessions=list(db.execute(select(WorkSession.id,WorkSession.title,WorkSession.created_at,WorkSession.updated_at,WorkSession.agent_history)))
     materials=list(db.execute(select(WorkMaterial.id,WorkMaterial.session_id,WorkMaterial.file_id,WorkMaterial.total_units,StoredFile.name,StoredFile.media_type,StoredFile.archived).join(StoredFile,StoredFile.id==WorkMaterial.file_id)))
-    batches=list(db.execute(select(WorkBatch.id,WorkBatch.material_id,WorkBatch.start,WorkBatch.end,WorkBatch.units,(WorkBatch.verified_text.is_not(None)).label("verified"),WorkBatch.job_id,WorkBatch.created_at,WorkBatch.updated_at)))
+    batches=list(db.execute(select(WorkBatch.id,WorkBatch.material_id,WorkBatch.start,WorkBatch.end,WorkBatch.units,(WorkBatch.verified_text.is_not(None)).label("verified"),case((WorkBatch.verified_text.is_not(None),True),else_=None).label("verified_text"),WorkBatch.job_id,WorkBatch.created_at,WorkBatch.updated_at)))
     jobs=list(db.execute(select(IntakeJob.id,IntakeJob.title,IntakeJob.state,IntakeJob.document_id,IntakeJob.retry_of,IntakeJob.provenance,IntakeJob.source_id,IntakeJob.items,IntakeJob.created_at,IntakeJob.updated_at)))
     docs=list(db.execute(select(TeachingDocument.id,TeachingDocument.title,TeachingDocument.source_id,TeachingDocument.blocks,TeachingDocument.revision,TeachingDocument.created_at,TeachingDocument.updated_at).where(TeachingDocument.kind=="intake",TeachingDocument.archived==False)))
     sources=dict(db.execute(select(TeachingResource.id,TeachingResource.source_type).where(TeachingResource.kind=="source")).all())
@@ -67,8 +67,8 @@ def build_records(db):
     for b in batches:
         if b.material_id in mm:batches_by_file[mm[b.material_id].file_id].append(b)
     from app.api import workspaces as work
-    all_file_batches=work.batch_groups(db,batches_by_file)
-    all_states=work.batch_states(db,[b for bs in all_file_batches.values() for b in bs])
+    all_file_batches=batches_by_file
+    all_states=work.batch_states(db,batches)
     result=[]
     for group in groups.values():
         ws,js,ds=group["w"],group["j"],group["d"]
@@ -91,9 +91,11 @@ def build_records(db):
         for d in ds:
             counts,pending=document_info(d)
             state="register" if pending and js else "intaking" if pending or not sum(counts.values()) else "registered"
-            action(state,"继续入库" if state=="register" else "继续录入" if state=="intaking" else "查看资料",url("/intake",doc=d.id),d.updated_at)
+            action(state,"继续入库" if state=="register" else "继续录入" if state=="intaking" else "查看资料",url("/intake",doc=d.id,review="1") if state=="register" else url("/intake",doc=d.id),d.updated_at)
             progress.append(str(counts["question"])+" 道题 / "+str(counts["knowledge"])+" 个知识单元")
         for j in current:
+            f=(j.provenance or {}).get("file_id")
+            if f in names:file_names.add(names[f])
             if j.document_id in dm and j.state=="converted":continue
             state={"running":"organizing","review":"review","failed":"failed","stopped":"failed","converted":"failed"}.get(j.state,"intaking")
             params={"job":j.id}
@@ -102,8 +104,6 @@ def build_records(db):
             if wid in sm:params["fromWorkspace"]=wid
             action(state,{"organizing":"查看整理进度","review":"继续审核","failed":"查看任务","intaking":"继续录入"}[state],url("/work",**params),j.updated_at)
             if state=="review":progress.append(str(len((j.provenance or {}).get("reviewed_uids",[])))+"/"+str(len(j.items or []))+" 条已审核")
-            f=(j.provenance or {}).get("file_id")
-            if f in names:file_names.add(names[f])
         for w in ws:
             related=mats_by_session[w.id]
             # A reference file is not a requirement to finish the main document.
@@ -131,20 +131,24 @@ def build_records(db):
                 bs=all_file_batches.get(fid,[]);p=work.progress(db,None,bs,m.total_units,all_states)
                 unit="页" if m.media_type=="application/pdf" else "段" if "wordprocessingml" in m.media_type else "份"
                 progress.append(m.name+"：已核对 "+str(p["verified_units"])+"/"+(str(m.total_units) if m.total_units is not None else "未知")+unit+"，已入库 "+str(p["registered_units"])+unit)
-                for b in bs:
-                    if b.verified_text is not None and not b.job_id and not m.archived:
-                        action("intaking","继续整理",url("/work",workspace=m.session_id,material=m.id,batch=b.id),b.updated_at)
+                pending=next((b for b in sorted(bs,key=lambda b:(b.start,b.id)) if b.verified and not b.job_id),None)
+                if pending and not m.archived:
+                    action("intaking","继续整理",url("/work",workspace=m.session_id,material=m.id,batch=pending.id),pending.updated_at)
                 if not p["complete"]:
                     # Verified or archived originals may have no pending batch action; do not mark the entire file complete.
                     if not any(a["state"]!="registered" for a in actions):
                         action("intaking","查看资料进度",url("/work",workspace=m.session_id,material=m.id),sm[m.session_id].updated_at)
+                elif not actions:
+                    action("registered","查看资料进度",url("/work",workspace=m.session_id,material=m.id),sm[m.session_id].updated_at)
+        if not actions and ws:
+            action("intaking","继续工作",url("/work",workspace=anchor.id),anchor.updated_at)
         if not actions:continue
         actions.sort(key=lambda a:(PRIORITY[a["state"]],-a["updated_at"],a["href"]))
         unique=[];seen=set()
         for a in actions:
             if a["href"] not in seen:unique.append(a);seen.add(a["href"])
         updated=max([x.updated_at for x in [*ws,*js,*ds]]+[a["updated_at"] for a in actions])
-        result.append({"id":key,"title":title,"source_type":source_type,"method":method,"status":unique[0]["state"],"href":unique[0]["href"],"action":unique[0]["label"],"actions":unique,"progress":progress,"file_names":sorted(file_names),"created_at":min(x.created_at for x in [*ws,*js,*ds]),"updated_at":updated,"document_id":ds[0].id if method=="manual" and len(ds)==1 else None,"revision":ds[0].revision if method=="manual" and len(ds)==1 else None})
+        result.append({"id":key,"title":title,"source_type":source_type,"method":method,"status":unique[0]["state"],"href":unique[0]["href"],"action":unique[0]["label"],"actions":unique,"progress":progress,"file_names":sorted(file_names),"related_titles":sorted({x.title for x in [*ws,*js,*ds]}),"created_at":min(x.created_at for x in [*ws,*js,*ds]),"updated_at":updated,"document_id":ds[0].id if method=="manual" and len(ds)==1 else None,"revision":ds[0].revision if method=="manual" and len(ds)==1 else None})
     prefs={}
     for s in db.scalars(select(Setting).where(Setting.key.startswith(PREFIX))):
         try:prefs[s.key[len(PREFIX):]]=json.loads(s.value)
@@ -153,7 +157,7 @@ def build_records(db):
         pref=prefs.get(r["id"],{})
         if not isinstance(pref,dict):pref={}
         r["original_title"]=r["title"]
-        r["title"]=pref.get("title") or r["title"]
+        if r["method"]!="manual":r["title"]=pref.get("title") or r["title"]
         r["hidden"]=bool(pref.get("hidden"))
     return result
 
@@ -161,7 +165,7 @@ def build_records(db):
 def listing(q:str=Query("",max_length=200),status:str=Query("",max_length=20),source_type:str=Query("",max_length=20),method:str=Query("",max_length=20),sort:Literal["recent","created","name"]="recent",offset:int=Query(0,ge=0),limit:int=Query(30,ge=1,le=100),hidden:bool=False,db:Session=Depends(get_db)):
     if status and status not in STATUSES or source_type and source_type not in TYPES|{"uncategorized"} or method and method not in ("manual","ai","mixed"):raise HTTPException(422,"筛选条件无效")
     needle=q.strip().casefold()
-    rows=[r for r in build_records(db) if r["hidden"]==hidden and (not status or status==r["status"]) and (not source_type or source_type==r["source_type"]) and (not method or method==r["method"]) and (not needle or any(needle in v.casefold() for v in [r["title"],r["original_title"],*r["file_names"]]))]
+    rows=[r for r in build_records(db) if r["hidden"]==hidden and (not status or status==r["status"]) and (not source_type or source_type==r["source_type"]) and (not method or method==r["method"]) and (not needle or any(needle in v.casefold() for v in [r["title"],r["original_title"],*r["file_names"],*r["related_titles"]]))]
     rows.sort(key=lambda r:(r["title"].casefold(),r["id"]) if sort=="name" else (-r["created_at" if sort=="created" else "updated_at"],r["id"]))
     return {"items":rows[offset:offset+limit],"total":len(rows)}
 

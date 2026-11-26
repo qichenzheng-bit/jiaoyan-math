@@ -736,7 +736,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         # F4.1.1: one index, explicit relationships, filtering, safe record preferences.
         index="/api/intake-records"
         listing=client.get(index,params={"q":"大资料性能回归"}).json()
-        assert listing["total"]==1 and listing["items"][0]["status"]=="intaking"
+        assert listing["total"]==1 and listing["items"][0]["status"]=="recognizing"
         record=listing["items"][0]
         assert record["method"]=="ai" and record["href"].startswith("/work?workspace=")
         assert client.get(index,params={"q":"perf-fixture-0.pdf","method":"ai"}).json()["total"]==1
@@ -749,7 +749,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get(index,params={"q":"性能教材组"}).json()["total"]==1
         combined=client.get(index,params={"q":"分批追加测试"}).json()
         assert combined["total"]==1
-        assert any(a["href"]=="/intake?doc="+existing_doc["id"] for a in combined["items"][0]["actions"])
+        assert any(a["href"].startswith("/intake?doc="+existing_doc["id"]) for a in combined["items"][0]["actions"])
         assert all(r["document_id"]!=existing_doc["id"] for r in client.get(index,params={"method":"manual","limit":100}).json()["items"])
         assert len(client.get(index,params={"limit":1}).json()["items"])==1
         # Permanent deletion keeps historical metadata, respects references and never races a backup.

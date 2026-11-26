@@ -29,7 +29,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  const [docs,setDocs]=useState<Summary[]>([]),[total,setTotal]=useState(0),[page,setPage]=useState(0),[doc,setDoc]=useState<Doc>(),[selected,setSelected]=useState(''),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[subjects,setSubjects]=useState<string[]>([])
  const [picker,setPicker]=useState<'new'|'append'|null>(!intake&&!requested?'new':null)
  const [review,setReview]=useState<ReviewData>(),[result,setResult]=useState<ResultCounts>()
- const running=useRef(false),imageUploading=useRef(false)
+ const running=useRef(false),imageUploading=useRef(false),autoReview=useRef("")
  const [saving,setSaving]=useState(false),[saveError,setSaveError]=useState('')
  const block=doc?.blocks.find(b=>b.uid===selected),locked=busy||Boolean(doc?.archived)
  const pending=!!doc?.blocks.some(b=>b.kind==='question'||b.kind==='knowledge'||b.edit_reference_revision)
@@ -74,6 +74,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  async function persist(d:Doc){setSaving(true);setSaveError('');try{const saved=await api<Doc>('/documents/'+d.id+(intake?'/manual-draft':''),{method:'PUT',body:JSON.stringify(d)});setDoc(saved);removeRecovery(saved.id);setDirty(false);window.dispatchEvent(new Event('wg-recent-changed'));return saved}catch(e){setSaveError(e instanceof Error?e.message:'保存失败');throw e}finally{setSaving(false)}}
  async function save(){await act(async()=>{if(!doc)throw Error('请先打开文档');if(!dirty)return;await persist(doc);setMessage(intake?'草稿已保存，尚未入库':'编排已保存到服务器');await refresh()})}
  async function check(){await act(async()=>{if(!doc)return;const saved=dirty?await persist(doc):doc;const data=await api<ReviewData>('/documents/'+saved.id+'/manual-review',{method:'POST',body:JSON.stringify({revision:saved.revision})});setReview(data);setResult(undefined)})}
+ useEffect(()=>{if(!intake||params.get('review')!=='1'||!doc||doc.id!==requested||dirty||busy||doc.archived||!pending||autoReview.current===doc.id)return;autoReview.current=doc.id;void check()},[intake,params,doc,requested,dirty,busy,pending])
  async function commit(accept:boolean){await act(async()=>{if(!doc||!review||dirty||doc.revision!==review.revision)throw Error('草稿已变化，请重新检查');const saved=await api<{document:Doc;counts:ResultCounts}>('/documents/'+doc.id+'/manual-commit',{method:'POST',body:JSON.stringify({revision:review.revision,accept_warnings:accept})});setDoc(saved.document);setDirty(false);removeRecovery(doc.id);setReview(undefined);setResult(saved.counts);window.dispatchEvent(new Event('wg-recent-changed'));void refresh().catch(()=>{})})}
  function resume(uid=''){setReview(undefined);setResult(undefined);choose(uid);if(!uid)setCardPanel('list')}
  useEffect(()=>{const handle=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&doc){e.preventDefault();if(!picker&&!busy&&!doc.archived&&dirty&&!review&&!result)void save()}};window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle)},[doc,dirty,busy,picker,pending,review,result])
