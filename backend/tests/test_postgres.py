@@ -378,6 +378,25 @@ def test_migration_and_login(tmp_path, monkeypatch):
             initial_plan=client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至2页'}).json()
             assert initial_plan['candidates'][0]['file_id']==fid and initial_plan['candidates'][0]['start']==1 and initial_plan['candidates'][0]['end']==2
             assert client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至11页'}).status_code==422
+            # Agent uses the selected real model; no recognition before explicit confirmation.
+            from app.api import qoder
+            agent_calls=[]
+            def agent_worker(method,path,body=None):
+                if path=="/status":return {"chat_available":True}
+                if path=="/chat/start":agent_calls.append(body);return {"state":"running"}
+                return {"state":"done","answer":json.dumps({"action":"recognize","file_id":fid,"start":None,"count":1,"explanation":"继续教材下一页"},ensure_ascii=False)}
+            with monkeypatch.context() as ap:
+                ap.setattr(qoder,"request",agent_worker)
+                agent_url=wb+"/agent"
+                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页","model":"Auto","effort":"default","selected_id":mat["id"]})
+                assert asked.status_code==200,asked.text
+                assert asked.json()["state"]=="running" and len(agent_calls)==1 and fid in agent_calls[0]["prompt"]
+                ready=client.get(agent_url).json()
+                assert ready["state"]=="ready" and ready["plan"]["start"]==1 and ready["plan"]["end"]==1
+                assert client.get(wb).json()["materials"][0]["batches"]==[]
+                assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ready["id"]}).json()["state"]=="confirmed"
+                assert client.get(agent_url).json()["id"]==ready["id"]
+                assert client.get(wb).json()["materials"][0]["batches"]==[]
             for page in (1,2):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
                 assert batch.status_code==200,batch.text

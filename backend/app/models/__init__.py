@@ -289,6 +289,7 @@ class VideoProject(Base):
 # Persistent AI work sessions; legacy intake jobs remain independent.
 class WorkSession(Base):
     __tablename__="work_sessions"
+    agent_history: Mapped[list]=mapped_column(JSON,default=list,server_default="[]")
     id: Mapped[str]=mapped_column(String(36),primary_key=True)
     title: Mapped[str]=mapped_column(String(200))
     created_at: Mapped[int]=mapped_column(BigInteger)
