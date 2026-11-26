@@ -153,9 +153,9 @@ def validate_effort(catalog,model,effort,video=False):
     if catalog.get("source")!="cli" or not any(m.get("id")==model and effort in m.get("efforts",[]) for m in catalog.get("models",[])):
         raise HTTPException(422,"该模型未报告所选推理强度，请刷新模型")
 
-def assistant_effort(db,model):
+def assistant_effort(db,model,override=None):
     prefs=model_preference(db)
-    effort=prefs["effort"] if prefs["model"]==model else "default"
+    effort=override if override is not None else (prefs["effort"] if prefs["model"]==model else "default")
     if effort!="default":validate_effort(available_models(),model,effort)
     return {"effort":effort} if effort!="default" else {}
 

@@ -64,6 +64,7 @@ class Patch(BaseModel):
 class Turn(BaseModel):
     content:str=Field(min_length=1,max_length=12000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+    effort:str|None=Field(default=None,max_length=16)
     attachments:list[str]=Field(default_factory=list,max_length=4)
     resource_ids:list[str]=Field(default_factory=list,max_length=10)
     retrieval_query:str=Field(default="",max_length=200)
@@ -117,6 +118,7 @@ def turn(ident:str,body:Turn,db:Session=Depends(get_db),user:User=Depends(curren
     if not body.content.strip(): raise HTTPException(422,"请输入内容")
     status=qoder.request("GET","/status")
     if not status.get("chat_available"): raise HTTPException(503,"独立 Qoder 执行服务需要升级至 M03")
+    effort_args=qoder.assistant_effort(db,body.model,body.effort)
     attached=attachments(db,body.attachments)
     refs,context=resource_context.prepare(db,body.resource_ids,body.retrieval_query)
     if body.rewind_id:
@@ -152,7 +154,7 @@ def turn(ident:str,body:Turn,db:Session=Depends(get_db),user:User=Depends(curren
     # Persist IDs before launching; a reconnect can query the exact job.
     db.commit()
     try:
-        qoder.request("POST","/chat/start",{"id":a.id,"model":body.model,"prompt":text,**qoder.assistant_effort(db,body.model)})
+        qoder.request("POST","/chat/start",{"id":a.id,"model":body.model,"prompt":text,**effort_args})
     except HTTPException as exc:
         # Transport failure may have occurred after the worker accepted the job.
         if exc.status_code not in (503,504):

@@ -20,6 +20,7 @@ class Start(BaseModel):
     subject:str=Field(default="",max_length=40)
     text:str=Field(min_length=1,max_length=24000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
+    effort:str|None=Field(default=None,max_length=16)
     import_id:str|None=Field(default=None,max_length=36)
     import_reviewed:bool=False
     source_message_id:str|None=Field(default=None,max_length=36)
@@ -117,12 +118,14 @@ def launch(db,user,body,provenance,retry_of=None):
         prompt+="\n文件提取可能失真。保留不确定标记，不自行还原缺失公式、图形或答案。所有结果待人工对照原件。"
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"原文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"独立Qoder执行服务需升级至V3")
+    effort_args=qoder.assistant_effort(db,body.model,body.effort)
+    provenance={**provenance,"effort":effort_args.get("effort","default")}
     j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,source_id=body.source_id,provenance=provenance,retry_of=retry_of,revision=1,created_at=now(),updated_at=now())
     db.add(j);db.flush()
     if provenance.get("kind")=="file_import":
         storage.link_file(db,provenance["file_id"],"intake_job",j.id)
     audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()
-    try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt,**qoder.assistant_effort(db,j.model)})
+    try:qoder.request("POST","/chat/start",{"id":j.id,"model":j.model,"prompt":prompt,**effort_args})
     except HTTPException as e:
         # Ambiguous transport failures may occur after acceptance. Reconcile the original ID.
         if e.status_code not in (503,504):
@@ -141,7 +144,7 @@ def retry(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(curre
     if j.state not in ("failed","stopped") or j.revision!=body.revision:
         raise HTTPException(409,"仅失败或已停止任务可重试，请刷新任务状态")
     provenance=j.provenance or {"kind":"manual","intent":"mixed"}
-    draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model,source_id=j.source_id)
+    draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model,effort=provenance.get("effort"),source_id=j.source_id)
     return launch(db,user,draft,provenance,retry_of=j.id)
 
 @router.post("/jobs/{id}/stop",dependencies=[Depends(require_origin)])

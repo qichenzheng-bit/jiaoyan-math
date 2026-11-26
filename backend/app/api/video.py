@@ -15,11 +15,11 @@ from app.api import qoder
 import threading
 production_model_lock=threading.Lock()
 
-def prepare_model(db):
+def prepare_model(db,override=None):
     model=qoder.video_model_preference(db)
     if model not in {m['id'] for m in qoder.available_models()['models']}:
         raise HTTPException(422,'视频模型已不在可用清单，请重新配置')
-    effort=qoder.stored_effort(db,qoder.VIDEO_EFFORT_KEY)
+    effort=override if override is not None else qoder.stored_effort(db,qoder.VIDEO_EFFORT_KEY)
     qoder.validate_effort(qoder.available_models(),model,effort,True)
     engine.configure_production_model(model,effort)
 
@@ -27,7 +27,9 @@ router = APIRouter(prefix="/video", dependencies=[Depends(current_user)])
 write = [Depends(require_origin)]
 class Start(BaseModel):
     resource_id: str = Field(max_length=36)
-class Instruction(BaseModel):
+class InferenceOptions(BaseModel):
+    effort: str|None = Field(default=None,max_length=16)
+class Instruction(InferenceOptions):
     instruction: str = Field(min_length=1, max_length=12000)
 
 def view(row):
@@ -109,14 +111,14 @@ def detail(ident: str, db: Session = Depends(get_db)):
     return result
 
 @router.post("/projects/{ident}/{action}", dependencies=write)
-def produce(ident: str, action: Literal["generate","render"], db: Session = Depends(get_db)):
+def produce(ident: str, action: Literal["generate","render"], body: InferenceOptions|None=None, db: Session = Depends(get_db)):
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可修改")
     rid=remote(row)
     if action=="generate":
         with production_model_lock:
-            prepare_model(db)
+            prepare_model(db,body.effort if body else None)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})
     return engine.call("POST", f"/lessons/{rid}/{action}", {})
 
@@ -127,7 +129,7 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
     with production_model_lock:
-        prepare_model(db)
+        prepare_model(db,body.effort)
         return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction, "images":[]})
 
 @router.get("/projects/{ident}/edits/history")
