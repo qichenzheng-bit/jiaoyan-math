@@ -33,6 +33,12 @@ def answer(route):
       "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
       "/qoder/usage/refresh":{"available":True,"source":"sdk","updated_at":1795656773,"packs":[{"kind":"userQuota","label":"套餐额度","total":100,"used":25,"remaining":75,"unit":"credits","available":True}]},"/studio/qoder-checkin":{"round":"2026-11-26","timezone":"Asia/Shanghai","accounts":[]},"/qiandao/state":{"enabled":False,"configured":False,"reason":"pat_missing","round":"2026-11-26","next_round":"2026-11-27T10:00:00+08:00","current":None,"history":[]},"/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if p=="/documents" and route.request.method=="POST":
+        body=json.loads(route.request.post_data)
+        result={**body,"id":"assembly-demo","archived":False,"revision":1,"blocks":[{**b,"snapshot":next(r for r in items if r["id"]==b["resource_id"])} if b["kind"]=="reference" else b for b in body["blocks"]]}
+    if p=="/documents/assembly-demo" and route.request.method=="PUT":
+        body=json.loads(route.request.post_data)
+        result={**body,"revision":body["revision"]+1}
     if p=="/documents/ai-demo":
         result=ai_doc
         if route.request.method=="PUT":
@@ -347,6 +353,39 @@ with sync_playwright() as p:
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
+    # Compose from the question bank, preserve original resources, and save layout only.
+    page.set_viewport_size({"width":1600,"height":900})
+    page.goto("http://127.0.0.1:4173/papers",wait_until="networkidle")
+    page.locator(".assembly-result").first.wait_for()
+    page.get_by_role("button",name="＋ 选入",exact=True).first.click()
+    page.get_by_role("button",name="＋ 选入",exact=True).first.click()
+    assert page.locator(".assembly-cart-item").count()==2
+    page.get_by_label("文档名称",exact=True).fill("组卷测试")
+    with page.expect_request(lambda req:req.url.endswith("/api/documents") and req.method=="POST") as created:
+        page.get_by_role("button",name="进入 Word 工作台",exact=True).click()
+    assert [b["kind"] for b in created.value.post_data_json["blocks"]]==["reference","reference"]
+    page.locator(".assembly-word").wait_for()
+    assert page.get_by_role("button",name="AI 协作",exact=True).count()==0
+    assert page.get_by_role("button",name="批量审核入库",exact=True).count()==0
+    assert page.locator(".manual-word-item").count()==2
+    page.get_by_label("本题分值",exact=True).fill("10")
+    page.get_by_role("button",name="下移",exact=True).click()
+    page.get_by_role("button",name="＋ 正文",exact=True).click()
+    page.get_by_label("正文",exact=True).fill("作答说明")
+    page.get_by_role("button",name="整套预览",exact=True).click()
+    assert page.locator(".manual-intake-preview .print-question-number").count()==2
+    assert page.locator(".manual-intake-preview").get_by_text("作答说明",exact=True).count()>0
+    with page.expect_request(lambda req:req.url.endswith("/documents/assembly-demo") and req.method=="PUT") as saved:
+        page.get_by_role("button",name="保存编排",exact=True).click()
+    assert [b["kind"] for b in saved.value.post_data_json["blocks"]]==["reference","reference","text"]
+    assert [b["resource_id"] for b in saved.value.post_data_json["blocks"][:2]]==[items[1]["id"],items[0]["id"]]
+    page.get_by_text("编排已保存到服务器",exact=True).wait_for()
+    page.screenshot(path=str(OUT/"30-assembly-paper.png"),full_page=False)
+    for route in ("handouts","textbooks"):
+        page.goto("http://127.0.0.1:4173/"+route,wait_until="networkidle")
+        page.locator(".assembly-picker").wait_for()
+        assert page.get_by_role("button",name="知识库",exact=True).is_visible()
+
     # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
     page.set_viewport_size({"width":393,"height":873})
     page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
