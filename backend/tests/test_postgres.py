@@ -138,7 +138,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         manual_path="/api/documents/"+manual["id"]
         draft_blocks=[
             {"uid":"manual-heading","kind":"heading","title":"一、选择题"},
-            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"多选题","chapter":"矩阵","knowledge_tags":["矩阵运算","矩阵运算"],"content":"选择正确项\\nA. 1\\nB. 2","answer":"AB","solution":"已知解析"},
+            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"选择题","difficulty":"中等","chapter":"矩阵","knowledge_tags":["矩阵运算","矩阵运算"],"content":"选择正确项\\nA. 1\\nB. 2","answer":"AB","solution":"已知解析"},
             {"uid":"manual-b","kind":"question","question_type":"解答题","content":"已知函数\\n(1) 求导数","answer":"(1) 2x","solution":"(1) 直接计算"},
         ]
         before_count=client.get("/api/resources?kind=question").json()["total"]
@@ -151,6 +151,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert saved.json()["blocks"][1]["snapshot"]["subject"]=="线性代数"
         assert saved.json()["blocks"][1]["snapshot"]["chapter"]=="矩阵"
         assert saved.json()["blocks"][1]["snapshot"]["answer"]=="AB"
+        assert saved.json()["blocks"][1]["snapshot"]["question_type"]=="多选题"
+        assert saved.json()["blocks"][1]["snapshot"]["difficulty"]=="中等"
         assert saved.json()["blocks"][2]["snapshot"]["content"].endswith("(1) 求导数")
         assert client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":draft_blocks}).status_code==409
         assert client.get(manual_path+"/export").status_code==409
@@ -167,7 +169,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert any(x["resource"]["id"]==original["id"] and x["match_kind"]=="exact" for x in found.json()["items"])
         new_source=client.post("/api/documents/setup",headers=origin,json={"title":"复用试卷","subject":"线性代数","source_type":"exam"}).json()
         reuse_path="/api/documents/"+new_source["id"]+"/manual-save"
-        reused_block={**draft_blocks[1],"uid":"reuse-question","reuse_resource_id":original["id"],"reuse_revision":original["revision"],"knowledge_tags":["矩阵运算","矩阵乘法"]}
+        reused_block={**draft_blocks[1],"question_type":original["question_type"],"uid":"reuse-question","reuse_resource_id":original["id"],"reuse_revision":original["revision"],"knowledge_tags":["矩阵运算","矩阵乘法"]}
         changed=client.post(reuse_path,headers=origin,json={**new_source,"blocks":[{**reused_block,"content":"篡改原题"}]})
         assert changed.status_code==409
         assert client.get("/api/documents/"+new_source["id"]).json()["revision"]==new_source["revision"]

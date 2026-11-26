@@ -259,7 +259,7 @@ with sync_playwright() as p:
             page.get_by_role("button",name="全部题目",exact=True).click()
             assert page.locator(".manual-list-row").count()==4
             page.get_by_role("button",name="整套预览",exact=True).click()
-            assert page.locator(".manual-render .katex").count()>0
+            assert page.locator(".manual-intake-preview .katex").count()>0
             page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.screenshot(path=str(OUT/"27-mobile-card.png"),full_page=False)
@@ -274,33 +274,42 @@ with sync_playwright() as p:
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
-    # Phone-first manual entry: structured inputs, no review, Word compatibility.
+    # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
     page.set_viewport_size({"width":393,"height":873})
     page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
     page.locator(".mobile-doc-card").wait_for()
     page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")
-    page.locator(".manual-field-preview .katex").first.wait_for()
-    assert page.get_by_role("button",name="保存并入库",exact=True).first.is_enabled()
+    page.get_by_label("难度",exact=True).select_option("中等")
+    page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
+    page.get_by_label("题目",exact=True).locator(".inline-math-token").click()
+    page.get_by_label("编辑 LaTeX 公式",exact=True).fill(r"$\frac{1}{x^2}$")
+    page.get_by_label("难度",exact=True).click()
+    page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
+    assert page.get_by_label("编辑 LaTeX 公式",exact=True).count()==0
+    assert page.get_by_role("button",name="保存整套资料",exact=True).is_enabled()
     assert page.get_by_label("条目标题",exact=True).count()==0
     page.get_by_role("button",name="切换 Word 版").click()
     assert page.locator(".doc-sheet").get_by_text("的导数",exact=False).count()>0
     assert page.locator(".doc-sheet .katex").count()>0
     page.get_by_role("button",name="切换卡片版").click()
-    assert page.get_by_label("题目",exact=True).input_value().endswith("的导数。")
-    page.get_by_role("button",name="＋ 单选题",exact=True).click()
+    assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
+    assert page.get_by_role("button",name="＋ 选择题",exact=True).count()==0
+    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+    assert page.get_by_label("题目",exact=True).count()==0
+    page.get_by_role("button",name="＋ 选择题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("选择正确答案")
     page.get_by_label("A 选项",exact=True).fill("$1$")
     page.get_by_label("B 选项",exact=True).fill("$2$")
     page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
+    assert page.get_by_text("正确选项 · 单选题",exact=True).is_visible()
     page.locator(".manual-answer-choices").get_by_role("button",name="B",exact=True).click()
-    assert page.get_by_label("答案",exact=True).input_value()=="B"
-    page.get_by_label("题型",exact=True).select_option("多选题")
-    page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
-    assert page.get_by_label("答案",exact=True).input_value()=="AB"
+    assert page.get_by_text("正确选项 · 多选题",exact=True).is_visible()
+    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 填空题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("计算")
     page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
-    assert "underline" in page.get_by_label("题目",exact=True).input_value()
+    assert "underline" in page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")
+    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 解答题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("已知函数")
     assert page.get_by_label("第 1 小问题目",exact=True).count()==0
@@ -308,25 +317,32 @@ with sync_playwright() as p:
     page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
     page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
     page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
-    assert page.get_by_role("button",name="＋ 引用题库",exact=True).count()==0
     page.get_by_label("知识标签",exact=True).fill("导数")
     page.get_by_label("知识标签",exact=True).press("Enter")
     assert page.get_by_role("button",name="移除知识标签 导数",exact=True).is_visible()
+    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 解答题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("测试查重")
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).wait_for()
     page.once("dialog",lambda dialog:dialog.accept())
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).click()
-    assert page.get_by_label("题目",exact=True).is_disabled()
+    assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="false"
     assert page.get_by_text("已选择原题 QDEMO0002",exact=False).is_visible()
     page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
-    assert page.get_by_label("题目",exact=True).is_enabled()
+    assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="true"
     page.get_by_label("题目",exact=True).fill("修改为新题")
     page.get_by_role("button",name="整套预览",exact=True).click()
-    assert page.locator(".manual-list-row").count()==5
-    page.get_by_role("button",name="保存并入库",exact=True).first.click()
+    assert page.locator(".manual-intake-preview .print-question-number").count()==5
+    assert page.locator(".manual-intake-preview .katex").count()>0
+    assert page.get_by_role("button",name="打印 / 保存为 PDF",exact=True).count()==0
+    assert page.get_by_text("已保存并直接入库",exact=True).count()==0
+    with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-save") and req.method=="POST") as request_info:
+        page.get_by_role("button",name="保存整套资料",exact=True).click()
+    submitted=request_info.value.post_data_json
+    assert len(submitted["blocks"])==5
+    assert submitted["blocks"][0]["difficulty"]=="中等"
+    assert submitted["blocks"][1]["question_type"]=="多选题"
     page.get_by_text("已保存并直接入库",exact=True).wait_for()
-    assert page.get_by_role("button",name="批量审核",exact=True).count()==0
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path=str(OUT/"28-mobile-review.png"),full_page=False)
     page.set_viewport_size({"width":1600,"height":900})
