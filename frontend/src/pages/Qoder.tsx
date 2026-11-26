@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react'
 import {api} from '../auth'
-import {Icon} from '../components/Icon'
+import QoderUsage from '../components/QoderUsage'
 type Login={state:string;url:string;detail:string}
 type Status={available:boolean;detail:string;verified_at?:number|null;login?:Login;auth_ui?:boolean;model_discovery?:boolean;worker_version?:number;retained_auth?:boolean;user_disconnected?:boolean;busy?:boolean}
 type Catalog={models:{id:string;label:string;efforts:string[]}[];source:string;updated_at?:number|null;capability_source?:string}
@@ -99,7 +99,7 @@ export default function Qoder(){
 
    </div>
    <section className="panel model-summary"><span>当前已验证平台：{status?.verified_at?'1':'0'} / 1</span><span>可用模型：{catalog?.source==='cli'?options.length:'待探测'}</span><span>AI 助手：{saved}</span><span>视频制作与微调：{videoSaved}</span><span>自动更新：每 24 小时</span><span>上次成功更新：{catalog?.source==='cli'&&catalog.updated_at?date(catalog.updated_at):'尚未更新'}</span></section>
-   <section className="panel model-quota"><h2>用量与积分</h2><p className="muted">当前未接入已验证的积分接口，不显示估算余额。可在官方 Qoder CN 账户中查看真实用量。</p><a className="text-link" href="https://qoder.com.cn/" target="_blank" rel="noopener noreferrer">打开 Qoder CN 官网 <Icon name="arrow" size={15}/></a></section>
+   <QoderUsage/>
   </>}
   {tab==='models'&&<section className="panel model-config"><div className="panel-heading"><div><h2>按用途配置模型</h2><p>模型清单来源：{catalog?.source==='cli'?'CLI 实际探测':catalog?.source==='pending'?'等待授权后探测':'兼容档位（尚未探测）'}</p></div><button disabled={disabled||!status?.model_discovery} onClick={()=>void discover()}>{busy==='models'?'正在探测…':'刷新模型'}</button></div>
    {catalog?.updated_at&&<p className="muted">上次成功更新：{date(catalog.updated_at)}</p>}

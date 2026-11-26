@@ -1,0 +1,13 @@
+import {useEffect,useRef,useState} from 'react'
+import {api} from '../auth'
+type Pack={kind:string;label:string;total:number|null;used:number|null;remaining:number|null;unit:string|null;available:boolean|null}
+type Usage={available:boolean;reason?:string;source?:string;updated_at?:number;stale?:boolean;busy?:boolean;packs?:Pack[];quota_exceeded?:boolean|null}
+const format=(n:number|null|undefined)=>n==null?'未返回':n.toLocaleString('zh-CN',{maximumFractionDigits:3})
+const reasons:Record<string,string>={sdk_missing:'官方 SDK 尚未安装',sdk_failed:'官方 SDK 调用失败',sdk_timeout:'额度查询超时',sdk_unavailable:'平台暂未返回账号额度',cli_missing:'CLI 未安装'}
+export default function QoderUsage(){
+ const [usage,setUsage]=useState<Usage>(),[pending,setPending]=useState(false),[error,setError]=useState('')
+ const running=useRef(false),alive=useRef(true)
+ async function refresh(){if(running.current)return;running.current=true;setPending(true);try{const r=await api<Usage>('/qoder/usage/refresh',{method:'POST',signal:AbortSignal.timeout(45000)});if(alive.current){setUsage(r);setError('')}}catch(e){if(alive.current)setError(e instanceof Error?e.message:'额度查询失败')}finally{running.current=false;if(alive.current)setPending(false)}}
+ useEffect(()=>{alive.current=true;void refresh();const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void refresh()},60000);const focus=()=>void refresh();window.addEventListener('focus',focus);return()=>{alive.current=false;window.clearInterval(timer);window.removeEventListener('focus',focus)}},[])
+ return <section className="panel model-quota"><div className="button-row"><h2>当前 AI 账号 · 实时积分</h2><button type="button" disabled={pending} onClick={()=>void refresh()}>{pending?'查询中…':'刷新积分'}</button></div><p className="muted">官方 SDK 查询 · 每 60 秒更新（页面可见时）· 复用 AI 登录，不需要 PAT。</p>{error&&<p role="alert" className="inline-error">{error}{usage?.available?'，下方为此前查询结果。':''}</p>}{usage?.available?<><div className="button-row"><small>{usage.stale||error?'历史快照（非实时）':'官方额度快照'} · {usage.updated_at?new Date(usage.updated_at*1000).toLocaleString('zh-CN'):''}</small>{usage.quota_exceeded===true&&<strong>额度已耗尽</strong>}</div>{usage.packs?.map(p=><div key={p.kind} className="provider-card"><strong>{p.label}{p.available===false?'（不可用）':''}</strong><dl><div><dt>剩余</dt><dd>{format(p.remaining)}{p.unit&&p.remaining!=null?' Credits':''}</dd></div><div><dt>已用 / 总量</dt><dd>{format(p.used)} / {format(p.total)}</dd></div></dl></div>)}{usage.busy&&<p className="muted">模型任务进行中，暂缓刷新。</p>}{usage.reason&&<small className="muted">{reasons[usage.reason]??usage.reason}</small>}</>:<p className="muted">{usage?.reason?(reasons[usage.reason]??usage.reason):pending?'正在读取真实额度…':'暂无额度数据'}</p>}<p className="muted">仅显示已授权的当前 AI 账号；不将额度增加推断为签到成功。</p></section>
+}
