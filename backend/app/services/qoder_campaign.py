@@ -5,6 +5,7 @@ import os
 import re
 import stat
 import time
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -144,3 +145,47 @@ def run_claim(now=None, *, claim=True):
     if result.get("replayed") is False and str(result.get("status","")).upper()=="CLAIMED" and isinstance(benefit,dict) and str(benefit.get("kind","")).upper()=="CREDITS" and stamp(benefit.get("amount"))==100:
         earned=100
     return {"state":"claimed","earned":earned}
+
+
+def save_pat(value):
+    value=value.strip()
+    if not re.fullmatch(r"pt-[A-Za-z0-9._-]{8,4090}",value):
+        raise CampaignError("pat_invalid")
+    # Verify authorization without claiming anything.
+    exchange(value)
+    fd,name=tempfile.mkstemp(prefix=".qoder-checkin.",dir=PAT_FILE.parent)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as handle:
+            handle.write(value+"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name,PAT_FILE)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
+def quota_snapshot():
+    """Read the PAT account's own quota, never combine with unrelated CLI account."""
+    token=exchange(read_pat())
+    raw=call("/api/v2/quota/usage",token=token)
+    if not isinstance(raw,dict):raise CampaignError("unexpected_response")
+    def number(v):
+        if isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and v>=0:return float(v)
+        return None
+    packs=[]
+    def add(key,label,row):
+        if not isinstance(row,dict) or row.get("available") is False:return
+        remaining=number(row.get("remaining",row.get("Remaining")))
+        total=number(row.get("total",row.get("Total",row.get("cap"))))
+        used=number(row.get("used",row.get("Used")))
+        unit=row.get("unit",row.get("Unit"))
+        if unit is not None and str(unit).lower() not in ("credit","credits"):raise CampaignError("unexpected_response")
+        if remaining is None:raise CampaignError("unexpected_response")
+        packs.append({"kind":key,"label":label,"remaining":remaining,"total":total,"used":used})
+    for key,label in (("userQuota","套餐额度"),("addOnQuota","加油包"),("orgResourcePackage","共享额度")):
+        add(key,label,raw.get(key))
+    if not raw.get("orgResourcePackage"):add("sharedQuota","共享额度",raw.get("sharedQuota"))
+    dedicated=raw.get("dedicatedResourcePackages",[])
+    if not isinstance(dedicated,list):raise CampaignError("unexpected_response")
+    for i,item in enumerate(dedicated):add("dedicated:"+str(i),"专用额度",item)
+    if not packs:raise CampaignError("unexpected_response")
+    return {"balance":round(sum(p["remaining"] for p in packs),6),"packs":packs,"at":int(time.time())}
