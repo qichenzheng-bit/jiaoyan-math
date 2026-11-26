@@ -3,20 +3,20 @@ from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
-from app.models import TeachingResource, VideoProject, StudioItem, User
+from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile, FileReference
 from app.api.resources import admin_lock
 from app.api.studio import save_version
-from app.services import video_engine as engine
+from app.services import video_engine as engine, storage
 from app.api import qoder
 import threading
 production_model_lock=threading.Lock()
 
-def prepare_model(db,override=None):
-    model=qoder.video_model_preference(db)
+def prepare_model(db,override=None,model_override=None):
+    model=model_override or qoder.video_model_preference(db)
     if model not in {m['id'] for m in qoder.available_models()['models']}:
         raise HTTPException(422,'视频模型已不在可用清单，请重新配置')
     effort=override if override is not None else qoder.stored_effort(db,qoder.VIDEO_EFFORT_KEY)
@@ -28,12 +28,33 @@ write = [Depends(require_origin)]
 class Start(BaseModel):
     resource_id: str = Field(max_length=36)
 class InferenceOptions(BaseModel):
+    model: str|None = Field(default=None,max_length=80)
     effort: str|None = Field(default=None,max_length=16)
 class Instruction(InferenceOptions):
     instruction: str = Field(min_length=1, max_length=12000)
 
-def view(row):
-    return {k: getattr(row, k) for k in ("id", "resource_id", "resource_revision", "source_snapshot", "engine_id", "work_id", "created_at")}
+class CoverSelection(BaseModel):
+    file_id: str = Field(max_length=36)
+    timestamp: float = Field(ge=0,le=86400)
+    revision: int = Field(ge=0)
+
+def view(row,db=None):
+    result={k: getattr(row, k) for k in ("id", "resource_id", "resource_revision", "source_snapshot", "engine_id", "work_id", "created_at")}
+    if db is not None and row.work_id:
+        item=db.get(StudioItem,row.work_id)
+        if item:result.update(cover_file_id=item.data.get("cover_file_id"),cover_timestamp=item.data.get("cover_timestamp"))
+    return result
+
+def save_cover(db,row,item,body):
+    image=db.get(StoredFile,body.file_id)
+    if not image or image.archived or image.media_type!="image/png":
+        raise HTTPException(422,"请选择有效的视频截帧")
+    old=item.data.get("cover_file_id")
+    storage.link_file(db,body.file_id,"studio_item",item.id)
+    item.data={**item.data,"cover_file_id":body.file_id,"cover_timestamp":body.timestamp,"cover_revision":body.revision}
+    if old and old!=body.file_id:
+        db.execute(delete(FileReference).where(FileReference.file_id==old,FileReference.owner_type=="studio_item",FileReference.owner_id==item.id))
+
 
 def row_for(db, ident):
     row = db.get(VideoProject, ident)
@@ -73,7 +94,7 @@ def status():
 
 @router.get("/projects")
 def listing(db: Session = Depends(get_db)):
-    return [view(r) for r in db.scalars(select(VideoProject).order_by(VideoProject.created_at.desc()).limit(200))]
+    return [view(r,db) for r in db.scalars(select(VideoProject).order_by(VideoProject.created_at.desc()).limit(200))]
 
 @router.post("/projects", dependencies=write)
 def create(body: Start, db: Session = Depends(get_db), user: User = Depends(current_user)):
@@ -103,7 +124,7 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
 @router.get("/projects/{ident}")
 def detail(ident: str, db: Session = Depends(get_db)):
     row = row_for(db, ident)
-    result = view(row)
+    result = view(row,db)
     if row.engine_id:
         rid = remote(row)
         result["lesson"] = engine.call("GET", f"/lessons/{rid}")
@@ -118,7 +139,7 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
     rid=remote(row)
     if action=="generate":
         with production_model_lock:
-            prepare_model(db,body.effort if body else None)
+            prepare_model(db,body.effort if body else None,body.model if body else None)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})
     return engine.call("POST", f"/lessons/{rid}/{action}", {})
 
@@ -129,7 +150,7 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
     with production_model_lock:
-        prepare_model(db,body.effort)
+        prepare_model(db,body.effort,body.model)
         return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction, "images":[]})
 
 @router.get("/projects/{ident}/edits/history")
@@ -152,13 +173,23 @@ def job_action(ident: str, job_id: str, action: Literal["cancel","retry"], db: S
     return engine.call("POST", f"/jobs/{jid}/{action}", {})
 
 @router.post("/projects/{ident}/review/approve", dependencies=write)
-def approve(ident: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def approve(ident: str, body: CoverSelection|None=None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     admin_lock(db, user)
     row = row_for(db, ident)
-    if row.work_id:
-        return view(row)
     rid = remote(row)
     lesson = engine.call("GET", f"/lessons/{rid}")
+    if body:
+        if not lesson.get("has_video") or lesson.get("revision")!=body.revision:raise HTTPException(409,"成片版本已变化，请重新截取")
+        image=db.get(StoredFile,body.file_id)
+        if not image or image.archived or image.media_type!="image/png":raise HTTPException(422,"封面无效")
+        jobs=engine.call("GET",f"/jobs?lesson_id={rid}&limit=30")
+        if any(j.get("status") in ("running","queued","cancelling") for j in jobs):raise HTTPException(409,"视频任务仍在执行")
+    if row.work_id:
+        if body:
+            item=db.get(StudioItem,row.work_id)
+            if not item:raise HTTPException(409,"作品记录不存在")
+            save_cover(db,row,item,body);item.revision+=1;item.updated_at=now();save_version(db,item);db.commit()
+        return view(row,db)
     if lesson.get("video_review_status") != "approved":
         lesson = engine.call("POST", f"/videos/{rid}/review/approve", {})
     if lesson.get("video_review_status") != "approved" or not lesson.get("has_video"):
@@ -168,9 +199,11 @@ def approve(ident: str, db: Session = Depends(get_db), user: User = Depends(curr
             "content":"", "note":"视频引擎审核归档", "video_project_id":row.id}
     item = StudioItem(id=str(uuid4()), kind="work", title=row.source_snapshot["title"], data=data,
                       revision=1, archived=False, created_at=now(), updated_at=now())
-    db.add(item); db.flush(); save_version(db,item); row.work_id=item.id
+    db.add(item); db.flush()
+    if body:save_cover(db,row,item,body)
+    save_version(db,item); row.work_id=item.id
     audit(db,"video.approve",user.id); db.commit()
-    return view(row)
+    return view(row,db)
 
 @router.get("/projects/{ident}/media")
 def media(ident: str, request: Request, download: bool=False, db: Session = Depends(get_db)):
