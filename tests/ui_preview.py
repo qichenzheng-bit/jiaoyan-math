@@ -598,6 +598,7 @@ with sync_playwright() as p:
                 expect(page.locator(".doc-mode-switch")).to_have_count(0)
                 expect(page.locator(".assembly-pages")).to_have_count(0)
                 expect(page.locator(".assembly-cart-bar")).to_be_visible()
+                assert page.locator(".assembly-cart-bar").evaluate("el=>getComputedStyle(el).position")=="fixed"
                 assert page.locator(".assembly-search input").evaluate("el=>el.getBoundingClientRect().height")<=44
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                 page.locator(".compact-resource-main").first.click()
