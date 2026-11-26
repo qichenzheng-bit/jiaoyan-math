@@ -302,6 +302,9 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:4173/intake?doc=ai-demo",wait_until="networkidle")
     page.locator(".mobile-doc-card").wait_for()
     page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")
+    # select_option changes value but does not reliably move keyboard focus.
+    # Click outside as a real user would, then assert rendered math.
+    page.get_by_label("难度",exact=True).click()
     page.get_by_label("难度",exact=True).select_option("中等")
     page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
     page.get_by_label("题目",exact=True).locator(".inline-math-token").click()

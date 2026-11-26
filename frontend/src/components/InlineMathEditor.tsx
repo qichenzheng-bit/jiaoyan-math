@@ -1,4 +1,4 @@
-import {useLayoutEffect,useRef,type Ref} from 'react'
+import {useCallback,useLayoutEffect,useRef,type Ref} from 'react'
 import katex from 'katex'
 
 const formula=/(?<!\\)\$\$[\s\S]+?(?<!\\)\$\$|(?<![\\$])\$(?!\$)[^\n]+?(?<!\\)\$(?!\$)|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g
@@ -34,7 +34,9 @@ function paint(root:HTMLElement,value:string){
 export default function InlineMathEditor({label,value,onChange,locked,placeholder,rows=3,editorRef}:{label:string;value:string;onChange:(v:string)=>void;locked:boolean;placeholder?:string;rows?:number;editorRef?:Ref<HTMLDivElement>}){
  const root=useRef<HTMLDivElement>(null),latest=useRef(value),change=useRef(onChange)
  latest.current=value;change.current=onChange
- function emit(){const el=root.current;if(!el)return;const v=read(el);if(v!==latest.current){latest.current=v;change.current(v)}}
+ const emit=useCallback(()=>{const el=root.current;if(!el)return;const v=read(el);if(v!==latest.current){latest.current=v;change.current(v)}},[])
+ const finish=useCallback(()=>{const el=root.current;if(!el)return;emit();paint(el,read(el))},[emit])
+ useLayoutEffect(()=>{const outside=(event:PointerEvent)=>{const el=root.current;if(!el||!(event.target instanceof Node)||el.contains(event.target))return;if(el.contains(document.activeElement)){const active=document.activeElement;if(active instanceof HTMLElement&&active!==el)active.blur();finish()}};document.addEventListener('pointerdown',outside,true);return()=>document.removeEventListener('pointerdown',outside,true)},[finish])
  useLayoutEffect(()=>{const el=root.current;if(el&&!el.contains(document.activeElement)&&read(el)!==value)paint(el,value)},[value])
  useLayoutEffect(()=>{if(root.current)paint(root.current,latest.current)},[])
  function editToken(token:HTMLElement){
@@ -54,5 +56,5 @@ export default function InlineMathEditor({label,value,onChange,locked,placeholde
   }else el.append(document.createTextNode(text))
   emit()
  }
- return <div className="manual-field"><span>{label}</span><div ref={el=>{root.current=el;if(typeof editorRef==='function')editorRef(el);else if(editorRef)editorRef.current=el}} role="textbox" aria-label={label} aria-multiline="true" aria-disabled={locked} contentEditable={!locked} suppressContentEditableWarning className="inline-math-editor" data-placeholder={placeholder??'输入文字，公式用 $...$ 包裹'} style={{minHeight:rows*25+'px'}} onInput={emit} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget)){emit();paint(e.currentTarget,read(e.currentTarget))}}} onPointerDown={e=>{const t=(e.target as HTMLElement).closest<HTMLElement>('[data-math-source]');if(t&&!locked&&!t.querySelector('input')){e.preventDefault();editToken(t)}}} onKeyDown={e=>{const t=(e.target as HTMLElement).closest<HTMLElement>('[data-math-source]');if(t&&e.key==='Enter'&&!t.querySelector('input')){e.preventDefault();editToken(t);return}if(e.key==='Enter'&&!e.nativeEvent.isComposing){e.preventDefault();insert('\n')}}} onPaste={e=>{e.preventDefault();insert(e.clipboardData.getData('text/plain'))}}/></div>
+ return <div className="manual-field"><span>{label}</span><div ref={el=>{root.current=el;if(typeof editorRef==='function')editorRef(el);else if(editorRef)editorRef.current=el}} role="textbox" aria-label={label} aria-multiline="true" aria-disabled={locked} contentEditable={!locked} suppressContentEditableWarning className="inline-math-editor" data-placeholder={placeholder??'输入文字，公式用 $...$ 包裹'} style={{minHeight:rows*25+'px'}} onInput={emit} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))finish()}} onPointerDown={e=>{const t=(e.target as HTMLElement).closest<HTMLElement>('[data-math-source]');if(t&&!locked&&!t.querySelector('input')){e.preventDefault();editToken(t)}}} onKeyDown={e=>{const t=(e.target as HTMLElement).closest<HTMLElement>('[data-math-source]');if(t&&e.key==='Enter'&&!t.querySelector('input')){e.preventDefault();editToken(t);return}if(e.key==='Enter'&&!e.nativeEvent.isComposing){e.preventDefault();insert('\n')}}} onPaste={e=>{e.preventDefault();insert(e.clipboardData.getData('text/plain'))}}/></div>
 }
