@@ -75,9 +75,10 @@ def test_migration_and_login(tmp_path, monkeypatch):
         second=client.post("/api/workspaces",headers=origin,json={"title":"跨会话继续"}).json()
         second_base="/api/workspaces/"+second["id"]
         second_material=client.post(second_base+"/materials",headers=origin,json={"file_ids":[item["id"]]}).json()["materials"][0]
-        assert second_material["verified_units"]==1 and second_material["next_unit"]==2
+        assert second_material["recognized_units"]==1 and second_material["verified_units"]==1 and second_material["next_unit"]==2
         assert client.get(second_base+"/batches/"+bid).json()["verified"]
         assert client.get("/api/workspaces/library?q=notes.txt").json()["items"][0]["verified_units"]==1
+        assert client.get("/api/workspaces/library/resolve?instruction=notes.txt%20继续识别").json()["items"][0]["id"]==item["id"]
         assert client.post("/api/workspaces/library/archive",headers=origin,json={"file_ids":[item["id"]]}).status_code==409
         assert client.post("/api/workspaces/library/archive",headers=origin,json={"file_ids":[item["id"]],"allow_unfinished":True}).status_code==200
         assert client.get(base).json()["materials"][0]["file"]["archived"]

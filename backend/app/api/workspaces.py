@@ -12,7 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
-from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument
+from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument, DocumentRegistration
 from app.services import storage, material_import as imp
 from app.api import intelligence as ai
 
@@ -77,17 +77,19 @@ def latest_job(db,b):
 def registered(db,j):
     if not j or j.state!="converted" or not j.document_id or not j.items:return False
     d=db.get(TeachingDocument,j.document_id)
-    if not d:return False
-    refs={b["uid"] for b in d.blocks if b.get("kind")=="reference" and b.get("resource_id")}
-    return all(b.get("uid") in refs for b in j.items)
+    if not d or d.archived:return False
+    refs={b["uid"] for b in d.blocks if b.get("kind")=="reference" and b.get("resource_id") and not b.get("edit_reference_revision")}
+    history={entry.get("uid") for r in db.scalars(select(DocumentRegistration).where(DocumentRegistration.document_id==d.id)) for entry in r.entries}
+    return all(b.get("uid") in refs and b.get("uid") in history for b in j.items)
 def file_batches(db,fid):
     return list(db.scalars(select(WorkBatch).join(WorkMaterial,WorkMaterial.id==WorkBatch.material_id).where(WorkMaterial.file_id==fid).order_by(WorkBatch.start,WorkBatch.created_at)))
 def progress(db,f,batches,total):
     done={n for b in batches if b.verified_text is not None for n in range(b.start,b.end+1)}
+    recognized={u["unit"] for b in batches for u in b.units if u.get("state")=="done"}
     saved={n for b in batches if registered(db,latest_job(db,b)) for n in range(b.start,b.end+1)}
     next_unit=1
     while next_unit in done:next_unit+=1
-    return {"total_units":total,"verified_units":len(done),"registered_units":len(saved),"next_unit":next_unit,"complete":total is not None and total>0 and all(n in saved for n in range(1,total+1))}
+    return {"total_units":total,"recognized_units":len(recognized),"verified_units":len(done),"registered_units":len(saved),"next_unit":next_unit,"complete":total is not None and total>0 and sum(1 for n in saved if 1<=n<=total)==total}
 def batch_view(db,b,full=False):
     j=latest_job(db,b)
     result={"id":b.id,"material_id":b.material_id,"start":b.start,"end":b.end,"units":[{k:v for k,v in u.items() if full or k!="text"} for u in b.units],"verified":b.verified_text is not None,"job_id":j.id if j else None,"job_state":j.state if j else None,"document_id":j.document_id if j else None,"created_at":b.created_at}
@@ -167,9 +169,9 @@ def read(ident:str,db:Session=Depends(get_db)):
 def attach(ident:str,body:Attach,db:Session=Depends(get_db),user:User=Depends(current_user)):
     s=workspace(db,ident,True)
     existing={m.file_id for m in db.scalars(select(WorkMaterial).where(WorkMaterial.session_id==s.id))}
-    for fid in dict.fromkeys(body.file_ids):
+    for fid in sorted(set(body.file_ids)):
         if fid in existing:continue
-        f=db.get(StoredFile,fid)
+        f=db.scalar(original_query().where(StoredFile.id==fid).with_for_update())
         if not f or f.archived:raise HTTPException(404,"文件不存在")
         previous=db.scalar(select(WorkMaterial).where(WorkMaterial.file_id==f.id).limit(1))
         total=previous.total_units if previous and previous.total_units is not None else unit_count(f)
