@@ -31,6 +31,10 @@ const subPattern=/^[（(]([1-9][0-9]*)[）)]\s*(.*)$/
 function combine(main:string,parts:Record<string,string>,keys:string[],label:(k:string)=>string){
  return [main,...keys.filter(k=>parts[k]?.trim()).map(k=>label(k)+parts[k])].filter(s=>s.trim()).join('\n')
 }
+// Keep empty subquestion markers in the stem so collapsing a card does not lose newly added slots.
+function combineSubStem(main:string,parts:Record<string,string>,keys:string[]){
+ return [main,...keys.map(k=>'('+k+')'+(parts[k]?.trim()?' '+parts[k]:''))].filter(s=>s.trim()).join('\n')
+}
 function Field(props:{label:string;value:string;onChange:(v:string)=>void;locked:boolean;placeholder?:string;rows?:number}){
  return <InlineMathEditor {...props}/>
 }
@@ -43,17 +47,31 @@ export function QuestionFields({value,subject,subjects,locked,onChange,knowledge
  const hasSubs=big&&subCount>0
  const stem=choice?options.main:hasSubs?sub.main:value.content
  const selectedLetters:string[]=/^[A-Z\s,，、]+$/.test(value.answer.trim())?value.answer.match(/[A-Z]/g)??[]:[]
- function setStem(v:string){onChange({content:choice?combine(v,options.parts,optKeys,k=>k+'. '):hasSubs?combine(v,sub.parts,subKeys,k=>'('+k+') '):v})}
+ function setStem(v:string){onChange({content:choice?combine(v,options.parts,optKeys,k=>k+'. '):hasSubs?combineSubStem(v,sub.parts,subKeys):v})}
  function setOption(k:string,v:string){onChange({content:combine(options.main,{...options.parts,[k]:v},optKeys,l=>l+'. ')})}
  function setSub(k:string,field:'content'|'answer'|'solution',v:string){
   const data=field==='content'?sub:field==='answer'?answers:solutions
-  onChange({[field]:combine(data.main,{...data.parts,[k]:v},subKeys,l=>'('+l+') ')})
+  const parts={...data.parts,[k]:v}
+  onChange({[field]:field==='content'?combineSubStem(data.main,parts,subKeys):combine(data.main,parts,subKeys,l=>'('+l+') ')})
+ }
+ function addSub(){
+  const keys=[...subKeys,String(subCount+1)]
+  if(!hasSubs&&(value.answer.trim()||value.solution.trim())){
+   if(!window.confirm('添加小问后不再使用公共答案和解析。将现有内容移入第 1 小问，是否继续？'))return
+   onChange({content:combineSubStem(sub.main,sub.parts,keys),answer:combine('',{'1':value.answer},keys,k=>'('+k+') '),solution:combine('',{'1':value.solution},keys,k=>'('+k+') ')})
+  }else onChange({content:combineSubStem(sub.main,sub.parts,keys)})
+  setSubCount(n=>n+1)
+ }
+ function migrateCommon(){
+  if(!window.confirm('将原公共答案、解析合并到第 1 小问，保留现有内容？'))return
+  const merge=(data:ReturnType<typeof marked>)=>combine('',{...data.parts,'1':[data.parts['1'],data.main].filter(v=>v?.trim()).join('\n')},subKeys,k=>'('+k+') ')
+  onChange({answer:merge(answers),solution:merge(solutions)})
  }
  function removeSub(k:string){
   if([sub.parts[k],answers.parts[k],solutions.parts[k]].some(v=>v?.trim())&&!window.confirm('移除该小问及其答案、解析？'))return
   const remaining=subKeys.filter(l=>l!==k)
   const renumber=(data:ReturnType<typeof marked>)=>combine(data.main,Object.fromEntries(remaining.map((old,i)=>[String(i+1),data.parts[old]??''])),remaining.map((_,i)=>String(i+1)),l=>'('+l+') ')
-  onChange({content:renumber(sub),answer:renumber(answers),solution:renumber(solutions)})
+  onChange({content:combineSubStem(sub.main,Object.fromEntries(remaining.map((old,i)=>[String(i+1),sub.parts[old]??''])),remaining.map((_,i)=>String(i+1))),answer:renumber(answers),solution:renumber(solutions)})
   setSubCount(n=>Math.max(0,n-1))
  }
  function setChoiceAnswer(v:string){
@@ -65,16 +83,16 @@ export function QuestionFields({value,subject,subjects,locked,onChange,knowledge
   setChoiceAnswer([...new Set(next)].sort().join(''))
  }
  function addBlank(){setStem(stem+'$\\underline{\\qquad}$')}
- const commonAnswer=hasSubs?answers.main:value.answer,commonSolution=hasSubs?solutions.main:value.solution
  return <div className="manual-question-fields">
   {!contentOnly&&<div className="manual-attributes"><label>科目<select aria-label="科目" disabled={locked} value={value.subject??subject} onChange={e=>onChange({subject:e.target.value})}>{Array.from(new Set(['',value.subject??subject,...subjects])).map(s=><option key={s} value={s}>{s||'请选择科目'}</option>)}</select></label><label>所在章节（选填）<input aria-label="所在章节" disabled={locked} maxLength={120} value={value.chapter} onChange={e=>onChange({chapter:e.target.value})}/></label><label>题型<select aria-label="题型" disabled={locked} value={type} onChange={e=>{onChange({question_type:e.target.value});setOptionCount(Math.max(4,...options.order.map(k=>k.charCodeAt(0)-64)));setSubCount(Math.max(0,...[...sub.order,...answers.order,...solutions.order].map(Number)))}}>{questionTypes.map(t=><option key={t}>{t}</option>)}</select></label><label>难度<select aria-label="难度" disabled={locked} value={value.difficulty??''} onChange={e=>onChange({difficulty:e.target.value})}><option value="">未设置</option>{['简单','中等','困难'].map(t=><option key={t}>{t}</option>)}</select></label></div>}
   {!contentOnly&&knowledge}
   <InlineMathEditor label="题目" value={stem} onChange={setStem} locked={locked} rows={5} placeholder="输入题干，公式用 $...$ 包裹"/>
   {fill&&<button type="button" disabled={locked} onClick={addBlank}>＋ 插入填空空位</button>}
   {choice&&<div className="manual-options"><strong>选项</strong>{optKeys.map(k=><Field key={k} label={k+' 选项'} value={options.parts[k]??''} locked={locked} rows={2} onChange={v=>setOption(k,v)}/>)}<div className="button-row"><button type="button" disabled={locked||optionCount>=26} onClick={()=>setOptionCount(n=>n+1)}>＋ 添加选项</button><button type="button" disabled={locked||optionCount<=2} onClick={()=>{const k=optKeys[optKeys.length-1];if(options.parts[k]?.trim()&&!window.confirm('移除最后一个选项？'))return;setOption(k,'');setOptionCount(n=>n-1)}}>减少选项</button></div><strong>正确选项{selectedLetters.length>1?' · 多选题':selectedLetters.length===1?' · 单选题':''}</strong><div className="button-row manual-answer-choices">{optKeys.map(k=><button type="button" key={k} disabled={locked} aria-pressed={selectedLetters.includes(k)} onClick={()=>toggleLetter(k)}>{k}</button>)}</div></div>}
-  {!choice&&<Field label="答案" value={commonAnswer} locked={locked} placeholder={fill?'多个空的答案按顺序填写':hasSubs?'共用答案（可留空）':'输入答案'} onChange={v=>onChange({answer:hasSubs?combine(v,answers.parts,subKeys,k=>'('+k+') '):v})}/>}
-  <Field label="解析" value={commonSolution} locked={locked} rows={5} placeholder={hasSubs?'共用解析（可留空）':'输入解析'} onChange={v=>onChange({solution:hasSubs?combine(v,solutions.parts,subKeys,k=>'('+k+') '):v})}/>
-  {big&&<div className="manual-subquestions">{subKeys.map(k=><section className="manual-subquestion" key={k}><div className="mobile-doc-title"><strong>第 {k} 小问</strong><button type="button" disabled={locked} onClick={()=>removeSub(k)}>移除</button></div>{(['content','answer','solution'] as const).map(f=><Field key={f} label={'第 '+k+' 小问'+({content:'题目',answer:'答案',solution:'解析'}[f])} value={(f==='content'?sub:f==='answer'?answers:solutions).parts[k]??''} locked={locked} onChange={v=>setSub(k,f,v)}/>)}</section>)}<button type="button" disabled={locked||subCount>=30} onClick={()=>setSubCount(n=>n+1)}>＋ 添加小问（可选）</button></div>}
+  {!choice&&!hasSubs&&<Field label="答案" value={value.answer} locked={locked} placeholder={fill?'多个空的答案按顺序填写':'输入答案'} onChange={v=>onChange({answer:v})}/>}
+  {!hasSubs&&<Field label="解析" value={value.solution} locked={locked} rows={5} placeholder="输入解析" onChange={v=>onChange({solution:v})}/>}
+  {hasSubs&&(answers.main.trim()||solutions.main.trim())&&<div className="manual-match"><small>此旧题仍有公共答案或解析，原内容已保留。</small><button type="button" disabled={locked} onClick={migrateCommon}>合并至第 1 小问</button></div>}
+  {big&&<div className="manual-subquestions">{subKeys.map(k=><section className="manual-subquestion" key={k}><div className="mobile-doc-title"><strong>第 {k} 小问</strong><button type="button" disabled={locked} onClick={()=>removeSub(k)}>移除</button></div>{(['content','answer','solution'] as const).map(f=><Field key={f} label={'第 '+k+' 小问'+({content:'题目',answer:'答案',solution:'解析'}[f])} value={(f==='content'?sub:f==='answer'?answers:solutions).parts[k]??''} locked={locked} onChange={v=>setSub(k,f,v)}/>)}</section>)}<button type="button" disabled={locked||subCount>=30} onClick={addSub}>＋ 添加小问（可选）</button></div>}
  </div>
 }
 
