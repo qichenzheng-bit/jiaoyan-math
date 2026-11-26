@@ -38,7 +38,7 @@ export default function Checkin(){
  </section>
  <section className="panel"><details><summary>签到历史（{state?.history.length??0}）</summary>{state?.history.map(h=><div className="checkin-event" key={h.round}><div>{h.round}<small className="muted checkin-block">{label(h.state)} · {h.mode==='auto'?'自动':'手动'}</small></div>{h.earned!=null&&<strong className="checkin-in">+{fmt(h.earned)}</strong>}</div>)}</details></section>
  {!!legacy?.accounts.length&&<section className="panel"><details><summary>原手工签到历史</summary>{legacy.accounts.map(a=><div key={a.id}><strong>{a.name}</strong>{a.recent.map(r=><div className="checkin-event" key={r.id}><span>{r.data.day} · {r.data.state==='success'?'已确认':r.data.state==='failed'?'失败':'未领取'}</span><span>{r.data.earned!=null?'+'+fmt(r.data.earned):'—'}</span></div>)}</div>)}</details></section>}
- <details className="checkin-sdk"><summary>AI 登录账号积分（独立查询）</summary><QoderUsage/></details>
+ {!valid&&state&&<details className="checkin-sdk"><summary>AI 登录账号积分（独立查询）</summary><QoderUsage/></details>}
  <small className="muted checkin-footnote">自动领取为实验接口，仅限符合资格的账号。<a href="https://docs.qoder.cn/events/100credits" target="_blank" rel="noopener noreferrer">活动规则</a></small>
  </div>
 }
