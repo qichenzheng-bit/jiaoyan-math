@@ -1,0 +1,47 @@
+/* Three-column intake view, sharing the phone card fields without the old ribbon. */
+.manual-intake-cards.manual-word-work{display:flex;flex-direction:column;gap:6px;font-size:13px;min-width:0}
+.manual-word-toolbar{display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:3px 0 7px}
+.manual-word-name{display:flex;align-items:baseline;gap:8px;flex:1;min-width:100px;overflow-wrap:anywhere}
+.manual-word-name small,.manual-word-side-head small{color:var(--muted);font-size:11px;white-space:nowrap}
+.legacy-shell .manual-word-work button,.legacy-shell .manual-word-work .button-link{min-height:29px;padding:4px 7px;font-size:12px;border-radius:5px}
+.manual-word-toolbar button[aria-pressed=true]{background:var(--selected);color:var(--ink)}
+.manual-word-layout{display:grid;grid-template-columns:minmax(115px,150px) minmax(0,1fr) minmax(210px,270px);gap:10px;align-items:start;min-width:0}
+.manual-word-outline,.manual-word-matches{min-width:0;position:sticky;top:0;max-height:calc(100dvh - 175px);overflow:auto}
+.manual-word-outline{padding-right:7px;border-right:1px solid var(--line)}
+.manual-word-matches{padding-left:9px;border-left:1px solid var(--line)}
+.manual-word-side-head{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:7px;font-size:13px}
+.legacy-shell .manual-word-outline input{width:100%;min-width:0;font-size:12px;padding:5px 6px}
+.manual-word-outline nav{display:grid;gap:2px;margin:7px 0}
+.legacy-shell .manual-word-outline nav button{display:grid;text-align:left;gap:2px;border:0;background:transparent;overflow:hidden;padding:5px 6px;min-width:0;white-space:normal}
+.manual-word-outline nav button[aria-current=true]{background:var(--selected);color:var(--ink)}
+.manual-word-outline nav button small{font-size:11px;color:var(--muted);max-height:2.7em;overflow:hidden;overflow-wrap:anywhere}
+.manual-word-outline details{font-size:12px;border-top:1px solid var(--line);padding:7px 0}
+.manual-word-outline details label{display:grid;gap:4px;margin:6px 0}
+.manual-word-canvas{min-width:0;display:grid;gap:6px;align-content:start}
+.manual-word-item{min-width:0;padding:9px;border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere}
+.manual-word-item.active{border-color:var(--muted)}
+.legacy-shell .manual-word-item-head{display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;border:0;background:transparent;padding:0;text-align:left}
+.manual-word-item-head small{font-size:11px;color:var(--muted)}
+.manual-word-read{cursor:pointer;min-width:0;overflow-wrap:anywhere}
+.manual-word-read img{max-width:100%;height:auto}
+.manual-word-read .chat-rich{margin:4px 0}
+.manual-word-work .manual-word-editor{display:grid;gap:8px;min-width:0}
+.manual-word-work .mobile-doc-title h2{font-size:14px;margin:0}
+.manual-word-work .manual-question-fields,.manual-word-work .manual-options,.manual-word-work .manual-subquestions{gap:8px}
+.manual-word-work .manual-attributes{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:6px;border-radius:5px}
+.manual-word-work .manual-attributes label:nth-child(2){grid-column:auto;grid-row:auto}
+.manual-word-work .manual-attributes label,.manual-word-work .manual-field{font-size:12px;gap:3px}
+.legacy-shell .manual-word-work .manual-attributes input,.legacy-shell .manual-word-work .manual-attributes select{font-size:13px;padding:5px 6px;min-width:0;width:100%}
+.manual-word-work .inline-math-editor{min-height:38px!important;font-size:14px;padding:6px 8px;line-height:1.6}
+.manual-word-work .manual-options,.manual-word-work .manual-subquestion,.manual-word-work .manual-knowledge-tags{padding:7px;border-radius:5px}
+.manual-word-work .manual-matches{padding:0;border:0;gap:6px}
+.manual-word-work .manual-matches .mobile-doc-title{font-size:12px}
+.manual-word-work .manual-match{padding:6px;gap:5px;border-radius:5px;font-size:12px}
+.manual-word-work .manual-match .chat-rich{font-size:12px}
+.manual-word-work .manual-match .button-row{gap:4px}
+.manual-word-work .manual-match .katex-display,.manual-word-work .manual-word-read .katex-display,.manual-word-work .inline-math-editor{overflow-x:auto}
+.manual-word-work .manual-word-empty{padding:16px 0;text-align:center}
+.manual-word-work .manual-intake-preview{min-width:0}
+.manual-word-preview-toggle{display:block;font-size:12px;margin-bottom:6px}
+@media(max-width:1150px){.manual-word-layout{grid-template-columns:minmax(90px,115px) minmax(0,1fr) minmax(185px,220px);gap:6px}}
+@media(max-width:900px){.manual-word-layout{grid-template-columns:minmax(0,1fr)}.manual-word-outline,.manual-word-matches{position:static;max-height:none;border:0;padding:0}.manual-word-outline nav{display:flex;overflow:auto;gap:4px}.manual-word-outline nav button{flex:0 0 auto;max-width:120px}.manual-word-outline details{display:none}.manual-word-canvas{grid-row:2}.manual-word-matches{grid-row:3}.manual-word-item{padding:7px}}
