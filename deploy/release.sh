@@ -65,10 +65,17 @@ switch_to() {
   local link="$base/.current-$sha-$"
   ln -s "$1" "$link" && mv -Tf "$link" "$base/current"
 }
-# Validate DB connectivity and schema before stopping service. No database or
-# user-file snapshot is created, as requested by the administrator.
+# Check the schema before stopping service. No local deployment archive is retained.
 before=$(psql -X -d jiaoyan -tAc "SELECT to_regclass('public.alembic_version')" )
 if [[ -n "$before" ]]; then before=$(psql -X -d jiaoyan -tAc 'SELECT version_num FROM alembic_version'); fi
+# Once configured, verify an encrypted remote backup before a schema change.
+if [[ -n "$before" && -f "$base/config/backup.json" ]]; then
+  target_heads=$(cd "$release/backend" && "$release/venv/bin/python" -m alembic heads | awk '{print $1}')
+  if [[ "$before" != "$target_heads" ]]; then
+    test -f "$old/deploy/backup.py" || { echo "Enable and verify backup service before migrating"; exit 1; }
+    "$old/venv/bin/python" "$old/deploy/backup.py" backup
+  fi
+fi
 systemctl --user stop jiaoyan.service
 migrated=false
 if (cd "$release/backend" && "$release/venv/bin/python" -m alembic upgrade head); then

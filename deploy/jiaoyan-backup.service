@@ -1,0 +1,16 @@
+[Unit]
+Description=Encrypted Jiaoyan business backup to private repository
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/jiaoyan-app
+EnvironmentFile=%h/jiaoyan-app/config/app.env
+ExecStart=/usr/bin/flock -w 600 %h/jiaoyan-app/deploy.lock %h/jiaoyan-app/current/venv/bin/python %h/jiaoyan-app/current/deploy/backup.py backup
+Restart=on-failure
+RestartSec=300
+TimeoutStartSec=3600
+Nice=10
+UMask=0077
+NoNewPrivileges=true

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Jiaoyan backup at 00:00 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1s
+Unit=jiaoyan-backup.service
+
+[Install]
+WantedBy=timers.target
