@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
-from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink
+from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument
 from app.services import storage
 from app.services.inline_images import validate_images,protect_resource_images
 
@@ -204,6 +204,21 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     if row.kind in ("question","knowledge") and row.tags:sync_knowledge_names(db,row,row.tags)
     snapshot(db,row);audit(db,"resource.create",user.id);db.commit()
     return view(row)
+
+@router.get("/chapters")
+def chapters(kind:Literal["question","knowledge"]="knowledge",subject:str="",db:Session=Depends(get_db)):
+    stmt=select(TeachingResource.subject,TeachingResource.chapter,func.count().label("count")).where(TeachingResource.kind==kind,TeachingResource.archived==False)
+    if subject:stmt=stmt.where(TeachingResource.subject==normalize_subject(subject))
+    return [{"subject":r.subject,"chapter":r.chapter,"count":r.count} for r in db.execute(stmt.group_by(TeachingResource.subject,TeachingResource.chapter).order_by(TeachingResource.subject,TeachingResource.chapter))]
+
+@router.get("/{id}/source-overview")
+def source_overview(id:str,db:Session=Depends(get_db)):
+    src=existing(db,id)
+    if src.kind!="source":raise HTTPException(422,"请选择来源资料")
+    linked=or_(TeachingResource.source_id==id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==id)))
+    counts=dict(db.execute(select(TeachingResource.kind,func.count()).where(linked,TeachingResource.archived==False,TeachingResource.kind.in_(("question","knowledge"))).group_by(TeachingResource.kind)).all())
+    batches=list(db.scalars(select(TeachingDocument).where(TeachingDocument.source_id==id,TeachingDocument.kind=="intake",TeachingDocument.archived==False).order_by(TeachingDocument.created_at,TeachingDocument.id)))
+    return {"questions":counts.get("question",0),"knowledge":counts.get("knowledge",0),"batches":[{"id":d.id,"title":d.title,"revision":d.revision,"pending":any(b.get("kind") in ("question","knowledge") for b in d.blocks)} for d in batches]}
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)): return view(existing(db,id))
