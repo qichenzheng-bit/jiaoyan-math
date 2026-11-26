@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="微光数学">
+  <g fill="none" stroke-linejoin="round" stroke-linecap="round"
+     transform="translate(6 9) scale(0.356)">
+    <path d="M10 58 Q30 45 52 49 Q67 52 78 65 Q89 52 104 49 Q126 45 146 58"
+          stroke="#343638" stroke-width="9"/>
+    <path d="M10 70 Q37 59 56 65 Q70 68 78 78 Q86 68 100 65 Q119 59 146 70"
+          stroke="#83868a" stroke-width="6"/>
+    <path d="M10 81 Q38 73 56 76 Q71 80 78 87 Q85 80 100 76 Q118 73 146 81"
+          stroke="#a5a6a5" stroke-width="3.3"/>
+  </g>
+</svg>
