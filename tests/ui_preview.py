@@ -319,6 +319,10 @@ with sync_playwright() as p:
             page.locator(".manual-word-matches .manual-word-side-head").first.click()
             expect(page.locator(".manual-word-editor")).to_have_count(0)
             page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+            page.locator(".manual-word-editor").get_by_role("button",name="移除",exact=True).click()
+            expect(page.get_by_role("dialog",name="移除条目")).to_be_visible()
+            page.get_by_role("dialog",name="移除条目").get_by_role("button",name="取消",exact=True).click()
+            expect(page.locator(".manual-word-editor")).to_have_count(1)
             page.get_by_role("button",name="完成编辑",exact=True).click()
             expect(page.locator(".manual-word-editor")).to_have_count(0)
             page.get_by_role("button",name="整套预览",exact=True).click()
@@ -333,8 +337,12 @@ with sync_playwright() as p:
             assert outline.count()==4
             outline.first.click()
             assert page.locator(".manual-word-item.active").count()==1
-            page.once("dialog",lambda dialog:dialog.accept())
+            outline.first.click()
+            expect(page.locator(".manual-word-editor")).to_have_count(0)
+            outline.first.click()
+            expect(page.locator(".manual-word-editor")).to_have_count(1)
             page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
+            page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
             page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
             page.get_by_role("button",name="取消微调",exact=True).click()
             page.get_by_role("button",name="下移",exact=True).click()
@@ -480,8 +488,8 @@ with sync_playwright() as p:
     assert page.get_by_label("解析",exact=True).is_visible()
     page.get_by_label("答案",exact=True).fill("原答案")
     page.get_by_label("解析",exact=True).fill("原解析")
-    page.once("dialog",lambda dialog:dialog.accept())
     page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
+    page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
     assert page.get_by_label("答案",exact=True).count()==0
     assert page.get_by_label("解析",exact=True).count()==0
     assert page.get_by_label("第 1 小问答案",exact=True).inner_text()=="原答案"
@@ -515,8 +523,8 @@ with sync_playwright() as p:
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.wait_for()
     assert page.locator(".manual-match").count()==2
     assert page.get_by_text("相似度 80.0%",exact=False).is_visible()
-    page.once("dialog",lambda dialog:dialog.accept())
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.click()
+    page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
     assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="false"
     assert page.get_by_text("已选择原题 QDEMO0002",exact=False).is_visible()
     page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
