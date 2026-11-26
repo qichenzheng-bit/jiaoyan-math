@@ -44,6 +44,7 @@ import './styles/interaction-components.css'
 import './styles/layout/sidebar-navigation.css'
 import './styles/layout/ai-home.css'
 import './styles/layout/chat-conversation.css'
+import './styles/layout/persistent-work.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(

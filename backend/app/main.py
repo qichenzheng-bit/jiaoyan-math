@@ -16,6 +16,7 @@ from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.documents import router as document_router
 from app.api.intelligence import router as intelligence_router
+from app.api.workspaces import router as workspace_router
 from app.api.tasks import router as task_router
 from app.api.studio import router as studio_router
 from app.api.video import router as video_router
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(document_router, prefix="/api")
     app.include_router(intelligence_router, prefix="/api")
+    app.include_router(workspace_router, prefix="/api")
     app.include_router(task_router, prefix="/api")
     app.include_router(studio_router, prefix="/api")
     app.include_router(video_router, prefix="/api")

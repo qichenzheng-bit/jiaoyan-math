@@ -61,6 +61,18 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/files/" + item["id"] + "/archive", headers=origin).status_code == 200
         assert client.get("/api/files?archived=true").json()["total"] == 1
         assert client.post("/api/files/" + item["id"] + "/restore", headers=origin).status_code == 200
+        work=client.post("/api/workspaces",headers=origin,json={"title":"持续录入测试"}).json()
+        linked=client.post("/api/workspaces/"+work["id"]+"/materials",headers=origin,json={"file_ids":[item["id"]]}).json()
+        mid=linked["materials"][0]["id"]
+        assert client.post("/api/files/"+item["id"]+"/archive",headers=origin).status_code==409
+        base="/api/workspaces/"+work["id"]
+        batch=client.post(base+"/materials/"+mid+"/batches",headers=origin,json={"start":1,"end":1}).json()
+        bid=batch["id"]
+        assert client.post(base+"/batches/"+bid+"/verify",headers=origin,json={"text":"test file"}).status_code==409
+        assert client.post(base+"/batches/"+bid+"/step",headers=origin).json()["units"][0]["text"]=="test file"
+        assert client.post(base+"/batches/"+bid+"/verify",headers=origin,json={"text":"test file"}).json()["verified"]
+        assert client.get(base).json()["materials"][0]["verified_units"]==1
+        assert client.post(base+"/materials/"+mid+"/batches",headers=origin,json={"start":1,"end":1}).json()["id"]==bid
         draft={"kind":"question","title":"极限","subject":"高数","content":"求极限","solution":"方法"}
         created=client.post("/api/resources",headers=origin,json=draft)
         assert created.status_code==200,created.text

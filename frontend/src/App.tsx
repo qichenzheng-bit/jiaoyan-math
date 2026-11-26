@@ -44,7 +44,7 @@ export default function App(){
  const current=modules.find(m=>m.path===location.pathname)
  const project=workspaceGroups.find(g=>location.pathname==='/project/'+g.id)
  const isChat=location.pathname==='/'||location.pathname==='/chat'
- const isWork=location.pathname==='/work'||location.pathname==='/intelligence', workHome=isWork&&!new URLSearchParams(location.search).has('job')&&!new URLSearchParams(location.search).has('history'), modeHome=isChat||isWork
+ const isWork=location.pathname==='/work'||location.pathname==='/intelligence', workHome=isWork&&!new URLSearchParams(location.search).has('job')&&!new URLSearchParams(location.search).has('history')&&!new URLSearchParams(location.search).has('workspace'), modeHome=isChat||isWork
  const isVideo=location.pathname==='/videos'
  useComposerViewport(phone&&(isChat||workHome))
  const showBack=!isChat

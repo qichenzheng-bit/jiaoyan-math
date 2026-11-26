@@ -108,7 +108,7 @@ def build_provenance(db,body):
                 "edited":body.text!=m.content,"intent":body.intent}
     return {"kind":body.input_origin,"intent":body.intent}
 
-def launch(db,user,body,provenance,retry_of=None):
+def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     if body.source_id:bank.active_source(db,body.source_id,True)
     prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type。最多100项。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
@@ -124,6 +124,7 @@ def launch(db,user,body,provenance,retry_of=None):
     provenance={**provenance,"effort":effort_args.get("effort","default")}
     j=Job(id=str(uuid4()),title=body.title.strip(),subject=normalize_subject(body.subject),input_text=body.text,model=body.model,state="running",detail="",items=[],document_id=None,source_id=body.source_id,provenance=provenance,retry_of=retry_of,revision=1,created_at=now(),updated_at=now())
     db.add(j);db.flush()
+    if work_batch is not None:work_batch.job_id=j.id;work_batch.updated_at=now()
     if provenance.get("kind")=="file_import":
         storage.link_file(db,provenance["file_id"],"intake_job",j.id)
     audit(db,"intelligence.start" if not retry_of else "intelligence.retry",user.id);db.commit()

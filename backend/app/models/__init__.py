@@ -283,3 +283,34 @@ class VideoProject(Base):
     work_id: Mapped[str | None] = mapped_column(ForeignKey("studio_items.id", ondelete="RESTRICT"), nullable=True, unique=True)
     created_at: Mapped[int] = mapped_column(BigInteger)
     __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),)
+
+# Persistent AI work sessions; legacy intake jobs remain independent.
+class WorkSession(Base):
+    __tablename__="work_sessions"
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    title: Mapped[str]=mapped_column(String(200))
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class WorkMaterial(Base):
+    __tablename__="work_materials"
+    __table_args__=(UniqueConstraint("session_id","file_id",name="uq_work_material_file"),)
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    session_id: Mapped[str]=mapped_column(ForeignKey("work_sessions.id",ondelete="RESTRICT"),index=True)
+    file_id: Mapped[str]=mapped_column(ForeignKey("files.id",ondelete="RESTRICT"))
+    total_units: Mapped[int | None]=mapped_column(Integer,nullable=True)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+
+class WorkBatch(Base):
+    __tablename__="work_batches"
+    __table_args__=(UniqueConstraint("material_id","start","end",name="uq_work_batch_range"),)
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    material_id: Mapped[str]=mapped_column(ForeignKey("work_materials.id",ondelete="RESTRICT"),index=True)
+    start: Mapped[int]=mapped_column(Integer)
+    end: Mapped[int]=mapped_column(Integer)
+    units: Mapped[list]=mapped_column(JSON)
+    verified_text: Mapped[str | None]=mapped_column(Text,nullable=True)
+    import_id: Mapped[str | None]=mapped_column(ForeignKey("intake_imports.id",ondelete="RESTRICT"),nullable=True)
+    job_id: Mapped[str | None]=mapped_column(ForeignKey("intake_jobs.id",ondelete="RESTRICT"),nullable=True,unique=True)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
