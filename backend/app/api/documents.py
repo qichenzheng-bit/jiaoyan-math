@@ -677,7 +677,7 @@ def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
     def result(r,kind,score):
         tags=list(db.scalars(select(KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(
             ResourceKnowledgeLink.resource_id==r.id,KnowledgePointCatalog.status=="active")))
-        return {"resource":{**bank.view(r),"knowledge_tags":list(dict.fromkeys([*r.tags,*tags]))[:20]},"match_kind":kind,"similarity":round(score,3)}
+        return {"resource":{**bank.view(r),"knowledge_tags":list(dict.fromkeys([*bank.view(r)["tags"],*tags]))[:20]},"match_kind":kind,"similarity":round(score,3)}
     items=[result(r,match_kind(r,values),1) for r in exact_rows]
     for score,ident in sorted(best,key=lambda x:(-x[0],x[1])):
         r=db.get(Resource,ident)
@@ -791,7 +791,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             before=bank.view(r)
             changed=attach_review_source(db,r,primary)
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
-            merged=list(dict.fromkeys([*r.tags,*tags]))
+            merged=list(dict.fromkeys([*bank.view(r)["tags"],*tags]))
             if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
             if merged!=r.tags:r.tags=merged;changed=True
             if changed:r.revision+=1;r.updated_at=now()

@@ -4,7 +4,7 @@ from difflib import SequenceMatcher
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, or_, delete
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
@@ -73,7 +73,24 @@ def clean(body,db):
     return d
 
 FIELDS=("id","code","kind","title","subject","content","answer","solution","tags","source_id","archived","created_at","updated_at","revision","sources_revision","exam_type","chapter","question_type","difficulty","unit_type","analysis","proof","exams","source_type","authority_tier","cohort_year","series_key","edition","dedup_override","dedup_reason")
-def view(row): return {k:getattr(row,k) for k in FIELDS}
+def view(row):
+    data={k:getattr(row,k) for k in FIELDS}
+    db=object_session(row) if hasattr(row,"_sa_instance_state") else None
+    if db is not None and row.kind in ("question","knowledge"):
+        pts=list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(ResourceKnowledgeLink.resource_id==row.id).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)))
+        data["knowledge_points"]=[{"id":p.id,"name":p.name} for p in pts]
+        if pts:data["tags"]=[p.name for p in pts][:20]
+    return data
+
+def sync_knowledge_names(db,row,names):
+    # The names are an input convenience only; formal resource identity is the catalog ID.
+    if row.kind not in ("question","knowledge") or not row.subject:return
+    from app.api.documents import manual_knowledge
+    labels,ids=manual_knowledge(db,row.subject,row.chapter,names)
+    current={l.knowledge_id:l for l in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==row.id))}
+    for ident in set(current)-set(ids):db.delete(current[ident])
+    for ident in set(ids)-set(current):db.add(ResourceKnowledgeLink(resource_id=row.id,knowledge_id=ident,role="related"))
+    row.tags=labels
 def existing(db,ident,lock=False):
     stmt=select(TeachingResource).where(TeachingResource.id==ident)
     row=db.scalar(stmt.with_for_update() if lock else stmt)
@@ -184,6 +201,7 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     row=TeachingResource(id=str(uuid4()),code=new_code(db,body.kind),**d,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(row);db.flush()
     if primary: change_primary(db,row,primary)
+    if row.kind in ("question","knowledge") and row.tags:sync_knowledge_names(db,row,row.tags)
     snapshot(db,row);audit(db,"resource.create",user.id);db.commit()
     return view(row)
 
@@ -199,10 +217,12 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     d=clean(body,db)
     if row.kind!="source" and d["fingerprint"]!=row.fingerprint: guard_duplicate(db,d,id)
     if row.kind=="source" and any(d[k]!=getattr(row,k) for k in ("title","source_type","cohort_year","exam_type","edition","series_key")):guard_source_identity(db,d,id)
+    before=view(row)
     primary=d.pop("source_id")
     if body.difficulty is None:d.pop("difficulty",None)
     for k,v in d.items(): setattr(row,k,v)
     if row.source_id!=primary: change_primary(db,row,primary)
+    if row.kind in ("question","knowledge") and (body.tags!=before["tags"] or row.subject!=before["subject"]):sync_knowledge_names(db,row,row.tags)
     row.revision+=1;row.updated_at=now();snapshot(db,row);audit(db,"resource.update",user.id);db.commit()
     return view(row)
 

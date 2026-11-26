@@ -161,4 +161,5 @@ def set_links(id:str,body:ResourceLinks,db:Session=Depends(get_db),user:User=Dep
         if point(db,i.knowledge_id).status!="active" and i.knowledge_id not in previous:raise HTTPException(422,"知识点已停用")
     db.execute(delete(Link).where(Link.resource_id==id))
     for i in body.items:db.add(Link(resource_id=id,**i.model_dump()))
+    r.tags=[point(db,i.knowledge_id).name for i in body.items][:20]
     r.revision+=1;r.updated_at=now();audit(db,"resource.knowledge.update",user.id);db.commit();return resource_links(db,r)
