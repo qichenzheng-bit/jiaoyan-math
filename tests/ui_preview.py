@@ -153,7 +153,7 @@ READY={
     "00-home":".chat-home-recent",
     "29-overview":".chat-home-recent",
     "12-create":".project-hub .project-link",
-    "13-video":".video-stage-track",
+    "13-video":".video-new-card",
     "01-intake":".intake-entry",
     "16-intake-document":".legacy-intake",
     "05-chat":".chat-home-recent",
@@ -343,6 +343,9 @@ with sync_playwright() as p:
                     page.wait_for_url("**/project/creation")
                     page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
                     expect(page.locator(".project-hub .project-link")).to_have_count(4)
+                    expect(page.locator(".production-grid .production-video")).to_have_count(1)
+                    expect(page.locator(".production-grid .production-document")).to_have_count(3)
+                    expect(page.locator(".production-library")).to_have_attribute("href","/teaching-library")
                     page.locator("#workspace-navigation").get_by_role("link",name="教学教研",exact=True).click()
                     page.wait_for_url("**/project/teaching")
                     page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
@@ -377,7 +380,8 @@ with sync_playwright() as p:
                     visit(page,"/create",".project-hub .project-link")
                     assert page.locator(".clean-context-menu").count()==0
                 if name=="13-video":
-                    expect(page.locator(".video-stage-track > div")).to_have_count(5)
+                    expect(page.locator(".video-stage-track")).to_have_count(0)
+                    expect(page.locator(".video-project-pages")).to_have_count(0)
                     expect(page.get_by_role("button",name="＋ 新建视频",exact=True)).to_be_visible()
                     expect(page.get_by_label("推理强度",exact=True)).to_have_count(0)
                     video_test_enabled=True
@@ -390,6 +394,7 @@ with sync_playwright() as p:
                         page.get_by_role("button",name="确认题目，下一步",exact=True).click()
                         effort=page.locator(".video-settings").get_by_label("推理强度",exact=True)
                         expect(effort).to_be_enabled()
+                        expect(page.locator(".video-stage-track > div")).to_have_count(5)
                         effort.select_option("high")
                         assert effort.input_value()=="high"
                         start=page.get_by_role("button",name="开始制作视频",exact=True)
