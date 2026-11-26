@@ -54,3 +54,41 @@ def test_rejected_campaign_is_not_success(monkeypatch):
     monkeypatch.setattr(q,"call",lambda path,**kw: [row(now,"INELIGIBLE")])
     with pytest.raises(q.CampaignError,match="not_claimable"):
         q.run_claim(now)
+
+
+def test_save_pat_verifies_before_writing_and_keeps_secret_private(tmp_path,monkeypatch):
+    path=tmp_path/"qoder-checkin.pat"
+    monkeypatch.setattr(q,"PAT_FILE",path)
+    monkeypatch.setattr(q,"exchange",lambda pat:"short-lived-token")
+    q.save_pat("pt-example-valid-token")
+    assert q.read_pat()=="pt-example-valid-token"
+    assert path.stat().st_mode & 0o777 == 0o600
+    def reject(pat):
+        raise q.CampaignError("authorization_denied")
+    monkeypatch.setattr(q,"exchange",reject)
+    with pytest.raises(q.CampaignError,match="authorization_denied"):
+        q.save_pat("pt-another-valid-token")
+    assert q.read_pat()=="pt-example-valid-token"
+
+def test_quota_snapshot_rejects_missing_values(monkeypatch):
+    monkeypatch.setattr(q,"read_pat",lambda:"dummy")
+    monkeypatch.setattr(q,"exchange",lambda pat:"token")
+    monkeypatch.setattr(q,"call",lambda *a,**kw:{"userQuota":{"remaining":100},"addOnQuota":{"used":10}})
+    with pytest.raises(q.CampaignError,match="unexpected_response"):
+        q.quota_snapshot()
+
+def test_observed_balance_ledger_has_signed_deltas_and_no_first_snapshot_gain():
+    from app.api.qiandao import apply_snapshot
+    at=int(datetime(2026,11,26,10,tzinfo=q.CN).timestamp())
+    state={}
+    def snap(offset,balance,kind="userQuota"):
+        return {"at":at+offset,"balance":balance,"packs":[{"kind":kind}]}
+    apply_snapshot(state,snap(0,500))
+    assert not state.get("changes")
+    apply_snapshot(state,snap(60,600))
+    apply_snapshot(state,snap(120,580))
+    assert [r["delta"] for r in state["changes"]]==[-20,100]
+    assert state["daily"]["increase"]==100
+    assert state["daily"]["decrease"]==20
+    apply_snapshot(state,snap(180,1000,"other"))
+    assert len(state["changes"])==2
