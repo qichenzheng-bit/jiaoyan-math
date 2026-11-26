@@ -592,6 +592,19 @@ with sync_playwright() as p:
         if GROUP in {'all','mobile'}:
             print('UI case: compact phone composition and production navigation',flush=True)
             page.set_viewport_size({"width":393,"height":873})
+            visit(page,"/project/teaching",".project-hub")
+            page.get_by_role("button",name="返回上一步",exact=True).click()
+            expect(page).to_have_url(BASE+"/")
+            visit(page,"/resources",".bank-workspace")
+            page.get_by_role("button",name="返回上一步",exact=True).click()
+            expect(page).to_have_url(BASE+"/project/teaching")
+            visit(page,"/videos",".video-new-card")
+            page.get_by_role("button",name="＋ 新建视频",exact=True).click()
+            expect(page.locator(".video-pick-grid")).to_be_visible()
+            page.get_by_role("button",name="返回上一步",exact=True).click()
+            expect(page.locator(".video-new-card")).to_be_visible()
+            page.get_by_role("button",name="返回上一步",exact=True).click()
+            expect(page).to_have_url(BASE+"/project/creation")
             for route in ("papers","handouts","textbooks"):
                 visit(page,"/"+route,".assembly-result")
                 expect(page.locator(".doc-selector")).to_have_count(0)
@@ -604,6 +617,10 @@ with sync_playwright() as p:
                 page.locator(".compact-resource-main").first.click()
                 expect(page.get_by_role("dialog",name="资源详情")).to_be_visible()
                 assert page.locator(".assembly-preview details[open]").count()==0
+                # Global back closes the active preview without leaving the picker.
+                page.get_by_role("button",name="关闭详情").click()
+                page.locator(".compact-resource-main").first.click()
+                # On phones the modal covers the topbar; its own close button stays available.
                 page.get_by_role("button",name="关闭详情").click()
                 page.get_by_role("button",name="＋ 选入",exact=True).first.click()
                 page.get_by_role("button",name="查看选题车").click()

@@ -173,7 +173,7 @@ export default function ManualIntakeCards({doc,selected,panel,subjects,dirty,bus
  const pending=doc.blocks.some(b=>b.kind==='question'||b.kind==='knowledge'||!!b.edit_reference_revision)
  const questionNumber=(b:Block)=>doc.blocks.slice(0,doc.blocks.indexOf(b)+1).filter(x=>x.kind==='question'||x.snapshot?.kind==='question').length
  useEffect(()=>{if(panel!=='list')setPreview(false)},[panel])
- useWorkspaceBack(()=>{if(busy)return true;if(desktopPreview||preview){setDesktopPreview(false);setPreview(false);onPanel('list');return true}if(adding||selected||panel!=='list'){setAdding(false);onSelect('');onPanel('list');return true}return false})
+ useWorkspaceBack(()=>{if(busy)return true;if(desktopPreview||preview){setDesktopPreview(false);setPreview(false);onPanel('list');return true}if(adding||selected||panel!=='list'){setAdding(false);onSelect('');onPanel('list');return true}return false},10)
  useEffect(()=>{if(desktop&&!desktopPreview&&selected)document.getElementById('manual-word-'+selected)?.scrollIntoView({block:'nearest',inline:'nearest'})},[desktop,desktopPreview,selected])
  // Listen across the workbench, not just the paper: the outline, gutters,
  // and surrounding whitespace are all outside the active question card.

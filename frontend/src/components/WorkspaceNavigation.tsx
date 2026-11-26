@@ -40,9 +40,11 @@ export function WorkspaceLink({onApproved,onClick,to,...props}:LinkProps&{onAppr
  }}/>
 }
 
-// A single visible back action first lets the current workbench close its inner step.
-export function useWorkspaceBack(handler:()=>boolean){
+// Nested workbench steps get priority over their parent route.
+const backSteps=new Map<symbol,{priority:number;run:()=>boolean}>()
+export function useWorkspaceBack(handler:()=>boolean,priority=0){
  const latest=useRef(handler);latest.current=handler
- useEffect(()=>{const listener=(event:Event)=>{if(!event.defaultPrevented&&latest.current())event.preventDefault()};window.addEventListener('wg-workspace-back',listener);return()=>window.removeEventListener('wg-workspace-back',listener)},[])
+ const key=useRef(Symbol('workspace-back'))
+ useLayoutEffect(()=>{const id=key.current;backSteps.set(id,{priority,run:()=>latest.current()});return()=>{backSteps.delete(id)}},[priority])
 }
-export function handleWorkspaceBack(){return !window.dispatchEvent(new Event('wg-workspace-back',{cancelable:true}))}
+export function handleWorkspaceBack(){return [...backSteps.values()].sort((a,b)=>b.priority-a.priority).some(step=>step.run())}
