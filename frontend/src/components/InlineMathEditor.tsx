@@ -21,12 +21,30 @@ function drawMath(el:HTMLElement,raw:string){
  try{if(latex.length>12000)throw Error('too long');katex.render(latex.replace(/\\lim(?=\s*_)/g,'\\lim\\limits'),el,{displayMode:display,throwOnError:true,trust:false,maxExpand:1000,maxSize:20})}catch{el.textContent=raw;el.classList.add('inline-math-invalid')}
  el.classList.toggle('inline-math-display',display)
 }
+function makeToken(raw:string){
+ const span=document.createElement('span');span.className='inline-math-token';span.contentEditable='false';span.setAttribute('role','button');span.tabIndex=0;span.title='点击编辑 LaTeX';drawMath(span,raw);return span
+}
+// Only replace newly typed math in ordinary text nodes. Existing rendered
+// tokens and neighboring text are deliberately kept in place.
+function renderNewMath(root:HTMLElement){
+ const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(node){return node.parentElement?.closest('[data-math-source]')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT}})
+ const nodes:Text[]=[]
+ while(walker.nextNode())nodes.push(walker.currentNode as Text)
+ for(const node of nodes){
+  const value=node.data,matches=[...value.matchAll(formula)]
+  if(!matches.length)continue
+  const f=document.createDocumentFragment();let pos=0
+  for(const m of matches){const start=m.index??0;if(start>pos)f.append(document.createTextNode(value.slice(pos,start)));f.append(makeToken(m[0]));pos=start+m[0].length}
+  if(pos<value.length)f.append(document.createTextNode(value.slice(pos)))
+  node.replaceWith(f)
+ }
+}
 function paint(root:HTMLElement,value:string){
  const f=document.createDocumentFragment();let pos=0
  for(const m of value.matchAll(formula)){
   const start=m.index??0
   if(start>pos)f.append(document.createTextNode(value.slice(pos,start)))
-  const span=document.createElement('span');span.className='inline-math-token';span.contentEditable='false';span.setAttribute('role','button');span.tabIndex=0;span.title='点击编辑 LaTeX';drawMath(span,m[0]);f.append(span);pos=start+m[0].length
+  f.append(makeToken(m[0]));pos=start+m[0].length
  }
  if(pos<value.length)f.append(document.createTextNode(value.slice(pos)))
  root.replaceChildren(f)
@@ -35,7 +53,7 @@ export default function InlineMathEditor({label,value,onChange,locked,placeholde
  const root=useRef<HTMLDivElement>(null),latest=useRef(value),change=useRef(onChange)
  latest.current=value;change.current=onChange
  const emit=useCallback(()=>{const el=root.current;if(!el)return;const v=read(el);if(v!==latest.current){latest.current=v;change.current(v)}},[])
- const finish=useCallback(()=>{const el=root.current;if(!el)return;emit();paint(el,read(el))},[emit])
+ const finish=useCallback(()=>{const el=root.current;if(!el)return;emit();renderNewMath(el)},[emit])
  useLayoutEffect(()=>{const outside=(event:PointerEvent)=>{const el=root.current;if(!el||!(event.target instanceof Node)||el.contains(event.target))return;if(el.contains(document.activeElement)){const active=document.activeElement;if(active instanceof HTMLElement&&active!==el)active.blur();finish()}};document.addEventListener('pointerdown',outside,true);return()=>document.removeEventListener('pointerdown',outside,true)},[finish])
  useLayoutEffect(()=>{const el=root.current;if(el&&!el.contains(document.activeElement)&&read(el)!==value)paint(el,value)},[value])
  useLayoutEffect(()=>{if(root.current)paint(root.current,latest.current)},[])
