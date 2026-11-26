@@ -454,30 +454,30 @@ with sync_playwright() as p:
     page.get_by_label("编辑 LaTeX 公式",exact=True).fill(r"$\frac{1}{x^2}$")
     page.get_by_label("难度",exact=True).click()
     page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
-    assert page.get_by_label("编辑 LaTeX 公式",exact=True).count()==0
-    assert page.get_by_role("button",name="保存整套资料",exact=True).is_enabled()
-    assert page.get_by_label("条目标题",exact=True).count()==0
+    expect(page.get_by_label("编辑 LaTeX 公式",exact=True)).to_have_count(0)
+    expect(page.get_by_role("button",name="保存整套资料",exact=True)).to_be_enabled()
+    expect(page.get_by_label("条目标题",exact=True)).to_have_count(0)
     page.get_by_role("button",name="切换 Word 版").click()
-    assert page.locator(".manual-word-canvas").is_visible()
+    expect(page.locator(".manual-word-canvas")).to_be_visible()
     assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
     page.get_by_role("button",name="切换卡片版").click()
     assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
-    assert page.get_by_role("button",name="＋ 选择题",exact=True).count()==0
+    expect(page.get_by_role("button",name="＋ 选择题",exact=True)).to_have_count(0)
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    assert page.get_by_label("题目",exact=True).count()==0
+    expect(page.get_by_label("题目",exact=True)).to_have_count(0)
     page.get_by_role("button",name="＋ 选择题",exact=True).click()
-    assert page.get_by_label("科目",exact=True).input_value()==""
+    expect(page.get_by_label("科目",exact=True)).to_have_value("")
     page.get_by_label("科目",exact=True).select_option("线性代数")
     page.get_by_label("题目",exact=True).fill("选择正确答案")
     page.get_by_label("A 选项",exact=True).fill("$1$")
     page.get_by_label("B 选项",exact=True).fill("$2$")
     page.locator(".manual-answer-choices").get_by_role("button",name="A",exact=True).click()
-    assert page.get_by_text("正确选项 · 单选题",exact=True).is_visible()
+    expect(page.get_by_text("正确选项 · 单选题",exact=True)).to_be_visible()
     page.locator(".manual-answer-choices").get_by_role("button",name="B",exact=True).click()
-    assert page.get_by_text("正确选项 · 多选题",exact=True).is_visible()
+    expect(page.get_by_text("正确选项 · 多选题",exact=True)).to_be_visible()
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 填空题",exact=True).click()
-    assert page.get_by_label("科目",exact=True).input_value()==""
+    expect(page.get_by_label("科目",exact=True)).to_have_value("")
     page.get_by_label("科目",exact=True).select_option("概率论与数理统计")
     page.get_by_label("题目",exact=True).fill("计算")
     page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
@@ -486,21 +486,23 @@ with sync_playwright() as p:
     page.get_by_role("button",name="＋ 综合题",exact=True).click()
     page.get_by_label("科目",exact=True).select_option("高等数学")
     page.get_by_label("题目",exact=True).fill("已知函数")
-    assert page.get_by_label("第 1 小问题目",exact=True).count()==0
-    assert page.get_by_label("答案",exact=True).is_visible()
-    assert page.get_by_label("解析",exact=True).is_visible()
+    expect(page.get_by_label("第 1 小问题目",exact=True)).to_have_count(0)
+    expect(page.get_by_label("答案",exact=True)).to_be_visible()
+    expect(page.get_by_label("解析",exact=True)).to_be_visible()
     page.get_by_label("答案",exact=True).fill("原答案")
     page.get_by_label("解析",exact=True).fill("原解析")
     page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
     page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
-    assert page.get_by_label("答案",exact=True).count()==0
-    assert page.get_by_label("解析",exact=True).count()==0
-    assert page.get_by_label("第 1 小问答案",exact=True).inner_text()=="原答案"
-    assert page.get_by_label("第 1 小问解析",exact=True).inner_text()=="原解析"
+    # The dialog close event and React commit occur asynchronously.
+    expect(page.get_by_label("第 1 小问题目",exact=True)).to_be_visible()
+    expect(page.get_by_label("答案",exact=True)).to_have_count(0)
+    expect(page.get_by_label("解析",exact=True)).to_have_count(0)
+    expect(page.get_by_label("第 1 小问答案",exact=True)).to_have_text("原答案")
+    expect(page.get_by_label("第 1 小问解析",exact=True)).to_have_text("原解析")
     page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
-    assert page.get_by_label("第 2 小问题目",exact=True).is_visible()
+    expect(page.get_by_label("第 2 小问题目",exact=True)).to_be_visible()
     page.locator(".manual-subquestion").nth(1).get_by_role("button",name="移除",exact=True).click()
-    assert page.get_by_label("第 2 小问题目",exact=True).count()==0
+    expect(page.get_by_label("第 2 小问题目",exact=True)).to_have_count(0)
     page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
     page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
     page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
@@ -518,20 +520,20 @@ with sync_playwright() as p:
 
     page.get_by_label("知识标签",exact=True).fill("新知识点")
     page.get_by_role("button",name="新增标签",exact=True).click()
-    assert page.get_by_role("button",name="移除知识标签 新知识点",exact=True).is_visible()
-    assert page.get_by_role("button",name="移除知识标签 导数",exact=True).is_visible()
+    expect(page.get_by_role("button",name="移除知识标签 新知识点",exact=True)).to_be_visible()
+    expect(page.get_by_role("button",name="移除知识标签 导数",exact=True)).to_be_visible()
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 综合题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("测试查重")
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.wait_for()
-    assert page.locator(".manual-match").count()==2
-    assert page.get_by_text("相似度 80.0%",exact=False).is_visible()
+    expect(page.locator(".manual-match")).to_have_count(2)
+    expect(page.get_by_text("相似度 80.0%",exact=False)).to_be_visible()
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.click()
     page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
-    assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="false"
-    assert page.get_by_text("已选择原题 QDEMO0002",exact=False).is_visible()
+    expect(page.get_by_label("题目",exact=True)).to_have_attribute("contenteditable","false")
+    expect(page.get_by_text("已选择原题 QDEMO0002",exact=False)).to_be_visible()
     page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
-    assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="true"
+    expect(page.get_by_label("题目",exact=True)).to_have_attribute("contenteditable","true")
     page.get_by_label("题目",exact=True).fill("修改为新题")
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 章",exact=True).click()
@@ -540,15 +542,15 @@ with sync_playwright() as p:
     page.get_by_role("button",name="＋ 节",exact=True).click()
     page.get_by_label("节标题",exact=True).fill("第一节 函数")
     page.get_by_role("button",name="整套预览",exact=True).click()
-    assert page.locator(".manual-intake-preview .print-question-number").count()==5
+    expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(5)
     chapter=page.locator(".manual-intake-preview .print-heading-level-1 h2")
     section=page.locator(".manual-intake-preview .print-heading-level-2 h3")
     assert chapter.inner_text()=="第一章 函数与极限"
     assert section.inner_text()=="第一节 函数"
     assert chapter.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > section.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > page.locator(".manual-intake-preview .chat-rich").first.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)")
     assert page.locator(".manual-intake-preview .katex").count()>0
-    assert page.get_by_role("button",name="打印 / 保存为 PDF",exact=True).count()==0
-    assert page.get_by_text("已保存并直接入库",exact=True).count()==0
+    expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_have_count(0)
+    expect(page.get_by_text("已保存并直接入库",exact=True)).to_have_count(0)
     with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-save") and req.method=="POST") as request_info:
         page.get_by_role("button",name="保存整套资料",exact=True).click()
     submitted=request_info.value.post_data_json
@@ -559,6 +561,9 @@ with sync_playwright() as p:
     assert submitted["blocks"][1]["subject"]=="线性代数"
     assert submitted["blocks"][2]["subject"]=="概率论与数理统计"
     assert submitted["blocks"][3]["subject"]=="高等数学"
+    assert submitted["blocks"][3]["content"]=="已知函数\n(1) 求导数"
+    assert submitted["blocks"][3]["answer"]=="(1) $2x$"
+    assert submitted["blocks"][3]["solution"]=="(1) 利用导数公式"
     page.get_by_text("已保存并直接入库",exact=True).wait_for()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path=str(OUT/"28-mobile-review.png"),full_page=False)
@@ -571,15 +576,15 @@ with sync_playwright() as p:
     page.evaluate("document.documentElement.dataset.theme='light'")
     page.set_viewport_size({"width":393,"height":873})
     page.screenshot(path=str(OUT/"10-home-mobile.png"),full_page=False)
-    assert page.locator(".mobile-tabs").count()==0
-    assert page.get_by_label("输入消息").is_visible()
-    assert page.locator(".clean-chat > .compact-composer").is_visible()
-    assert page.locator(".mode-switch").is_visible()
+    expect(page.locator(".mobile-tabs")).to_have_count(0)
+    expect(page.get_by_label("输入消息")).to_be_visible()
+    expect(page.locator(".clean-chat > .compact-composer")).to_be_visible()
+    expect(page.locator(".mode-switch")).to_be_visible()
     page.get_by_role("button",name="添加与工具").click()
-    assert page.get_by_role("group",name="聊天工具").is_visible()
+    expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
     page.get_by_role("button",name="添加与工具").click()
-    assert page.locator(".workspace > header").count()==1
-    assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
+    expect(page.locator(".workspace > header")).to_have_count(1)
+    expect(page.locator(".clean-chat header,.clean-chat .chat-top")).to_have_count(0)
     assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     menu=page.get_by_role("button",name="打开导航",exact=True)
@@ -595,7 +600,7 @@ with sync_playwright() as p:
     page.wait_for_url("**/project/teaching")
     page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
     expect(drawer).to_have_count(0)
-    assert page.locator(".project-hub").get_by_role("link",name="来源库",exact=True).is_visible()
+    expect(page.locator(".project-hub").get_by_role("link",name="来源库",exact=True)).to_be_visible()
     menu.click()
     expect(drawer).to_be_visible()
     drawer.get_by_role("link",name="资料录入",exact=True).click()
@@ -611,24 +616,24 @@ with sync_playwright() as p:
     page.get_by_role("link",name="导出 PDF",exact=True).click()
     page.wait_for_url("**/source-print/source-preview")
     page.locator(".print-document .katex").first.wait_for()
-    assert page.locator(".print-question-number").count()==4
-    assert page.get_by_role("button",name="打印 / 保存为 PDF",exact=True).is_enabled()
+    expect(page.locator(".print-question-number")).to_have_count(4)
+    expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_be_enabled()
     page.get_by_label("仅题目").check()
-    assert page.locator(".print-document").get_by_text("答案：",exact=False).count()==0
+    expect(page.locator(".print-document").get_by_text("答案：",exact=False)).to_have_count(0)
     page.goto("http://127.0.0.1:4173/resources",wait_until="networkidle")
     page.locator(".bank-row").first.wait_for()
-    assert page.locator(".bank-detail").is_hidden()
+    expect(page.locator(".bank-detail")).to_be_hidden()
     page.locator(".bank-row").first.click()
     page.locator(".bank-detail .katex").first.wait_for()
-    assert page.locator(".bank-list").is_hidden()
+    expect(page.locator(".bank-list")).to_be_hidden()
     page.screenshot(path=str(OUT/"30-resource-mobile.png"),full_page=False)
     page.get_by_role("button",name="返回资源列表",exact=False).click()
-    assert page.locator(".bank-list").is_visible()
+    expect(page.locator(".bank-list")).to_be_visible()
     page.goto("http://127.0.0.1:4173/works",wait_until="networkidle")
-    assert page.locator(".studio-library").is_visible()
+    expect(page.locator(".studio-library")).to_be_visible()
     page.get_by_role("button",name="新建",exact=True).click()
-    assert page.locator(".clean-studio .resource-form").is_visible()
-    assert page.locator(".studio-library").is_hidden()
+    expect(page.locator(".clean-studio .resource-form")).to_be_visible()
+    expect(page.locator(".studio-library")).to_be_hidden()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     # Qoder login must visibly report unavailable services and expose a real
     # authorization link even if the browser blocks automatic popups.
@@ -659,9 +664,9 @@ with sync_playwright() as p:
     context.route("**/api/qoder/login/start",start_login)
     page.get_by_role("button",name="获取授权链接",exact=True).click()
     page.locator(".auth-inline-row").wait_for()
-    assert page.locator(".auth-inline-row input").count()==1
-    assert page.locator(".auth-inline-row textarea").count()==0
-    assert page.get_by_label("授权链接",exact=True).input_value()=="https://qoder.com.cn/auth/login?state=preview"
+    expect(page.locator(".auth-inline-row input")).to_have_count(1)
+    expect(page.locator(".auth-inline-row textarea")).to_have_count(0)
+    expect(page.get_by_label("授权链接",exact=True)).to_have_value("https://qoder.com.cn/auth/login?state=preview")
     # The URL must be visible, authorization must remain on the same page,
     # and no new browser tab/window may be opened by requesting the link.
     expect(page.get_by_role("button",name="复制授权链接",exact=True)).to_be_enabled()
@@ -669,7 +674,7 @@ with sync_playwright() as p:
     expect(page.get_by_role("button",name="取消本次授权",exact=True)).to_be_enabled()
     assert page.url==authorization_origin, f"Unexpected navigation: {page.url}"
     assert len(context.pages)==existing_pages and not authorization_pages, "Unexpected automatic authorization popup"
-    assert page.get_by_text("等待授权",exact=True).is_visible()
+    expect(page.get_by_text("等待授权",exact=True)).to_be_visible()
     page.screenshot(path=str(OUT/"31-qoder-auth-mobile.png"),full_page=False)
     # Complete the simulated official login: the current account's actual
     # catalog must be fetched automatically, not the compatibility defaults.
