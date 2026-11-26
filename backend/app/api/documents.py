@@ -861,6 +861,10 @@ def manual_draft(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(
         raise HTTPException(409,"录入草稿版本或来源冲突，请重新加载")
     d.blocks=validate(db,body,d.blocks,allow_reference_edits=True)
     d.title=body.title.strip();d.subject=normalize_subject(body.subject);d.revision+=1;d.updated_at=now()
+    state=manual_review_state(db,d)
+    if state:
+        kept={uid:state[uid] for uid in manual_reviewed(d,state)}
+        if kept!=state:db.merge(Setting(key=manual_review_key(d),value=json.dumps(kept)))
     references(db,d);audit(db,"document.manual.draft",user.id);db.commit()
     return public(d)
 
@@ -957,7 +961,7 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     review=manual_review_data(db,d)
     if not review["rows"]:raise HTTPException(422,"没有待入库的资源")
     if any(r["errors"] for r in review["rows"]):raise HTTPException(422,"仍有必须处理的问题，请重新检查")
-    if body.require_reviewed and not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
+    if (body.require_reviewed or db.get(Setting,manual_review_key(d)) is not None) and not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
         raise HTTPException(409,"请先逐条完成审核")
     if any(r["warnings"] for r in review["rows"]) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
     saved=manual_save(id,Draft.model_validate(public(d)),db,user)

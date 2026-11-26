@@ -692,6 +692,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post(image_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"image-q","approved":True}).status_code==409
         revision=modified.json()["revision"]
         assert client.post(image_path+"/manual-review",headers=origin,json={"revision":revision}).json()["reviewed_uids"]==[]
+        reverted=client.put(image_path+"/manual-draft",headers=origin,json={**modified.json(),"blocks":image_blocks})
+        assert reverted.status_code==200,reverted.text
+        revision=reverted.json()["revision"]
+        assert client.post(image_path+"/manual-review",headers=origin,json={"revision":revision}).json()["reviewed_uids"]==[]
+        assert client.post(image_path+"/manual-commit",headers=origin,json={"revision":revision,"accept_warnings":True}).status_code==409
         assert client.post(image_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"image-q","approved":True}).status_code==200
         image_commit=client.post(image_path+"/manual-commit",headers=origin,json={"revision":revision,"accept_warnings":True,"require_reviewed":True})
         assert image_commit.status_code==200,image_commit.text

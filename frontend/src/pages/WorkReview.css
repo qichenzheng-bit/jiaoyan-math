@@ -24,3 +24,7 @@
  .wg-review-mobile-tabs .wg-segment button{font-size:11px;padding:6px 2px;white-space:nowrap}
  .manual-unified-review .wg-review-grid:not(.has-side){display:block}
 }
+
+.wg-review-submitted{font-size:12px;min-width:0}.wg-review-submitted summary{cursor:pointer;color:var(--muted)}
+@media(min-width:761px){.wg-review-workbench .wg-review-list,.wg-review-workbench .wg-review-side{position:sticky;top:8px}}
+@media(max-width:760px){.wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source{max-height:50dvh;overflow:auto;overscroll-behavior:contain;box-sizing:border-box}.wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source .persistent-page{max-width:100%}}
