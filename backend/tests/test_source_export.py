@@ -27,3 +27,13 @@ def test_pending_source_batch_is_not_exported():
     result=assemble_source_export(src,[draft],[])
     assert not result["has_source_content"]
     assert all(b.get("content")!="未入库" for b in result["blocks"])
+
+
+def test_latest_source_export_uses_corrected_resource(monkeypatch):
+    from app.api import documents
+    monkeypatch.setattr(documents.bank,"view",lambda r:{"id":r.id,"content":"修正后"})
+    src=SimpleNamespace(title="教材",subject="",source_type="textbook",content="")
+    rows=[SimpleNamespace(id="q1")]
+    docs=[SimpleNamespace(id="b1",title="第一批",blocks=[{"kind":"reference","resource_id":"q1","snapshot":{"content":"旧答案"}}])]
+    assert assemble_source_export(src,docs,rows,latest=True)["blocks"][0]["snapshot"]["content"]=="修正后"
+    assert docs[0].blocks[0]["snapshot"]["content"]=="旧答案"

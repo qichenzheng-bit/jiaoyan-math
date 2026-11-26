@@ -333,7 +333,7 @@ with sync_playwright() as p:
                     page.locator("#workspace-navigation").get_by_role("link",name="教学教研",exact=True).click()
                     page.wait_for_url("**/project/teaching")
                     page.locator(".project-hub").get_by_role("heading",name="教学教研",exact=True).wait_for()
-                    expect(page.locator(".project-hub .project-link")).to_have_count(4)
+                    expect(page.locator(".project-hub .project-link")).to_have_count(5)
                     for label in ("题库","知识库","知识图谱","来源库"):
                         expect(page.locator(".project-hub").get_by_role("link",name=label,exact=True)).to_be_visible()
                     assert page.locator(".project-hub").get_by_role("link",name="视频制作",exact=True).count()==0
@@ -629,10 +629,10 @@ with sync_playwright() as p:
             page.get_by_label("搜索已有知识点").fill("定积分")
             catalog.get_by_role("button",name="定积分",exact=False).first.wait_for()
 
-            page.get_by_label("知识标签",exact=True).fill("新知识点")
-            page.get_by_role("button",name="新增标签",exact=True).click()
-            expect(page.get_by_role("button",name="移除知识标签 新知识点",exact=True)).to_be_visible()
-            expect(page.get_by_role("button",name="移除知识标签 导数",exact=True)).to_be_visible()
+            page.get_by_label("知识点",exact=True).fill("新知识点")
+            page.get_by_role("button",name="新增知识点",exact=True).click()
+            expect(page.get_by_role("button",name="移除知识点 新知识点",exact=True)).to_be_visible()
+            expect(page.get_by_role("button",name="移除知识点 导数",exact=True)).to_be_visible()
             page.get_by_role("button",name="下一条 · 新增",exact=True).click()
             page.get_by_role("button",name="＋ 综合题",exact=True).click()
             page.get_by_label("题目",exact=True).fill("测试查重")

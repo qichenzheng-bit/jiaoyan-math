@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
-from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob
+from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink
 from app.services import storage
 from app.services.inline_images import validate_images,protect_resource_images
 
@@ -134,7 +134,7 @@ def snapshot(db,row):
 def subjects(): return list(MATH_SUBJECTS)
 
 @router.get("")
-def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
     filters=[TeachingResource.archived==archived]
     if kind: filters.append(TeachingResource.kind==kind)
     if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
@@ -142,9 +142,12 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
         if key=="question_type" and value=="综合题":
             filters.append(TeachingResource.question_type.in_(("综合题","解答题","计算题","证明题")))
         elif value: filters.append(getattr(TeachingResource,key)==value)
+    if difficulty: filters.append(TeachingResource.difficulty==difficulty)
+    if source_id: filters.append(or_(TeachingResource.source_id==source_id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source_id))))
+    if knowledge_id: filters.append(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).where(ResourceKnowledgeLink.knowledge_id==knowledge_id)))
     if q.strip():
         term=q.strip()
-        filters.append(or_(TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
+        filters.append(or_(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
     total=db.scalar(select(func.count()).select_from(TeachingResource).where(*filters))
     rows=db.scalars(select(TeachingResource).where(*filters).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).offset(offset).limit(limit))
     return {"items":[view(r) for r in rows],"total":total}

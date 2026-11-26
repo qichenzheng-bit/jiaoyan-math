@@ -124,10 +124,11 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     bank.admin_lock(db,user)
     d=Doc(id=str(uuid4()),title=body.title.strip(),kind=body.kind,subject=normalize_subject(body.subject),source_id=body.source_id,blocks=validate(db,body,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();references(db,d);audit(db,"document.create",user.id);db.commit();return public(d)
-def assemble_source_export(source, documents, resources):
+def assemble_source_export(source, documents, resources, *, latest=False):
     """Read-only export: preserve saved batch order and block snapshots."""
     blocks=[]
     seen=set()
+    current={r.id:r for r in resources} if latest else {}
     # Pending draft questions/knowledge must never appear in exported material.
     batches=[d for d in documents if d.blocks and not any(b["kind"] in ("question","knowledge") for b in d.blocks)]
     for d in batches:
@@ -136,6 +137,8 @@ def assemble_source_export(source, documents, resources):
         for index, block in enumerate(d.blocks):
             item=dict(block)
             item["uid"]=f"{d.id}-{index}"
+            if block.get("resource_id") in current:
+                item["snapshot"]=bank.view(current[block["resource_id"]])
             blocks.append(item)
             if block.get("resource_id"):seen.add(block["resource_id"])
     remaining=[]
@@ -163,9 +166,45 @@ def source_export(source_id:str,db:Session=Depends(get_db)):
     documents=[d for d in documents if (d.kind=="intake" and (any(b["kind"]=="reference" for b in d.blocks) or db.scalar(select(DocumentRegistration.id).where(DocumentRegistration.document_id==d.id,DocumentRegistration.result_revision==d.revision).limit(1)))) or (d.kind!="intake" and source.content.endswith("对应文档编号 "+d.id))]
     linked_ids=select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source.id,ResourceSourceLink.provenance_role.in_(("original","reproduced")))
     resources=list(db.scalars(select(Resource).where(Resource.archived==False,Resource.kind.in_(("question","knowledge")),or_(Resource.source_id==source.id,Resource.id.in_(linked_ids))).order_by(Resource.created_at,Resource.id)))
-    result=assemble_source_export(source,documents,resources)
+    result=assemble_source_export(source,documents,resources,latest=True)
     if not result["has_source_content"]:raise HTTPException(409,"该来源尚无已入库资料，不能导出")
     return result
+
+@router.get("/{id}/reference-updates")
+def reference_updates(id:str,db:Session=Depends(get_db)):
+    doc=row(db,id)
+    if doc.kind=="intake":raise HTTPException(422,"仅用于自编教学资料")
+    items=[]
+    for b in doc.blocks:
+        if b["kind"]!="reference":continue
+        resource=db.get(Resource,b["resource_id"])
+        if resource and not resource.archived and (b.get("snapshot") or {}).get("revision")!=resource.revision:
+            items.append({"uid":b["uid"],"code":resource.code,"title":resource.title,"before":(b.get("snapshot") or {}).get("revision"),"after":resource.revision})
+    return {"revision":doc.revision,"items":items}
+
+class RefreshReferences(BaseModel):
+    revision:int
+    uids:list[str]=Field(max_length=500)
+
+@router.post("/{id}/refresh-references",dependencies=[Depends(require_origin)])
+def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user)
+    doc=row(db,id)
+    if doc.kind=="intake" or doc.archived or doc.revision!=body.revision:raise HTTPException(409,"文档版本已变化，请重新检查")
+    selected=set(body.uids)
+    available={b["uid"] for b in doc.blocks if b["kind"]=="reference"}
+    if not selected or not selected<=available:raise HTTPException(422,"请选择有效引用")
+    blocks=[]
+    for b in doc.blocks:
+        item=dict(b)
+        if b["uid"] in selected:
+            resource=bank.existing(db,b["resource_id"])
+            if resource.archived:raise HTTPException(409,"资源已停用")
+            item["snapshot"]=bank.view(resource)
+        blocks.append(item)
+    doc.blocks=blocks;doc.revision+=1;doc.updated_at=now()
+    references(db,doc);audit(db,"document.refresh_references",user.id);db.commit()
+    return public(doc)
 
 @router.get("/{id}/export")
 def export_document(id:str,db:Session=Depends(get_db)):
@@ -651,15 +690,15 @@ def manual_knowledge(db,subject,chapter,names):
     for raw in names:
         name=raw.strip();key=norm(name)
         if not name or key in seen:continue
-        if not subject or len(name)>60 or len(key)>200:raise HTTPException(422,"知识标签需有科目且每个最多60字")
+        if not subject or len(name)>60 or len(key)>200:raise HTTPException(422,"知识点需有科目且每个最多60字")
         seen.add(key)
         point=db.scalar(select(KnowledgePointCatalog).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.name_key==key))
         if not point:
             candidates=list(db.scalars(select(KnowledgePointCatalog).join(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id).where(
                 KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.status=="active",KnowledgeAlias.normalized==key).limit(2)))
-            if len(candidates)>1:raise HTTPException(422,"知识标签存在多个同名别称，请使用知识点正式名称")
+            if len(candidates)>1:raise HTTPException(422,"知识点存在多个同名别称，请使用知识点正式名称")
             if candidates:point=candidates[0]
-        if point and point.status!="active":raise HTTPException(422,"知识标签已停用，请选择有效知识点")
+        if point and point.status!="active":raise HTTPException(422,"知识点已停用，请选择有效知识点")
         if not point:
             point=KnowledgePointCatalog(id=str(uuid4()),code="KP"+uuid4().hex[:8].upper(),name=name,name_key=key,subject=subject,
                 chapter=chapter,description="",status="active",replaced_by_id=None,revision=1,created_at=now(),updated_at=now())
@@ -753,7 +792,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             changed=attach_review_source(db,r,primary)
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
             merged=list(dict.fromkeys([*r.tags,*tags]))
-            if len(merged)>20:raise HTTPException(422,"复用题目的知识标签总数超过20个")
+            if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
             if merged!=r.tags:r.tags=merged;changed=True
             if changed:r.revision+=1;r.updated_at=now()
             action="reuse"

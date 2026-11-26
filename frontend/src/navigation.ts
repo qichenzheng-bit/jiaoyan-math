@@ -8,6 +8,7 @@ export const modules:Module[]=[
  {path:'/tasks',name:'任务中心',desc:'后台任务进度和执行记录',icon:'clock',group:'overview',ready:true},
  {path:'/intake',name:'手动录入',desc:'在同一资料文档内录入题目与知识单元',icon:'intake',group:'resources',ready:true},
  {path:'/intelligence',name:'AI 智能录入',desc:'原文提取与草稿审核',icon:'spark',group:'resources',ready:true},
+ {path:'/teaching-library',name:'教学资料库',desc:'自己组编的试卷、讲义和教材',icon:'files',group:'resources',ready:true},
  {path:'/resources',name:'题库',desc:'题目、查重与检索',icon:'resources',group:'resources',ready:true},
  {path:'/graph',name:'知识图谱',desc:'知识点树、关联与图谱',icon:'graph',group:'resources',ready:true},
  {path:'/sources',name:'来源库',desc:'录入的试卷、讲义、教材等原始来源',icon:'files',group:'resources',ready:true},
@@ -34,7 +35,8 @@ export const workspaceGroups:WorkspaceGroup[]=[
   {id:'intake',name:'录入方式',entries:[{path:'/intake',name:'手动录入',icon:'files'}]},
  ]},
  {id:'teaching',name:'教学教研',icon:'book',sections:[
-  {id:'resources',name:'教学资源',entries:[entry('/resources'),entry('/knowledge-library'),entry('/graph'),entry('/sources')]},
+  {id:'resources',name:'基础资源',entries:[entry('/resources'),entry('/knowledge-library'),entry('/sources'),entry('/graph')]},
+  {id:'compositions',name:'自编教学资料',entries:[entry('/teaching-library')]},
  ]},
  {id:'creation',name:'教学制作',icon:'media',sections:[
   {id:'creation',name:'制作与导出',entries:[entry('/videos'),entry('/papers'),entry('/handouts'),entry('/textbooks')]},
