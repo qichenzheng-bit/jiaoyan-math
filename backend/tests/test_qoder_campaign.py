@@ -124,3 +124,49 @@ def test_campaign_request_has_routing_parameter_without_fake_device(monkeypatch)
             return io.BytesIO(b'{"data":{"campaigns":[]}}')
     monkeypatch.setattr(q,"build_opener",lambda *args:Opener())
     assert q.call("/sash/api/v1/me/campaigns",token="test")=={"campaigns":[]}
+
+
+def test_confirmed_reward_is_recovered_from_existing_history_not_balance():
+    from app.api.qiandao import confirmed_rewards
+    state={"history":[
+        {"round":"2026-11-26","state":"claimed","earned":100,"at":1795660000},
+        {"round":"2026-11-26","state":"claimed","earned":100,"at":1795660001},
+        {"round":"2026-11-25","state":"already_claimed","earned":None,"at":1795573600},
+        {"round":"2026-11-24","state":"claimed","earned":None,"at":1795487200},
+    ],"changes":[]}
+    assert confirmed_rewards(state)==[{"round":"2026-11-26","at":1795660000,"delta":100}]
+
+def test_claim_samples_balance_before_and_after_and_preserves_confirmed_reward(monkeypatch):
+    from app.api import qiandao
+    import copy
+    stored={"enabled":True,"history":[]}
+    def read(db):return copy.deepcopy(stored)
+    def write(db,state):
+        stored.clear()
+        stored.update(copy.deepcopy(state))
+    monkeypatch.setattr(qiandao,"read_state",read)
+    monkeypatch.setattr(qiandao,"write_state",write)
+    monkeypatch.setattr(qiandao,"view",read)
+    calls=[]
+    def quota():
+        calls.append("quota")
+        return {"at":1795660000+len(calls),"balance":3553,"packs":[{"kind":"userQuota"}]}
+    def claim():
+        calls.append("claim")
+        return {"state":"claimed","earned":100}
+    monkeypatch.setattr(q,"quota_snapshot",quota)
+    monkeypatch.setattr(q,"run_claim",claim)
+    result=qiandao.attempt(None,manual=True)
+    assert calls==["quota","claim","quota"]
+    assert result["quota"]["balance"]==3553
+    assert result["daily"]["increase"]==0
+    assert qiandao.confirmed_rewards(result)[0]["delta"]==100
+    qiandao.attempt(None,manual=True)
+    assert calls==["quota","claim","quota"]
+
+def test_quota_source_change_does_not_create_false_gain():
+    from app.api.qiandao import apply_snapshot
+    state={}
+    for at,source,balance in [(1795660000,"one",3553),(1795660001,"two",3653)]:
+        apply_snapshot(state,{"at":at,"balance":balance,"source":source,"packs":[{"kind":"userQuota"}]})
+    assert not state.get("changes")
