@@ -378,6 +378,61 @@ def test_migration_and_login(tmp_path, monkeypatch):
             initial_plan=client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至2页'}).json()
             assert initial_plan['candidates'][0]['file_id']==fid and initial_plan['candidates'][0]['start']==1 and initial_plan['candidates'][0]['end']==2
             assert client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至11页'}).status_code==422
+            # F3.4.5: deterministic natural-language routing contract (stubbed model,
+            # not a claim about the accuracy of a live model).
+            from app.api import qoder
+            agent_url=wb+"/agent"
+            cases=[
+                ("work-pages.pdf 从第2页开始，只识别这一页，先不要整理或入库",
+                 {"action":"recognize","file_id":fid,"start":2,"count":1,"goal":"recognition"},"ready"),
+                ("昨天那本继续一页，核对之后整理，只匹配参考资料里的答案",
+                 {"action":"recognize","file_id":fid,"count":1,"goal":"review","reference_ids":[item["id"]],"match_fields":["answer"]},"ready"),
+                ("继续之前的教材",{"action":"clarify","explanation":"请确认本次页数"},"clarify"),
+                ("这两份资料都处理一下",{"action":"clarify","explanation":"请确认主资料及范围"},"clarify"),
+                ("不要识别，也不要入库，只问一下之前做了什么",{"action":"clarify","explanation":"本次不执行录入工作"},"clarify"),
+                ("把之前的原件删除",{"action":"delete","file_id":fid},"failed"),
+                ("直接入库，不需要人工审核",{"action":"recognize","file_id":fid,"count":1,"goal":"auto_register"},"failed"),
+                ("一次识别十一页",{"action":"recognize","file_id":fid,"count":11},"failed"),
+                ("从不存在的资料继续一页",{"action":"recognize","file_id":"unknown","count":1},"failed"),
+                ("整理这份并参考不存在的答案",{"action":"recognize","file_id":fid,"count":1,"goal":"review","reference_ids":["unknown"],"match_fields":["answer"]},"failed"),
+                ("只识别原文但自动匹配答案",{"action":"recognize","file_id":fid,"count":1,"reference_ids":[item["id"]],"match_fields":["answer"]},"failed"),
+            ]
+            before=client.get(wb).json()["materials"]
+            total_before=client.get("/api/resources?kind=question").json()["total"]
+            previous_id=None
+            for instruction,reply,expected in cases:
+                calls=[]
+                def contract_worker(method,path,body=None):
+                    if path=="/status":return {"chat_available":True}
+                    if path=="/chat/start":calls.append(body);return {"state":"running"}
+                    return {"state":"done","answer":json.dumps(reply,ensure_ascii=False)}
+                with monkeypatch.context() as ap:
+                    ap.setattr(qoder,"request",contract_worker)
+                    asked=client.post(agent_url,headers=origin,json={"instruction":instruction,"model":"Auto","effort":"default","selected_id":mat["id"]})
+                    assert asked.status_code==200,(instruction,asked.text)
+                    ident=asked.json()["id"]
+                    assert asked.json()["state"]=="running" and len(calls)==1
+                    assert instruction in calls[0]["prompt"] and fid in calls[0]["prompt"]
+                    settled=client.get(agent_url).json()
+                    assert settled["state"]==expected,(instruction,settled)
+                    if previous_id:
+                        assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":previous_id}).status_code==409
+                    if expected=="ready":
+                        assert settled["plan"]["start"]==(reply.get("start") or 1)
+                        assert settled["plan"]["end"]==settled["plan"]["start"]
+                        assert settled["plan"]["goal"]==reply["goal"]
+                        assert settled["plan"]["match_fields"]==reply.get("match_fields",[])
+                    else:
+                        assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ident}).status_code==409
+                    assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ident}).status_code==409
+                    assert client.get(wb).json()["materials"]==before
+                    assert client.get("/api/resources?kind=question").json()["total"]==total_before
+                    if expected in ("ready","clarify"):
+                        cancelled=client.post(agent_url+"/cancel",headers=origin,json={"plan_id":ident})
+                        assert cancelled.status_code==200,cancelled.text
+                        assert cancelled.json()["state"]=="cancelled"
+                        assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ident}).status_code==409
+                    previous_id=ident
             # Agent uses the selected real model; no recognition before explicit confirmation.
             from app.api import qoder
             agent_calls=[]
