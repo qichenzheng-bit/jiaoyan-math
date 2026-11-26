@@ -16,8 +16,19 @@ from app.api.resources import admin_lock
 router=APIRouter(prefix="/studio",dependencies=[Depends(current_user)])
 Kind=Literal["asset","work","publication","account","checkin"]
 Platform=Literal["bilibili","douyin","xiaohongshu","wechat_top","wechat_sub"]
-# Legacy template presets, not a claim of current platform limits.
-PRESETS={"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28.7,28.7],"wechat_sub":[500,500,8,8,8,8]}
+# Recommended cover export sizes; safe margins are editorial guides, not platform API limits.
+PRESETS={
+    "bilibili":[1200,900,7,7,7,7],
+    "bilibili_wide":[1920,1080,8,8,8,8],
+    "douyin":[1080,1440,9,12,8,8],
+    "douyin_wide":[1440,1080,8,8,8,8],
+    "douyin_full":[1080,1920,13,21,8,12],
+    "xiaohongshu":[1080,1440,8,10,8,8],
+    "wechat_channels":[1080,1260,8,10,8,8],
+    "wechat_channels_wide":[1920,1080,8,8,8,8],
+    "wechat_top":[900,383,6,8,28.72,28.72],
+    "wechat_sub":[500,500,8,8,8,8],
+}
 class Asset(BaseModel):
     category:Literal["image","template","formula"]
     file_id:str|None=Field(default=None,max_length=36)
