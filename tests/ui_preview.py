@@ -221,14 +221,12 @@ with sync_playwright() as p:
                 if name=="05-chat":
                     assert page.locator("#mode-more-panel .reasoning-effort").count()==0
                     page.get_by_role("button",name="打开模型选择",exact=True).click()
-                    effort=page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)
+                    effort=page.locator(".composer-inference-panel").get_by_role("button",name="高",exact=True)
                     effort.wait_for()
-                    effort.select_option("high")
-                    assert effort.input_value()=="high"
-                    page.get_by_role("button",name="完成",exact=True).click()
-                    assert not effort.is_visible()
+                    effort.click()
+                    expect(page.locator(".composer-inference-panel")).to_have_count(0)
                     page.get_by_role("button",name="打开模型选择",exact=True).click()
-                    expect(page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)).to_have_value("high")
+                    expect(page.locator(".composer-inference-panel").get_by_role("button",name="高",exact=True)).to_have_attribute("aria-pressed","true")
                     page.keyboard.press("Escape")
                     expect(page.locator(".composer-inference-panel")).to_have_count(0)
                     assert page.locator(".intake-chat-prompts").count()==0
@@ -258,14 +256,12 @@ with sync_playwright() as p:
                 if name=="18-intelligence":
                     assert page.locator("#mode-more-panel .reasoning-effort").count()==0
                     page.get_by_role("button",name="打开模型选择",exact=True).click()
-                    effort=page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)
+                    effort=page.locator(".composer-inference-panel").get_by_role("button",name="高",exact=True)
                     effort.wait_for()
-                    effort.select_option("high")
-                    assert effort.input_value()=="high"
-                    page.get_by_role("button",name="完成",exact=True).click()
-                    assert not effort.is_visible()
+                    effort.click()
+                    expect(page.locator(".composer-inference-panel")).to_have_count(0)
                     page.get_by_role("button",name="打开模型选择",exact=True).click()
-                    expect(page.locator(".composer-inference-panel").get_by_label("推理强度",exact=True)).to_have_value("high")
+                    expect(page.locator(".composer-inference-panel").get_by_role("button",name="高",exact=True)).to_have_attribute("aria-pressed","true")
                     page.keyboard.press("Escape")
                     expect(page.locator(".composer-inference-panel")).to_have_count(0)
                     page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
@@ -897,7 +893,8 @@ with sync_playwright() as p:
                 model_button=page.get_by_role("button",name="打开模型选择",exact=True)
                 send_button=page.locator(".compact-tools .composer-send")
                 expect(model_button).to_be_visible()
-                assert model_button.evaluate("(el)=>el.getBoundingClientRect().width")>45
+                assert 30<=model_button.evaluate("(el)=>el.getBoundingClientRect().width")<=44
+                assert model_button.inner_text().strip()==""
                 assert page.locator(".compact-tools").evaluate("(el)=>getComputedStyle(el).display")=="flex"
                 assert model_button.evaluate("(el)=>el.getBoundingClientRect().right")<=send_button.evaluate("(el)=>el.getBoundingClientRect().left")+1
                 model_button.click()
@@ -905,7 +902,7 @@ with sync_playwright() as p:
                 expect(panel).to_be_visible()
                 assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1}")
                 assert panel.evaluate("(el)=>el.getBoundingClientRect().bottom")<=model_button.evaluate("(el)=>el.getBoundingClientRect().top")+1
-                page.get_by_role("button",name="完成",exact=True).click()
+                panel.get_by_role("button",name="高",exact=True).click()
                 expect(panel).to_have_count(0)
                 assert page.locator("#mode-more-panel .reasoning-effort").count()==0
             visit(page,"/chat",".chat-home-recent")

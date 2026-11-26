@@ -3,9 +3,10 @@ import {useLayoutEffect,useState,type ReactNode} from 'react'
 export type ModelCatalog={models:{id:string;label:string;efforts?:string[]}[];source?:string}
 export type ModelPreferences={model:string;effort?:string;video_model?:string;video_effort?:string}
 const labels:Record<string,string>={default:'默认',none:'关闭',off:'关闭',disabled:'关闭',low:'低',medium:'中',high:'高',xhigh:'极高',max:'最大'}
+export function effortLabel(value:string){return labels[value]??value}
 export function effortOptions(catalog:ModelCatalog|undefined,model:string,video=false){
  const available=catalog?.source==='cli'?catalog.models.find(m=>m.id===model)?.efforts??[]:[]
- return ['default',...new Set(available.filter(e=>e!=='default'&&Object.hasOwn(labels,e)&&(!video||['low','medium','high','xhigh','max'].includes(e))))]
+ return ['default',...new Set(available.filter(e=>typeof e==='string'&&e.length>0&&e.length<=16&&e!=='default'&&(!video||['low','medium','high','xhigh','max'].includes(e))))]
 }
 export default function ReasoningEffort({catalog,model,value,onChange,disabled=false,video=false}:{catalog?:ModelCatalog;model:string;value:string;onChange:(e:string)=>void;disabled?:boolean;video?:boolean}){
  const options=effortOptions(catalog,model,video)

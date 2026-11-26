@@ -231,3 +231,22 @@
 .work-chat[data-chat-layout="v3"] .chat-home-recent>a>svg{width:17px;height:17px;flex:none}
 @media(max-width:760px){.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference{max-width:calc(100% - 90px)}.composer-inference-panel{width:min(285px,calc(100vw - 56px));max-height:min(390px,55dvh);right:-30px}.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference .chat-model-shortcut{font-size:12px}.work-chat[data-chat-layout="v3"] .chat-home-heading h1{font-size:23px}.work-chat[data-chat-layout="v3"] .chat-home-heading p{font-size:12px}.work-chat[data-chat-layout="v3"] .chat-home-links{gap:6px}.legacy-shell.clean-workspace .work-chat[data-chat-layout="v3"] .chat-home-links>button{font-size:12px;padding:7px 9px}}
 @media(max-height:480px){.legacy-shell.clean-workspace .work-chat[data-chat-layout="v3"]>.chat-scroll:not(:has(.work-review-preview)){justify-content:flex-start}.composer-inference-panel{max-height:45dvh}}
+
+/* Icon-only inference picker; keep the send button in its original position. */
+.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference{width:38px;max-width:38px;flex:0 0 38px}
+.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference .chat-model-shortcut{display:grid;place-items:center;width:38px;height:38px;min-height:38px;padding:0;max-width:none;border-radius:50%;color:var(--ink)}
+.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference .chat-model-shortcut[aria-expanded=true]{background:var(--selected)}
+.composer-inference-panel{width:min(272px,calc(100vw - 44px));gap:7px;padding:9px;max-height:min(430px,56dvh);overflow:auto}
+.composer-inference-heading{flex:none;color:var(--muted);font-size:12px;font-weight:500}
+.composer-inference-heading strong{font-weight:500}
+.composer-model-list{max-height:240px;min-height:0;flex:0 1 auto;overflow:auto}
+.composer-catalog-status{display:block;padding:2px 5px;font-size:11px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+.composer-model-search{display:flex;align-items:center;gap:5px;background:var(--subtle);border-radius:8px;padding:3px 7px;flex:none;color:var(--muted)}
+.legacy-shell.clean-workspace .composer-model-search input{width:100%;min-width:0;max-width:none;background:transparent;border:0;box-shadow:none;padding:5px 2px;font-size:14px;min-height:30px}
+.composer-inference-effort{flex:none;padding:8px 3px 2px}
+.composer-effort-label{display:flex;align-items:center;justify-content:space-between;gap:5px;margin:0 0 7px;font-size:12px;color:var(--muted)}
+.composer-effort-label strong{font-weight:500}
+.composer-effort-options{display:flex;flex-wrap:wrap;gap:5px}
+.legacy-shell.clean-workspace .composer-effort-options>button{border:1px solid var(--line);background:transparent;min-height:30px;border-radius:18px;padding:4px 10px;color:var(--ink);font-size:12px;box-shadow:none}
+.legacy-shell.clean-workspace .composer-effort-options>button[aria-pressed=true]{background:var(--selected);border-color:var(--muted)}
+@media(max-width:760px){.composer-inference-panel{right:-30px;max-height:min(400px,56dvh)}.legacy-shell.clean-workspace .composer-model-search input{font-size:16px}}

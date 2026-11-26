@@ -33,6 +33,7 @@ const paths:Record<string,ReactNode>={
  close:<><path d="m6 6 12 12M18 6 6 18"/></>,
  arrow:<><path d="M4 12h15m-6-6 6 6-6 6"/></>,
  chevron:<><path d="m9 6 6 6-6 6"/></>,
+ brain:<><path d="M12 4v16M12 5a4 4 0 0 0-7 3 4 4 0 0 0-2 7 4 4 0 0 0 4 5 3 3 0 0 0 5-2m0-13a4 4 0 0 1 7 3 4 4 0 0 1 2 7 4 4 0 0 1-4 5 3 3 0 0 1-5-2M5 8c1 0 3 1 3 3M19 8c-1 0-3 1-3 3M7 20v-4m10 4v-4"/></>,
  spark:<><path d="m12 2 2.7 7.3L22 12l-7.3 2.7L12 22l-2.7-7.3L2 12l7.3-2.7L12 2Z"/></>,
  logout:<><path d="M10 4H4v16h6m-1-8h12m-5-5 5 5-5 5"/></>,
  shield:<><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></>,
