@@ -384,11 +384,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
             def agent_worker(method,path,body=None):
                 if path=="/status":return {"chat_available":True}
                 if path=="/chat/start":agent_calls.append(body);return {"state":"running"}
-                return {"state":"done","answer":json.dumps({"action":"recognize","file_id":fid,"start":None,"count":1,"goal":"review","explanation":"继续教材下一页并整理审核"},ensure_ascii=False)}
+                return {"state":"done","answer":json.dumps({"action":"recognize","file_id":fid,"start":None,"count":1,"goal":"review","reference_ids":[item["id"]],"match_fields":["answer"],"explanation":"继续教材下一页并匹配参考答案"},ensure_ascii=False)}
             with monkeypatch.context() as ap:
                 ap.setattr(qoder,"request",agent_worker)
                 agent_url=wb+"/agent"
-                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页，核对后整理审核","model":"Auto","effort":"default","selected_id":mat["id"]})
+                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页，核对后整理审核并匹配参考答案","model":"Auto","effort":"default","selected_id":mat["id"]})
                 assert asked.status_code==200,asked.text
                 assert asked.json()["state"]=="running" and len(agent_calls)==1 and fid in agent_calls[0]["prompt"]
                 ready=client.get(agent_url).json()
@@ -401,7 +401,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
                 assert dispatched.status_code==200,dispatched.text
                 assert dispatched.json()["state"]=="dispatched"
                 bid=dispatched.json()["result"]["batch_id"]
-                assert client.get(wb).json()["materials"][0]["batches"][0]["id"]==bid
+                assert next(m for m in client.get(wb).json()["materials"] if m["file"]["id"]==fid)["batches"][0]["id"]==bid
                 assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]}).json()["result"]["batch_id"]==bid
                 assert client.get(agent_url).json()["result"]["batch_id"]==bid
                 assert client.get(agent_url).json()["workflow"]["stage"]=="recognizing"
@@ -439,11 +439,19 @@ def test_migration_and_login(tmp_path, monkeypatch):
                     def match_worker(method,path,body=None):
                         if path=="/status":return {"chat_available":True}
                         if path=="/chat/start":return {"state":"running"}
-                        return {"state":"done","answer":'{"answer":"test file"}'}
+                        return {"state":"done","answer":json.dumps({uid:{"answer":"test file"}})}
                     with monkeypatch.context() as match_patch:
                         match_patch.setattr(qoder,"request",match_worker)
-                        pending=client.post(jb+"/source-match",headers=origin,json={"revision":reviewed.json()["revision"],"item_uid":uid,"fields":["answer"],"source_batch_id":reference[0]["batch_id"]})
+                        planned=client.get(agent_url+"/matching",params={"job_id":result["id"]}).json()
+                        assert planned["plan_id"]==ready["id"] and planned["fields"]==["answer"]
+                        candidate=next(b for b in planned["candidates"] if b["batch_id"]==reference[0]["batch_id"])
+                        assert candidate["targets"][0]["uid"]==uid
+                        match_payload={"plan_id":ready["id"],"job_id":result["id"],"revision":reviewed.json()["revision"],"source_batch_id":reference[0]["batch_id"]}
+                        assert client.post(agent_url+"/matching",headers=origin,json={**match_payload,"source_batch_id":"invalid"}).status_code==409
+                        assert client.post(agent_url+"/matching",headers=origin,json={**match_payload,"revision":reviewed.json()["revision"]+1}).status_code==409
+                        pending=client.post(agent_url+"/matching",headers=origin,json=match_payload)
                         assert pending.status_code==200,pending.text
+                        assert client.post(agent_url+"/matching",headers=origin,json=match_payload).status_code==409
                         sid=pending.json()["id"]
                         assert client.post("/api/workspaces/library/archive",headers=origin,json={"file_ids":[item["id"]],"allow_unfinished":True}).status_code==409
                         suggestion=next(s for s in client.get(jb+"/supplements").json() if s["id"]==sid)
@@ -454,6 +462,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
                         j2=accepted.json()
                         assert j2["items"][0]["answer"]=="test file" and j2["reviewed_uids"]==[]
                         assert j2["provenance"]["external_sources"][uid]["answer"]["file_id"]==item["id"]
+                        remaining=client.get(agent_url+"/matching",params={"job_id":result["id"]}).json()
+                        assert next(b for b in remaining["candidates"] if b["batch_id"]==reference[0]["batch_id"])["eligible_count"]==0
                         assert client.post(jb+"/document",headers=origin,json={"revision":j2["revision"]}).status_code==409
                         j2["items"][0]["dedup_reason"]="集成测试独立条目"
                         reviewed=client.put(jb,headers=origin,json={"revision":j2["revision"],"items":j2["items"],"reviewed_uids":[uid]})

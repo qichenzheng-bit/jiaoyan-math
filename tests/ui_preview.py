@@ -40,6 +40,17 @@ def answer(route):
       "/studio/presets":{"bilibili":[1200,900,7,7,7,7],"bilibili_wide":[1920,1080,8,8,8,8],"douyin":[1080,1440,9,12,8,8],"douyin_wide":[1440,1080,8,8,8,8],"douyin_full":[1080,1920,13,21,8,12],"xiaohongshu":[1080,1440,8,10,8,8],"wechat_channels":[1080,1260,8,10,8,8],"wechat_channels_wide":[1920,1080,8,8,8,8],"wechat_top":[900,383,6,8,28.72,28.72],"wechat_sub":[500,500,8,8,8,8]},
       "/qoder/usage/refresh":{"available":True,"source":"sdk","updated_at":1795656773,"packs":[{"kind":"userQuota","label":"套餐额度","total":100,"used":25,"remaining":75,"unit":"credits","available":True}]},"/studio/qoder-checkin":{"round":"2026-11-26","timezone":"Asia/Shanghai","accounts":[]},"/qiandao/state":{"enabled":False,"configured":False,"reason":"pat_missing","round":"2026-11-26","next_round":"2026-11-27T10:00:00+08:00","current":None,"history":[]},"/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if p=="/intelligence/jobs/review-agent-match":result={**review_job,"id":"review-agent-match","reviewed_uids":[]}
+    if p=="/intelligence/jobs/review-agent-match/supplements":result=[]
+    if p=="/workspaces/agent-work-demo/agent/matching":
+        if route.request.method=="POST":
+            payload=route.request.post_data_json
+            assert payload=={"plan_id":"agent-plan","job_id":"review-agent-match","revision":1,"source_batch_id":"reference-batch"}
+            result={**review_suggestion,"state":"failed","detail":"测试：无可靠原文","proposal":{}}
+        elif q.get("job_id")==["review-agent-match"]:
+            result={"plan_id":"agent-plan","job_id":"review-agent-match","revision":1,"fields":["answer"],"pending":False,"candidates":[{"batch_id":"reference-batch","file_id":"reference-file","file_name":"参考答案.pdf","start":21,"end":25,"eligible_count":1,"targets":[{"uid":"review-item","title":"导数计算","fields":["answer"]}]}],"unavailable":[]}
+        else:
+            route.fulfill(status=200,content_type="application/json",body="null");return
     if p=="/workspaces":result=[]
     if p=="/workspaces/agent-work-demo":
         result={"id":"agent-work-demo","title":"持续工作预览","materials":[{"id":"agent-material","file":{"id":"agent-pdf","name":"高等数学.pdf","media_type":"application/pdf"},"total_units":100,"verified_units":5,"next_unit":6,"batches":[{"id":"agent-batch","start":1,"end":5,"units":[],"verified":True}]}]}
@@ -754,6 +765,14 @@ with sync_playwright() as p:
             assert "fromWorkspace=agent-work-demo" in page.url
             page.get_by_role("link",name="返回资料工作").click()
             expect(page.get_by_label("实际工作进度")).to_be_visible()
+            visit(page,"/work?job=review-agent-match&review=1&fromWorkspace=agent-work-demo",".agent-reference-match")
+            expect(page.locator(".agent-reference-match")).to_contain_text("匹配字段：答案")
+            expect(page.get_by_label("计划参考批次")).to_have_value("reference-batch")
+            expect(page.get_by_role("button",name="按计划开始参考匹配",exact=True)).to_be_enabled()
+            with page.expect_request(lambda req:req.url.endswith("/agent/matching") and req.method=="POST") as matched:
+                page.get_by_role("button",name="按计划开始参考匹配",exact=True).click()
+            assert matched.value.post_data_json["source_batch_id"]=="reference-batch"
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
         if GROUP in {'all','editors'}:
             print('UI case: document assembly',flush=True)
             # Compose from the question bank, preserve original resources, and save layout only.
