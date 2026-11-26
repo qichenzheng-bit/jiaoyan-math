@@ -111,9 +111,10 @@ def catalog(db,s,body):
     named={f.id for f in matching_names(files,body.instruction,"")}
     files.sort(key=lambda f:(f.id not in named,f.id!=selected,f.id not in attached))
     rows=[]
-    for f in files[:60]:
-        p=w.library_row(db,f);bs=w.file_batches(db,f.id)
-        rows.append({"id":f.id,"name":f.name,"type":f.media_type,"attached":f.id in attached,"selected":f.id==selected,"total":p["total_units"],"next_unit":p["next_unit"],"verified":p["verified_units"],"registered":p["registered_units"],"batches":[{"id":b.id,"start":b.start,"end":b.end,"verified":b.verified_text is not None,"job_state":j.state if (j:=w.latest_job(db,b)) else None} for b in bs[-6:]]})
+    page=files[:60];details,grouped,states=w.library_details(db,page)
+    for f,p in zip(page,details):
+        bs=grouped[f.id]
+        rows.append({"id":f.id,"name":f.name,"type":f.media_type,"attached":f.id in attached,"selected":f.id==selected,"total":p["total_units"],"next_unit":p["next_unit"],"verified":p["verified_units"],"registered":p["registered_units"],"batches":[{"id":b.id,"start":b.start,"end":b.end,"verified":b.verified_text is not None,"job_state":j.state if (j:=states[0].get(b.id)) else None} for b in bs[-6:]]})
     return rows,len(files)>len(rows)
 def resolve(db,i):
     from app.api import workspaces as w

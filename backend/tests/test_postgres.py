@@ -692,6 +692,47 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.request("DELETE",image_path+"/manual",headers=origin,json={"revision":saved_image_doc["revision"]}).status_code==200
         assert client.post("/api/files/"+file_id+"/archive",headers=origin).status_code==409
 
+        # F3.4.6: verify multi-file summaries and bound repeated SQL on a large PDF history.
+        from sqlalchemy import event
+        from app.models import WorkBatch
+        perf=client.post("/api/workspaces",headers=origin,json={"title":"大资料性能回归"}).json()
+        perf_base="/api/workspaces/"+perf["id"]
+        perf_ids=[]
+        for i in range(12):
+            uploaded=client.post("/api/files?name=perf-fixture-"+str(i)+".pdf",headers=origin,content=("%PDF-1.7\nperformance "+str(i)).encode())
+            assert uploaded.status_code==200,uploaded.text
+            perf_ids.append(uploaded.json()["id"])
+        monkeypatch.setattr(ws,"pdf_pages",lambda f:1000)
+        attached=client.post(perf_base+"/materials",headers=origin,json={"file_ids":perf_ids})
+        assert attached.status_code==200,attached.text
+        mats=attached.json()["materials"]
+        assert len(mats)==12 and all(m["total_units"]==1000 for m in mats)
+        # Seed previously verified batches in the isolated CI database; no real OCR or bank writes.
+        with session_factory()() as db:
+            from uuid import uuid4
+            for m in mats:
+                for start in range(1,201,10):
+                    db.add(WorkBatch(id=str(uuid4()),material_id=m["id"],start=start,end=start+9,units=[{"unit":n,"state":"done","text":"fixture","method":"pdf_text","warnings":[]} for n in range(start,start+10)],verified_text="fixture",created_at=now(),updated_at=now()))
+            db.commit()
+        queries=[]
+        def count_sql(conn,cursor,statement,parameters,context,executemany):
+            if statement.lstrip().upper().startswith("SELECT"):queries.append(statement)
+        event.listen(engine(),"before_cursor_execute",count_sql)
+        try:
+            listed=client.get("/api/workspaces/library?q=perf-fixture")
+            assert listed.status_code==200,listed.text
+            rows=listed.json()["items"]
+            assert len(rows)==12 and all(r["recognized_units"]==200 and r["verified_units"]==200 and r["next_unit"]==201 and r["registered_units"]==0 for r in rows)
+            assert len(queries)<=10,len(queries)
+            queries.clear()
+            restored=client.get(perf_base)
+            assert restored.status_code==200,restored.text
+            assert all(len(m["batches"])==20 and m["next_unit"]==201 for m in restored.json()["materials"])
+            assert len(queries)<=10,len(queries)
+        finally:event.remove(engine(),"before_cursor_execute",count_sql)
+        m=mats[0]
+        assert client.post(perf_base+"/materials/"+m["id"]+"/batches",headers=origin,json={"start":201,"end":211}).status_code==422
+        assert client.post(perf_base+"/materials/"+m["id"]+"/batches",headers=origin,json={"start":201,"end":210}).status_code==200
         # Permanent deletion keeps historical metadata, respects references and never races a backup.
         from sqlalchemy import text as sql_text
         from app.models import StoredFile, FileReference

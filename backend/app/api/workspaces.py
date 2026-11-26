@@ -86,32 +86,89 @@ def registered(db,j):
     return all(b.get("uid") in refs and b.get("uid") in history for b in j.items)
 def file_batches(db,fid):
     return list(db.scalars(select(WorkBatch).join(WorkMaterial,WorkMaterial.id==WorkBatch.material_id).where(WorkMaterial.file_id==fid).order_by(WorkBatch.start,WorkBatch.created_at)))
-def progress(db,f,batches,total):
+def chunks(values,size=500):
+    values=list(values)
+    for i in range(0,len(values),size):yield values[i:i+size]
+
+def batch_groups(db,file_ids):
+    """Load historical batches once for the files in the current response."""
+    grouped={fid:[] for fid in file_ids}
+    for ids in chunks(grouped):
+        stmt=select(WorkMaterial.file_id,WorkBatch).join(WorkBatch,WorkBatch.material_id==WorkMaterial.id).where(WorkMaterial.file_id.in_(ids)).order_by(WorkBatch.start,WorkBatch.created_at)
+        for fid,b in db.execute(stmt):grouped[fid].append(b)
+    return grouped
+
+def batch_states(db,batches):
+    """Bulk load retry chains and registration evidence without repeated per-batch queries."""
+    roots={b.job_id for b in batches if b.job_id}
+    jobs={};successors={}
+    cols=(IntakeJob.id,IntakeJob.retry_of,IntakeJob.state,IntakeJob.document_id,IntakeJob.items)
+    for ids in chunks(roots):
+        for j in db.execute(select(*cols).where(IntakeJob.id.in_(ids))):jobs[j.id]=j
+    pending=set(jobs);visited=set()
+    while pending:
+        visited.update(pending);following=set()
+        for ids in chunks(pending):
+            for j in db.execute(select(*cols).where(IntakeJob.retry_of.in_(ids))):
+                successors[j.retry_of]=j.id;jobs[j.id]=j
+                if j.id not in visited:following.add(j.id)
+        pending=following
+    latest={}
+    for b in batches:
+        j=jobs.get(b.job_id);seen=set()
+        while j and j.id not in seen and j.id in successors:
+            seen.add(j.id);j=jobs[successors[j.id]]
+        latest[b.id]=j
+    doc_ids={j.document_id for j in latest.values() if j and j.state=="converted" and j.document_id and j.items}
+    refs={};history={}
+    for ids in chunks(doc_ids):
+        for did,blocks in db.execute(select(TeachingDocument.id,TeachingDocument.blocks).where(TeachingDocument.id.in_(ids),TeachingDocument.archived==False)):
+            refs[did]={b["uid"] for b in blocks if b.get("kind")=="reference" and b.get("resource_id") and not b.get("edit_reference_revision")}
+        for did,entries in db.execute(select(DocumentRegistration.document_id,DocumentRegistration.entries).where(DocumentRegistration.document_id.in_(ids))):
+            history.setdefault(did,set()).update(entry.get("uid") for entry in entries)
+    saved={bid for bid,j in latest.items() if j and j.state=="converted" and j.document_id in refs and j.items and all(b.get("uid") in refs[j.document_id] and b.get("uid") in history.get(j.document_id,set()) for b in j.items)}
+    return latest,saved
+
+def progress(db,f,batches,total,states=None):
     done={n for b in batches if b.verified_text is not None for n in range(b.start,b.end+1)}
     recognized={u["unit"] for b in batches for u in b.units if u.get("state")=="done"}
-    saved={n for b in batches if registered(db,latest_job(db,b)) for n in range(b.start,b.end+1)}
+    registered_ids=(states if states is not None else batch_states(db,batches))[1]
+    saved={n for b in batches if b.id in registered_ids for n in range(b.start,b.end+1)}
     next_unit=1
     while next_unit in done:next_unit+=1
     return {"total_units":total,"recognized_units":len(recognized),"verified_units":len(done),"registered_units":len(saved),"next_unit":next_unit,"complete":total is not None and total>0 and sum(1 for n in saved if 1<=n<=total)==total}
-def batch_view(db,b,full=False):
-    j=latest_job(db,b)
+def batch_view(db,b,full=False,states=None):
+    j=latest_job(db,b) if states is None else states[0].get(b.id)
     result={"id":b.id,"material_id":b.material_id,"start":b.start,"end":b.end,"units":[{k:v for k,v in u.items() if full or k!="text"} for u in b.units],"verified":b.verified_text is not None,"job_id":j.id if j else None,"job_state":j.state if j else None,"document_id":j.document_id if j else None,"created_at":b.created_at}
     if full:result["verified_text"]=b.verified_text
     return result
 def material_view(db,m):
-    f=db.get(StoredFile,m.file_id)
-    batches=file_batches(db,m.file_id)
-    return {"id":m.id,"file":storage.serialize(f),**progress(db,f,batches,m.total_units),"batches":[batch_view(db,b) for b in batches]}
+    return material_views(db,[m])[0]
+
+def material_views(db,materials):
+    materials=list(materials);ids={m.file_id for m in materials}
+    files={f.id:f for part in chunks(ids) for f in db.scalars(select(StoredFile).where(StoredFile.id.in_(part)))}
+    grouped=batch_groups(db,ids)
+    states=batch_states(db,[b for bs in grouped.values() for b in bs])
+    return [{"id":m.id,"file":storage.serialize(files[m.file_id]),**progress(db,files[m.file_id],grouped[m.file_id],m.total_units,states),"batches":[batch_view(db,b,states=states) for b in grouped[m.file_id]]} for m in materials]
 
 SUPPORTED=tuple(sorted({"application/pdf",imp.DOCX,*imp.TEXT,*storage.IMAGE_TYPES}))
 class Cleanup(BaseModel):
     file_ids:list[str]=Field(min_length=1,max_length=20)
     allow_unfinished:bool=False
 
+def library_details(db,files):
+    files=list(files);ids=[f.id for f in files];totals={}
+    for part in chunks(ids):
+        stmt=select(WorkMaterial.file_id,WorkMaterial.total_units).where(WorkMaterial.file_id.in_(part)).order_by(WorkMaterial.created_at,WorkMaterial.id)
+        for fid,total in db.execute(stmt):totals.setdefault(fid,total)
+    grouped=batch_groups(db,ids)
+    states=batch_states(db,[b for bs in grouped.values() for b in bs])
+    rows=[{**storage.serialize(f),**progress(db,f,grouped[f.id],totals.get(f.id,1 if f.media_type in imp.TEXT or f.media_type in storage.IMAGE_TYPES else None),states)} for f in files]
+    return rows,grouped,states
+
 def library_row(db,f):
-    m=db.scalar(select(WorkMaterial).where(WorkMaterial.file_id==f.id).order_by(WorkMaterial.created_at).limit(1))
-    total=m.total_units if m else (1 if f.media_type in imp.TEXT or f.media_type in storage.IMAGE_TYPES else None)
-    return {**storage.serialize(f),**progress(db,f,file_batches(db,f.id),total)}
+    return library_details(db,[f])[0][0]
 def original_query():
     return select(StoredFile).where(StoredFile.generated==False,StoredFile.media_type.in_(SUPPORTED))
 @router.get("/library")
@@ -119,7 +176,7 @@ def library(q:str=Query("",max_length=255),archived:bool=False,offset:int=Query(
     stmt=original_query().where(StoredFile.archived==archived,(StoredFile.purged_at.is_(None)) | (StoredFile.purge_pending==True))
     if q.strip():stmt=stmt.where(StoredFile.name.contains(q.strip(),autoescape=True))
     total=db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    return {"items":[library_row(db,f) for f in db.scalars(stmt.order_by(StoredFile.created_at.desc(),StoredFile.id).offset(offset).limit(limit))],"total":total}
+    return {"items":library_details(db,db.scalars(stmt.order_by(StoredFile.created_at.desc(),StoredFile.id).offset(offset).limit(limit)))[0],"total":total}
 @router.get("/library/resolve")
 def resolve_library(instruction:str=Query(min_length=1,max_length=500),db:Session=Depends(get_db)):
     # Full filenames or unambiguous complete stems only. Never pick a file by model guess.
@@ -128,9 +185,9 @@ def resolve_library(instruction:str=Query(min_length=1,max_length=500),db:Sessio
     for f in db.scalars(original_query().where(StoredFile.archived==False)):
         stem=Path(f.name).stem.casefold()
         if f.name.casefold() in q or (len(stem)>=2 and stem in q):
-            matches.append(library_row(db,f))
+            matches.append(f)
             if len(matches)>=20:break
-    return {"items":matches}
+    return {"items":library_details(db,matches)[0]}
 def protect_original(db,f):
     for ref in db.scalars(select(FileReference).where(FileReference.file_id==f.id)):
         if ref.owner_type=="work_material":continue
@@ -230,7 +287,7 @@ def recognition_plan(ident:str,instruction:str=Query(min_length=1,max_length=500
 @router.get("/{ident}")
 def read(ident:str,db:Session=Depends(get_db)):
     s=workspace(db,ident)
-    return {**session_view(s),"materials":[material_view(db,m) for m in db.scalars(select(WorkMaterial).where(WorkMaterial.session_id==s.id).order_by(WorkMaterial.created_at,WorkMaterial.id))]}
+    return {**session_view(s),"materials":material_views(db,db.scalars(select(WorkMaterial).where(WorkMaterial.session_id==s.id).order_by(WorkMaterial.created_at,WorkMaterial.id)))}
 @router.post("/{ident}/materials",dependencies=[Depends(require_origin)])
 def attach(ident:str,body:Attach,db:Session=Depends(get_db),user:User=Depends(current_user)):
     s=workspace(db,ident,True)
