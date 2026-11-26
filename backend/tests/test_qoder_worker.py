@@ -150,3 +150,15 @@ def test_usage_refresh_cache_and_disconnect(monkeypatch):
     assert len(calls)==1
     monkeypatch.setattr(worker,"user_disconnected",True)
     assert not worker.usage_status(True)[1]["available"]
+
+
+def test_usage_api_distinguishes_old_worker_and_outage(monkeypatch):
+    from fastapi import HTTPException
+    from app.api import qoder
+    for status, reason in ((404,"worker_upgrade_required"),(503,"worker_unavailable"),(504,"sdk_timeout")):
+        def fail(*args, **kwargs):
+            raise HTTPException(status, "internal error")
+        monkeypatch.setattr(qoder, "request", fail)
+        expected = {"available":False,"reason":reason}
+        assert qoder.usage() == expected
+        assert qoder.usage_refresh() == expected
