@@ -89,6 +89,19 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.post("/api/knowledge/relations",headers=origin,json=edge).status_code==200
         assert client.post("/api/knowledge/relations",headers=origin,json={**edge,"source_id":other["id"],"target_id":k["id"]}).status_code==409
         assert client.get("/api/knowledge/points?q=limit").json()["total"]==1
+        root_browse=client.get("/api/knowledge/browse",params={"subject":"高等数学"}).json()
+        assert root_browse["mode"]=="chapters"
+        assert any(x["chapter"]=="" for x in root_browse["items"])
+        roots=client.get("/api/knowledge/browse",params={"subject":"高等数学","chapter":""}).json()
+        assert roots["mode"]=="points"
+        assert any(x["id"]==k["id"] and x["child_count"]==1 for x in roots["items"])
+        assert all(x["id"]!=other["id"] for x in roots["items"])
+        children=client.get("/api/knowledge/browse",params={"subject":"高等数学","parent_id":k["id"]}).json()
+        assert [x["id"] for x in children["items"]]==[other["id"]]
+        search=client.get("/api/knowledge/browse",params={"subject":"高等数学","q":"limit"}).json()
+        assert [x["id"] for x in search["items"]]==[k["id"]]
+        assert client.get("/api/knowledge/browse",params={"subject":"线性代数","parent_id":k["id"]}).status_code==422
+
         link=client.get("/api/knowledge/resources/"+rid).json()
         assert client.put("/api/knowledge/resources/"+rid,headers=origin,json={"revision":link["revision"],"items":[{"knowledge_id":k["id"],"role":"core"}]}).status_code==200
         assert client.get("/api/knowledge/points/"+k["id"]+"/resources").json()[0]["id"]==rid

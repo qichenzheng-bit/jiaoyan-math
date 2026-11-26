@@ -58,6 +58,26 @@ def answer(route):
     if p=="/resources":
         rows=[source] if q.get("kind")==["source"] else items
         result={"items":rows,"total":len(rows)}
+    if p=="/knowledge/browse":
+        pool=[p for p in points if p["subject"]==q.get("subject",[""])[0]]
+        ids={p["id"] for p in pool}
+        relations=[e for e in edges if e["source_id"] in ids and e["target_id"] in ids and e["relation_type"]=="contains"]
+        roots=[p for p in pool if p["id"] not in {e["target_id"] for e in relations}]
+        term=q.get("q",[""])[0]
+        parent=q.get("parent_id",[""])[0]
+        if term:
+            rows=[p for p in pool if term in p["name"]]
+        elif parent:
+            rows=[p for p in pool if p["id"] in {e["target_id"] for e in relations if e["source_id"]==parent}]
+        elif "chapter" in q:
+            rows=[p for p in roots if p["chapter"]==q["chapter"][0]]
+        else:
+            rows=None
+        if rows is None:
+            chapters=sorted({p["chapter"] for p in roots})
+            result={"mode":"chapters","items":[{"chapter":c,"count":sum(p["chapter"]==c for p in roots)} for c in chapters],"total":len(chapters)}
+        else:
+            result={"mode":"points","items":[{**p,"child_count":sum(e["source_id"]==p["id"] for e in relations)} for p in rows],"total":len(rows)}
     if p.startswith("/knowledge/points/") and p.endswith("/resources"):result=[]
     if result is None:result={}
     route.fulfill(status=200,content_type="application/json",body=json.dumps(result,ensure_ascii=False))
@@ -320,7 +340,17 @@ with sync_playwright() as p:
     page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
     page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
     page.get_by_role("button",name="选择已有知识点",exact=True).click()
-    page.locator(".manual-tag-catalog").get_by_role("button",name="导数 · 微积分",exact=True).click()
+    catalog=page.locator(".manual-tag-catalog")
+    catalog.locator(".manual-tag-category").wait_for()
+    assert catalog.get_by_role("button",name="导数",exact=True).count()==0
+    catalog.locator(".manual-tag-category").filter(has_text="微积分").click()
+    catalog.get_by_role("button",name="展开 微积分",exact=True).click()
+    catalog.get_by_role("button",name="展开 一元函数微分学",exact=True).click()
+    catalog.get_by_role("button",name="导数",exact=True).click()
+    assert catalog.get_by_role("button",name="定积分",exact=True).count()==0
+    page.get_by_label("搜索已有知识点").fill("定积分")
+    catalog.get_by_role("button",name="定积分",exact=False).first.wait_for()
+
     page.get_by_label("知识标签",exact=True).fill("新知识点")
     page.get_by_role("button",name="新增标签",exact=True).click()
     assert page.get_by_role("button",name="移除知识标签 新知识点",exact=True).is_visible()
