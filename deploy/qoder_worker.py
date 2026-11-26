@@ -2,6 +2,7 @@
 """Unix-socket-only Qoder CN worker. Separate non-root service account."""
 import errno
 import json
+import math
 import os
 import re
 import selectors
@@ -64,6 +65,8 @@ AUTH_STATE_PATH = Path.home() / ".jiaoyan-auth-state.json"
 retained_auth = False
 user_disconnected = False
 SDK_PYTHON = Path("/opt/jiaoyan-qoder/sdk-venv/bin/python")
+usage_cache = None
+USAGE_CACHE_SECONDS = 60
 SUPPORTED_EFFORTS = ('none','off','disabled','low','medium','high','xhigh','max')
 
 def parse_models(output):
@@ -176,6 +179,64 @@ def sdk_catalog(exe):
     except (OSError,ValueError):
         return None,"sdk_failed"
 
+SDK_USAGE_SCRIPT = SDK_CATALOG_SCRIPT.replace(
+    'models = await client.get_available_models()','usage = await client.get_usage_info()'
+).replace('{"models": models}','{"usage": usage}')
+
+def parse_usage(payload):
+    """Whitelist account quota fields; never expose account identifiers or raw SDK responses."""
+    if not isinstance(payload,dict):return None
+    def number(v):
+        if type(v) in (int,float) and math.isfinite(v) and v>=0:return v
+        return None
+    packs=[]
+    for key,label in (("userQuota","套餐额度"),("addOnQuota","资源包"),("orgResourcePackage","组织共享额度")):
+        row=payload.get(key)
+        if not isinstance(row,dict):continue
+        fields={name:number(row.get("cap" if name=="total" and key=="orgResourcePackage" else name)) for name in ("total","used","remaining")}
+        if all(v is None for v in fields.values()):continue
+        unit=row.get("unit")
+        unit=unit if isinstance(unit,str) and unit.lower() in ("credits","credit") else None
+        packs.append({"kind":key,"label":label,**fields,"unit":unit,"available":row.get("available") if type(row.get("available")) is bool else None})
+    if not packs:return None
+    return {"packs":packs,"quota_exceeded":payload.get("isQuotaExceeded") if type(payload.get("isQuotaExceeded")) is bool else None,
+            "usage_percentage":number(payload.get("totalUsagePercentage"))}
+
+def sdk_usage(exe):
+    if not SDK_PYTHON.is_file():return None,"sdk_missing"
+    try:
+        with tempfile.TemporaryDirectory(prefix="qoder-sdk-usage-") as work:
+            proc=subprocess.Popen([str(SDK_PYTHON),"-c",SDK_USAGE_SCRIPT,exe,work],cwd=work,
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,
+                env={**os.environ,"PATH":str(Path(exe).parent)+os.pathsep+os.environ.get("PATH","")})
+            try:out,_=proc.communicate(timeout=20)
+            except subprocess.TimeoutExpired:
+                stop_process(proc);proc.communicate();return None,"sdk_timeout"
+        if proc.returncode!=0:return None,"sdk_failed"
+        payload=json.loads(out.decode("utf-8"))
+        data=parse_usage(payload.get("usage")) if isinstance(payload,dict) else None
+        return (data,"sdk") if data else (None,"sdk_unavailable")
+    except (OSError,ValueError):return None,"sdk_failed"
+
+def usage_status(refresh=False):
+    global usage_cache
+    with lock:
+        if user_disconnected:return 200,{"available":False,"reason":"已主动退出 AI"}
+        if login_process is not None:return 200,{"available":False,"reason":"正在授权"}
+        cached=usage_cache
+        fresh=cached and time.time()-cached["updated_at"]<USAGE_CACHE_SECONDS
+        if not refresh or fresh or chat_active:
+            if cached:return 200,{**cached,"stale":not fresh,"busy":bool(chat_active)}
+            if not refresh or chat_active:return 200,{"available":False,"reason":"暂无额度快照，请刷新或等待当前任务完成"}
+    exe=executable()
+    data,reason=sdk_usage(exe) if exe else (None,"cli_missing")
+    with lock:
+        if data:
+            usage_cache={"available":True,"source":"sdk","updated_at":int(time.time()),**data}
+            return 200,{**usage_cache,"stale":False}
+        if usage_cache:return 200,{**usage_cache,"stale":True,"reason":reason}
+        return 200,{"available":False,"reason":reason}
+
 def save_auth_state():
     """Only non-secret metadata. Credentials remain exclusively in the official CLI home."""
     fd,name=tempfile.mkstemp(dir=AUTH_STATE_PATH.parent,prefix=".jiaoyan-auth-")
@@ -217,6 +278,7 @@ def restore_auth_state():
         catalog_capability_source=data.get("capability_source") if data.get("capability_source") in ("sdk","cli_metadata") else "unavailable"
 
 def disconnect():
+    global usage_cache
     global retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source
     with lock:
         if chat_active or login_process is not None:return 409,{"detail":"请先完成当前任务或取消授权"}
@@ -228,6 +290,7 @@ def disconnect():
         except OSError:
             retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source=old
             return 503,{"detail":"无法保存退出状态，未断开"}
+        usage_cache=None
         login.update(state="disconnected",url="",detail="已退出本系统 AI；官方 CLI 凭据未删除")
         return 200,dict(login)
 
@@ -346,6 +409,7 @@ def login_worker(proc):
                 login_process = None
 
 def start_login():
+    global usage_cache
     global login_process, verified_at, catalog, catalog_at, catalog_efforts, catalog_capability_source
     with lock:
         if chat_active:
@@ -365,6 +429,7 @@ def start_login():
         except OSError:
             return 503, {"detail": "无法启动官方登录命令"}
         login_process = proc
+        usage_cache=None
         login.update(state="starting", url="", detail="正在获取官方授权链接")
         threading.Thread(target=login_worker, args=(proc,), daemon=True).start()
         return 200, dict(login)
@@ -380,7 +445,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 11, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 12, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -641,6 +706,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(*chat_state(self.path.removeprefix("/chat/")))
         if self.path == "/models":
             return self.reply(200, model_catalog())
+        if self.path == "/usage":
+            return self.reply(*usage_status())
         return self.reply(404, {"detail": "Not found"})
     def do_POST(self):
         if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
@@ -654,6 +721,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(*chat_start(data, video=self.path == "/video/start"))
         if self.path == "/models/refresh":
             return self.reply(*refresh_models())
+        if self.path == "/usage/refresh":
+            return self.reply(*usage_status(True))
         if self.path == "/login/start":
             return self.reply(*start_login())
         if self.path == "/login/cancel":

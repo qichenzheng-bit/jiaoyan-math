@@ -67,6 +67,18 @@ def login_cancel():
 def login_disconnect():
     return request("POST", "/login/disconnect", {})
 
+@router.get("/usage")
+def usage():
+    try:return request("GET","/usage")
+    except HTTPException:return {"available":False,"reason":"额度执行服务尚未就绪或需要升级至 V12"}
+
+@router.post("/usage/refresh",dependencies=[Depends(require_origin)])
+def usage_refresh():
+    try:return request("POST","/usage/refresh",{})
+    except HTTPException as exc:
+        if exc.status_code==404:return {"available":False,"reason":"需要升级执行服务至 V12"}
+        raise
+
 MODEL_KEY = "ai.qoder.model"
 VIDEO_MODEL_KEY = "ai.qoder.video_model"
 EFFORT_KEY = "ai.qoder.effort"

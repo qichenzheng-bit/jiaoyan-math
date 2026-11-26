@@ -126,3 +126,27 @@ def test_retained_auth_survives_restart_and_explicit_disconnect(monkeypatch,tmp_
     assert worker.refresh_models()[0]==409
     assert worker.chat_start({"id":"12345678-1234-1234-1234-123456789abc","model":"Auto","prompt":"test"})[0]==409
     assert set(json.loads(worker.AUTH_STATE_PATH.read_text()))=={"retained","disconnected","verified_at","catalog","catalog_at","capability_source"}
+
+
+def test_usage_parser_never_exposes_secrets_or_invents_zero():
+    assert worker.parse_usage({"session":{"total_credits":12},"userId":"secret"}) is None
+    data=worker.parse_usage({"userId":"secret","userQuota":{"total":100,"used":0,"remaining":100,"unit":"credits"},"addOnQuota":{"remaining":42},"orgResourcePackage":{"cap":200,"remaining":0,"available":False},"isQuotaExceeded":False})
+    assert "secret" not in str(data)
+    assert data["packs"][0]["used"]==0
+    assert data["packs"][1]["total"] is None
+    assert data["packs"][2]["total"]==200 and data["packs"][2]["available"] is False
+
+def test_usage_refresh_cache_and_disconnect(monkeypatch):
+    monkeypatch.setattr(worker,"usage_cache",None)
+    monkeypatch.setattr(worker,"user_disconnected",False)
+    monkeypatch.setattr(worker,"executable",lambda:"/usr/bin/qoderclicn")
+    calls=[]
+    def fetch(exe):
+        calls.append(exe)
+        return {"packs":[{"remaining":100}],"quota_exceeded":False},"sdk"
+    monkeypatch.setattr(worker,"sdk_usage",fetch)
+    assert worker.usage_status(True)[1]["available"]
+    assert worker.usage_status(True)[1]["source"]=="sdk"
+    assert len(calls)==1
+    monkeypatch.setattr(worker,"user_disconnected",True)
+    assert not worker.usage_status(True)[1]["available"]
