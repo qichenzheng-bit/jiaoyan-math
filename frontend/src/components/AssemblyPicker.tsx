@@ -8,9 +8,9 @@ import './ManualWordWork.css'
 type Kind='paper'|'handout'|'textbook'
 const size=20
 const names={paper:'试卷',handout:'讲义',textbook:'教材'}
-export default function AssemblyPicker({kind,subjects,existing,append,busy,onConfirm,onCancel}:{kind:Kind;subjects:string[];existing:string[];append:boolean;busy:boolean;onConfirm:(items:R[],title:string)=>void;onCancel?:()=>void}){
+export default function AssemblyPicker({kind,subjects,existing,occupied,append,busy,onConfirm,onCancel}:{kind:Kind;subjects:string[];existing:string[];occupied:number;append:boolean;busy:boolean;onConfirm:(items:R[],title:string)=>void;onCancel?:()=>void}){
  const [bank,setBank]=useState<'question'|'knowledge'>('question'),[q,setQ]=useState(''),[subject,setSubject]=useState(''),[type,setType]=useState(''),[difficulty,setDifficulty]=useState(''),[chapter,setChapter]=useState(''),[page,setPage]=useState(0),[items,setItems]=useState<R[]>([]),[total,setTotal]=useState(0),[cart,setCart]=useState<R[]>([]),[title,setTitle]=useState(''),[loading,setLoading]=useState(false),[error,setError]=useState('')
- const available=Math.max(0,200-existing.length)
+ const available=Math.max(0,200-occupied)
  const selected=new Set(cart.map(r=>r.id)),included=new Set(existing)
  useEffect(()=>{
   const ctl=new AbortController();setLoading(true);setError('');setItems([])
