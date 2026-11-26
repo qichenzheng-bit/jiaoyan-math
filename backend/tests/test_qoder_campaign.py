@@ -92,3 +92,35 @@ def test_observed_balance_ledger_has_signed_deltas_and_no_first_snapshot_gain():
     assert state["daily"]["decrease"]==20
     apply_snapshot(state,snap(180,1000,"other"))
     assert len(state["changes"])==2
+
+
+def test_empty_activity_list_is_not_account_ineligibility():
+    with pytest.raises(q.CampaignError,match="campaigns_not_returned") as exc:
+        q.select_campaign({"campaigns":[]})
+    assert exc.value.retry
+
+def test_daily_activity_with_small_time_offset():
+    now=datetime(2026,11,26,12,tzinfo=q.CN)
+    activity=row(now)
+    activity["startAt"]+=120000
+    activity["endAt"]-=120000
+    assert q.select_campaign([activity],now)==activity
+
+def test_known_daily_campaign_can_have_shorter_active_window():
+    now=datetime(2026,11,26,12,tzinfo=q.CN)
+    activity=row(now)
+    activity["campaignKey"]="cn_daily_check_in_legacy"
+    activity["endAt"]-=3600000
+    assert q.select_campaign([activity],now)==activity
+
+def test_campaign_request_has_routing_parameter_without_fake_device(monkeypatch):
+    import io
+    class Opener:
+        def open(self, req, timeout):
+            headers={k.lower():v for k,v in req.header_items()}
+            assert headers["cosy-clienttype"]=="10"
+            assert headers["user-agent"]=="JiaoyanMath-QoderCheckin/1"
+            assert not any(k.startswith("cosy-machine") for k in headers)
+            return io.BytesIO(b'{"data":{"campaigns":[]}}')
+    monkeypatch.setattr(q,"build_opener",lambda *args:Opener())
+    assert q.call("/sash/api/v1/me/campaigns",token="test")=={"campaigns":[]}
