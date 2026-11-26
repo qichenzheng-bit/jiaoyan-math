@@ -27,6 +27,10 @@ class Block(BaseModel):
     proof:str=Field(default="",max_length=50000)
     chapter:str=Field(default="",max_length=120)
     subject:str|None=Field(default=None,max_length=40)
+    knowledge_tags:list[str]=Field(default_factory=list,max_length=20)
+    reuse_resource_id:str|None=Field(default=None,max_length=36)
+    reuse_revision:int|None=Field(default=None,ge=1)
+    fork_from_id:str|None=Field(default=None,max_length=36)
     question_type:str=Field(default="",max_length=20)
     unit_type:str=Field(default="",max_length=24)
     resource_id:str|None=Field(default=None,max_length=36)
@@ -567,6 +571,64 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
     db.add(record);audit(db,"document.registration.batch",user.id);db.commit()
     return public(d)
 
+class ManualSearch(BaseModel):
+    content:str=Field(min_length=1,max_length=50000)
+    answer:str=Field(default="",max_length=20000)
+    solution:str=Field(default="",max_length=50000)
+
+@router.post("/manual-matches",dependencies=[Depends(require_origin)])
+def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
+    """Full active library, exact/stem matches first; text similarity is not mathematical equivalence."""
+    values=bank.clean(bank.Draft(kind="question",title="查重",content=body.content,answer=body.answer,solution=body.solution),db)
+    exact_rows=list(db.scalars(select(Resource).where(Resource.kind=="question",Resource.archived==False,
+        or_(Resource.fingerprint==values["fingerprint"],Resource.stem_key==values["stem_key"]))
+        .order_by((Resource.fingerprint==values["fingerprint"]).desc(),Resource.updated_at.desc(),Resource.id).limit(10)))
+    seen={r.id for r in exact_rows}
+    query=canonical_text(body.content)[:1500]
+    best=[];scanned=0
+    # Select only small text columns and stream; load full question bodies for top results only.
+    for ident,content in db.execute(select(Resource.id,Resource.content).where(Resource.kind=="question",Resource.archived==False)
+                .execution_options(yield_per=100)):
+        scanned+=1
+        if ident in seen or not query:continue
+        matcher=SequenceMatcher(None,query,canonical_text(content)[:1500])
+        if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
+        score=matcher.ratio()
+        if score>=.75:
+            best.append((score,ident));best=sorted(best,key=lambda x:(-x[0],x[1]))[:10]
+    def result(r,kind,score):
+        tags=list(db.scalars(select(KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(
+            ResourceKnowledgeLink.resource_id==r.id,KnowledgePointCatalog.status=="active")))
+        return {"resource":{**bank.view(r),"knowledge_tags":list(dict.fromkeys([*r.tags,*tags]))[:20]},"match_kind":kind,"similarity":round(score,3)}
+    items=[result(r,match_kind(r,values),1) for r in exact_rows]
+    for score,ident in best[:max(0,10-len(items))]:
+        r=db.get(Resource,ident)
+        if r and not r.archived:items.append(result(r,"similar",score))
+    return {"items":items,"scanned":scanned,"scope":"full_active_question_bank"}
+
+def manual_knowledge(db,subject,chapter,names):
+    from app.api.knowledge import norm
+    tags=[];ids=[];seen=set()
+    for raw in names:
+        name=raw.strip();key=norm(name)
+        if not name or key in seen:continue
+        if not subject or len(name)>60 or len(key)>200:raise HTTPException(422,"知识标签需有科目且每个最多60字")
+        seen.add(key)
+        point=db.scalar(select(KnowledgePointCatalog).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.name_key==key))
+        if not point:
+            candidates=list(db.scalars(select(KnowledgePointCatalog).join(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id).where(
+                KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.status=="active",KnowledgeAlias.normalized==key).limit(2)))
+            if len(candidates)>1:raise HTTPException(422,"知识标签存在多个同名别称，请使用知识点正式名称")
+            if candidates:point=candidates[0]
+        if point and point.status!="active":raise HTTPException(422,"知识标签已停用，请选择有效知识点")
+        if not point:
+            point=KnowledgePointCatalog(id=str(uuid4()),code="KP"+uuid4().hex[:8].upper(),name=name,name_key=key,subject=subject,
+                chapter=chapter,description="",status="active",replaced_by_id=None,revision=1,created_at=now(),updated_at=now())
+            db.add(point);db.flush()
+        if point.id not in ids:
+            tags.append(point.name);ids.append(point.id)
+    return tags,ids
+
 @router.post("/{id}/manual-save",dependencies=[Depends(require_origin)])
 def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     """Save the phone intake document and register entered items in one transaction."""
@@ -586,26 +648,47 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
         count+=1
         title=b["title"].strip() or ("题目" if b["kind"]=="question" else "知识单元")+f" {i+1}"
         source=bank.active_source(db,d.source_id) if d.source_id else None
-        data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=b.get("subject") or body.subject,
+        data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=body.subject if b.get("subject") is None else b["subject"],
             content=b["content"],answer=b["answer"],solution=b["solution"],analysis=b.get("analysis",""),proof=b.get("proof",""),
             chapter=b["chapter"],question_type=b["question_type"],unit_type=b["unit_type"],
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
-        # Manual entry is authoritative. Preserve distinct entries, even when the
-        # content matches an existing question; never silently merge/overwrite it.
-        if db.scalar(bank.exact(db,data).limit(1)):
-            data["dedup_override"]=True
-            data["dedup_reason"]="手动录入：保留独立条目及其来源"
         primary=data.pop("source_id")
-        r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**data,source_id=None,
-            revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
-        db.add(r);db.flush()
-        if primary:bank.change_primary(db,r,primary)
+        tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[])) if b["kind"]=="question" else ([],[])
+        before=None
+        if b.get("reuse_resource_id"):
+            r=bank.existing(db,b["reuse_resource_id"],True)
+            if r.archived or r.kind!="question" or r.revision!=b.get("reuse_revision"):
+                raise HTTPException(409,"选择的题库题目已变化，请重新查重")
+            # Prevent an edited draft from silently reusing a different question.
+            if any(data[k]!=getattr(r,k) for k in ("kind","content","answer","solution","subject","chapter","question_type")):
+                raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
+            before=bank.view(r)
+            changed=attach_review_source(db,r,primary)
+            changed=attach_review_knowledge(db,r,knowledge_ids) or changed
+            merged=list(dict.fromkeys([*r.tags,*tags]))
+            if len(merged)>20:raise HTTPException(422,"复用题目的知识标签总数超过20个")
+            if merged!=r.tags:r.tags=merged;changed=True
+            if changed:r.revision+=1;r.updated_at=now()
+            action="reuse"
+        else:
+            # Never mutate a candidate when the user edits a similar question.
+            if db.scalar(bank.exact(db,data).limit(1)):
+                data["dedup_override"]=True
+                data["dedup_reason"]="手动录入：保留独立条目及其来源"
+            data["tags"]=tags
+            r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**data,source_id=None,
+                revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+            db.add(r);db.flush()
+            if primary:bank.change_primary(db,r,primary)
+            attach_review_knowledge(db,r,knowledge_ids)
+            audit(db,"resource.create",user.id)
+            action="create"
+        db.flush()
         replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
         replacement["snapshot"]=bank.view(r)
         blocks[i]=replacement
-        history.append({"uid":b["uid"],"action":"create","reason":"手动直接入库","input":b,"before":None,
-                        "after":bank.view(r),"knowledge_ids":[],"source_id":primary})
-        audit(db,"resource.create",user.id)
+        history.append({"uid":b["uid"],"action":action,"reason":"手动录入复用原题" if action=="reuse" else "手动直接入库","input":b,"before":before,
+                        "after":bank.view(r),"knowledge_ids":knowledge_ids,"source_id":primary})
     before=d.revision
     d.blocks=blocks;d.subject=normalize_subject(body.subject);d.title=body.title.strip()
     d.revision+=1;d.updated_at=now();references(db,d)
