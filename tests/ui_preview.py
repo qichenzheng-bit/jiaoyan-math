@@ -30,7 +30,7 @@ def answer(route):
       "/documents/demo":doc,"/documents/source-export/source-preview":{**doc,"kind":"paper","source_export":True,"has_source_content":True,"batch_count":1},"/documents/demo/origin":{"job_id":"review-demo","input_text":r"原始资料 $x^2$","provenance":{"kind":"manual"},"supplements":[]},"/resources/source-preview":source,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
       "/intelligence/jobs":[],"/intelligence/import/capabilities":{"text":True,"docx":True,"pdf_text":True,"image_ocr":False,"pdf_ocr":False},"/chat/sessions/chat-demo":demo_chat,"/intelligence/chat-source/msg-user":{"message_id":"msg-user","session_id":"chat-demo","role":"user","text":demo_chat["messages"][0]["content"],"title":demo_chat["title"],"has_attachments":False},"/chat/sessions":[{k:v for k,v in demo_chat.items() if k!="messages"}],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"source":"cli","models":[{"id":"Auto","label":"Auto","efforts":["medium","high"]}]},"/qoder/preferences":{"model":"Auto","effort":"medium","video_model":"Auto","video_effort":"medium"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
-      "/studio/presets":{"bilibili":[1920,1200,5,5,4,4],"douyin":[1080,1920,13,21,4,16.5],"xiaohongshu":[1242,1660,6,12,5,12],"wechat_top":[900,383,6,30,28,28],"wechat_sub":[500,500,8,8,8,8]},
+      "/studio/presets":{"bilibili":[1200,900,7,7,7,7],"bilibili_wide":[1920,1080,8,8,8,8],"douyin":[1080,1440,9,12,8,8],"douyin_wide":[1440,1080,8,8,8,8],"douyin_full":[1080,1920,13,21,8,12],"xiaohongshu":[1080,1440,8,10,8,8],"wechat_channels":[1080,1260,8,10,8,8],"wechat_channels_wide":[1920,1080,8,8,8,8],"wechat_top":[900,383,6,8,28.72,28.72],"wechat_sub":[500,500,8,8,8,8]},
       "/qoder/usage/refresh":{"available":True,"source":"sdk","updated_at":1795656773,"packs":[{"kind":"userQuota","label":"套餐额度","total":100,"used":25,"remaining":75,"unit":"credits","available":True}]},"/studio/qoder-checkin":{"round":"2026-11-26","timezone":"Asia/Shanghai","accounts":[]},"/qiandao/state":{"enabled":False,"configured":False,"reason":"pat_missing","round":"2026-11-26","next_round":"2026-11-27T10:00:00+08:00","current":None,"history":[]},"/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
     if p=="/documents" and route.request.method=="POST":
@@ -352,6 +352,28 @@ with sync_playwright() as p:
         if name=="06-cover":
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
+            for platform,variant,w,h in [
+                ("B站","bilibili",1200,900),("B站","bilibili_wide",1920,1080),
+                ("抖音","douyin",1080,1440),("抖音","douyin_wide",1440,1080),("抖音","douyin_full",1080,1920),
+                ("小红书","xiaohongshu",1080,1440),("视频号","wechat_channels",1080,1260),
+                ("视频号","wechat_channels_wide",1920,1080),("公众号","wechat_top",900,383),("公众号","wechat_sub",500,500)
+            ]:
+                page.get_by_role("navigation",name="发布平台").get_by_role("button",name=platform,exact=True).click()
+                page.get_by_label("封面比例",exact=True).select_option(variant)
+                expect(page.get_by_text(f"{w} × {h} px",exact=True)).to_be_visible()
+                assert page.locator(".math-cover-art").evaluate("(el)=>[el.offsetWidth,el.offsetHeight]")==[w,h]
+                assert page.locator(".math-cover-art .katex").count()>0
+                assert page.locator(".math-cover-art .cover-safe").count()==0
+            # Confirm the downloaded PNG uses native pixels, not preview pixels.
+            import struct
+            with page.expect_download(timeout=60000) as downloaded:
+                page.get_by_role("button",name="下载 PNG",exact=True).click()
+            with open(downloaded.value.path(),"rb") as png:
+                header=png.read(24)
+            assert header[:8]==b"\\x89PNG\\r\\n\\x1a\\n"
+            assert struct.unpack(">II",header[16:24])==(500,500)
+            page.get_by_role("navigation",name="发布平台").get_by_role("button",name="小红书",exact=True).click()
+
         page.screenshot(path=str(OUT/(name+".png")),full_page=False)
     # Compose from the question bank, preserve original resources, and save layout only.
     page.set_viewport_size({"width":1600,"height":900})
