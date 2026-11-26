@@ -372,8 +372,19 @@ with sync_playwright() as p:
     page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
     assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="true"
     page.get_by_label("题目",exact=True).fill("修改为新题")
+    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+    page.get_by_role("button",name="＋ 章",exact=True).click()
+    page.get_by_label("章标题",exact=True).fill("第一章 函数与极限")
+    page.get_by_role("button",name="下一条 · 新增",exact=True).click()
+    page.get_by_role("button",name="＋ 节",exact=True).click()
+    page.get_by_label("节标题",exact=True).fill("第一节 函数")
     page.get_by_role("button",name="整套预览",exact=True).click()
     assert page.locator(".manual-intake-preview .print-question-number").count()==5
+    chapter=page.locator(".manual-intake-preview .print-heading-level-1 h2")
+    section=page.locator(".manual-intake-preview .print-heading-level-2 h3")
+    assert chapter.inner_text()=="第一章 函数与极限"
+    assert section.inner_text()=="第一节 函数"
+    assert chapter.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > section.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > page.locator(".manual-intake-preview .chat-rich").first.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)")
     assert page.locator(".manual-intake-preview .katex").count()>0
     assert page.get_by_role("button",name="打印 / 保存为 PDF",exact=True).count()==0
     assert page.get_by_text("已保存并直接入库",exact=True).count()==0

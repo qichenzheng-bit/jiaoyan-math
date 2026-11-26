@@ -20,6 +20,7 @@ class Block(BaseModel):
     uid:str=Field(min_length=1,max_length=36,pattern=r"^[A-Za-z0-9_-]+$")
     kind:Literal["heading","text","question","knowledge","reference","image","pagebreak"]
     title:str=Field(default="",max_length=200)
+    heading_level:Literal[1,2]|None=None
     content:str=Field(default="",max_length=50000)
     answer:str=Field(default="",max_length=20000)
     solution:str=Field(default="",max_length=50000)
