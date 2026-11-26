@@ -270,34 +270,50 @@ with sync_playwright() as p:
             page.locator(".bank-detail .katex").first.wait_for()
             assert page.locator(".bank-list .katex").count()>0
         if name=="25-word-ai":
-            page.get_by_role("button",name="批量审核入库").click()
-            page.get_by_role("button",name="检查重复与知识点").click()
-            page.locator(".doc-review-item").wait_for()
-            page.get_by_role("button",name="采用建议章节",exact=False).click()
-            page.get_by_label("导数",exact=False).last.check()
-            assert page.get_by_role("button",name="确认批量入库（1 条）").is_enabled()
-            page.screenshot(path=str(OUT/"26-registration-review.png"),full_page=False)
-            page.get_by_role("button",name="AI协作",exact=True).click()
-            page.locator(".doc-ai-after .katex").first.wait_for()
-            assert page.get_by_role("button",name="采纳选中修改").is_enabled()
-            assert page.locator(".doc-ai-change").count()==1
-            assert page.locator(".doc-sheet").get_by_text("由幂函数求导公式",exact=False).count()==0
+            page.locator(".manual-word-work").wait_for()
+            assert page.locator(".manual-word-matches").is_visible()
+            assert page.get_by_role("button",name="批量审核入库").count()==0
+            assert page.get_by_role("button",name="AI协作",exact=True).count()==0
+            assert page.get_by_role("button",name="原文",exact=True).count()==0
+            assert page.get_by_role("link",name="AI 录入",exact=True).count()==0
+            page.get_by_label("题目",exact=True).fill(r"测试查重 $x^2$ 与 $y^2$")
+            page.get_by_label("难度",exact=True).click()
+            tokens=page.get_by_label("题目",exact=True).locator(".inline-math-token")
+            expect(tokens).to_have_count(2)
+            tokens.nth(1).evaluate("(el)=>el.dataset.localRenderProbe='unchanged'")
+            tokens.nth(0).click()
+            page.get_by_label("编辑 LaTeX 公式",exact=True).fill("$x^3$")
+            page.get_by_label("难度",exact=True).click()
+            expect(tokens.nth(0)).to_have_attribute("data-math-source","$x^3$")
+            expect(tokens.nth(1)).to_have_attribute("data-local-render-probe","unchanged")
+            page.locator(".manual-word-matches").get_by_text("相似度 80.0%",exact=False).wait_for()
+            assert page.locator(".manual-word-matches .manual-match").count()==2
+            page.get_by_role("button",name="整套预览",exact=True).click()
+            page.locator(".manual-intake-preview .katex").first.wait_for()
+            page.screenshot(path=str(OUT/"25-word-intake-preview.png"),full_page=False)
+            page.get_by_role("button",name="编辑",exact=True).click()
+            page.evaluate("sessionStorage.removeItem('wg-doc-recovery:ai-demo')")
         if name=="04-word":
-            page.locator(".doc-sheet .katex").first.wait_for()
-            assert page.locator(".doc-outline-item").count()==4
-            page.get_by_role("button",name="待入库",exact=True).click()
-            assert page.locator(".doc-outline-item").count()==0
-            page.locator(".doc-outline").get_by_role("button",name="全部",exact=True).click()
-            page.locator(".doc-outline-item").first.click()
-            assert page.locator(".doc-block.selected").count()==1
-            page.get_by_role("button",name="原文",exact=True).click()
-            page.locator(".doc-origin-text .katex").first.wait_for()
-            page.screenshot(path=str(OUT/"23-word-origin.png"),full_page=False)
+            page.locator(".manual-word-work .katex").first.wait_for()
+            outline=page.locator(".manual-word-outline nav button")
+            assert outline.count()==4
+            outline.first.click()
+            assert page.locator(".manual-word-item.active").count()==1
+            page.once("dialog",lambda dialog:dialog.accept())
+            page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
+            page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
+            page.get_by_role("button",name="取消微调",exact=True).click()
+            page.get_by_role("button",name="下移",exact=True).click()
+            assert outline.nth(1).get_attribute("aria-current")=="true"
+            page.get_by_role("button",name="上移",exact=True).click()
+            assert outline.first.get_attribute("aria-current")=="true"
+            page.get_by_role("button",name="整套预览",exact=True).click()
+            assert page.locator(".manual-intake-preview .print-question-number").count()==4
             page.get_by_role("button",name="编辑",exact=True).click()
             page.set_viewport_size({"width":393,"height":873})
             page.locator(".mobile-doc-card").wait_for()
             page.locator(".manual-render .katex").first.wait_for()
-            assert page.locator(".doc-canvas").count()==0
+            assert page.locator(".manual-word-canvas").count()==0
             assert page.get_by_role("button",name="AI 修改",exact=True).count()==0
             assert page.get_by_role("button",name="原文对照",exact=True).count()==0
             assert page.get_by_role("link",name="导出 PDF",exact=True).count()==0
@@ -312,12 +328,12 @@ with sync_playwright() as p:
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.screenshot(path=str(OUT/"27-mobile-card.png"),full_page=False)
             page.get_by_role("button",name="切换 Word 版").click()
-            page.get_by_role("navigation",name="文档面板").get_by_role("button",name="页面").click()
-            assert page.locator(".doc-canvas").is_visible()
-            assert not page.locator(".doc-side").is_visible()
+            assert page.locator(".manual-word-canvas").is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.screenshot(path=str(OUT/"24-word-mobile.png"),full_page=False)
             page.set_viewport_size({"width":1600,"height":900})
+            # Restore the original fixture without carrying local recovery to another test.
+            page.evaluate("sessionStorage.removeItem('wg-doc-recovery:demo')")
         if name=="06-cover":
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
@@ -340,8 +356,8 @@ with sync_playwright() as p:
     assert page.get_by_role("button",name="保存整套资料",exact=True).is_enabled()
     assert page.get_by_label("条目标题",exact=True).count()==0
     page.get_by_role("button",name="切换 Word 版").click()
-    assert page.locator(".doc-sheet").get_by_text("的导数",exact=False).count()>0
-    assert page.locator(".doc-sheet .katex").count()>0
+    assert page.locator(".manual-word-canvas").is_visible()
+    assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
     page.get_by_role("button",name="切换卡片版").click()
     assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
     assert page.get_by_role("button",name="＋ 选择题",exact=True).count()==0
