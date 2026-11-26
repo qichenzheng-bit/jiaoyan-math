@@ -1,0 +1,17 @@
+
+/* Shared product appearance. Business navigation, actions, and printed documents stay unchanged. */
+.legacy-shell.clean-workspace .topbar.clean-topbar,.legacy-shell.clean-workspace.mode-home .mode-topbar{background:var(--header);color:var(--header-ink);min-height:52px;flex-basis:52px;border-bottom:1px solid var(--line)}
+.clean-workspace .topbar .breadcrumb,.clean-workspace .topbar .health{color:var(--header-ink)}
+.legacy-shell.clean-workspace .topbar .icon-button,.legacy-shell.clean-workspace .mode-topbar .mode-more-trigger,.legacy-shell.clean-workspace .mode-topbar .menu{color:var(--header-ink);background:transparent}
+.legacy-shell.clean-workspace .topbar .icon-button:hover{background:var(--header-hover)}
+.mode-topbar .mode-switch{background:var(--header-hover);padding:3px}
+.mode-topbar .mode-switch a{color:var(--header-ink);min-height:32px}
+.mode-topbar .mode-switch a[aria-current=page]{background:var(--surface);color:var(--ink)}
+.mode-more-panel{color:var(--ink);background:var(--surface)}
+.legacy-shell.clean-workspace .nav{border-right:1px solid var(--line)}
+.clean-workspace .nav .nav-scroll a.active,.clean-workspace .clean-group-toggle.current,.clean-workspace .clean-group-toggle[aria-current=page]{background:var(--selected);color:var(--accent)}
+.legacy-shell.clean-workspace .content-inner{max-width:1600px}
+.legacy-shell.clean-workspace .panel,.legacy-shell.clean-workspace .bank-detail,.legacy-shell.clean-workspace .studio-item,.legacy-shell.clean-workspace .home-stat,.legacy-shell.clean-workspace .quick-link{box-shadow:var(--shadow)}
+.legacy-shell.clean-workspace .chat-message.user .chat-message-body{background:var(--selected);color:var(--ink)}
+.legacy-shell.clean-workspace .chat-composer{background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-floating)}
+.legacy-shell.clean-workspace .chat-prompts>*{background:var(--surface)}

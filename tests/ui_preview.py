@@ -631,6 +631,9 @@ with sync_playwright() as p:
             # Compose from the question bank, preserve original resources, and save layout only.
             page.set_viewport_size({"width":1600,"height":900})
             visit(page,"/papers",".assembly-result")
+            # Composition-only compatibility selectors must not style an unrelated page.
+            assert page.locator(".composition-work .composition-context").evaluate("el=>getComputedStyle(el).display") == "flex"
+            assert page.evaluate("""() => { const probe=document.createElement('div'); probe.className='composition-context'; document.querySelector('.content-inner').append(probe); try { return getComputedStyle(probe).display === 'block' } finally { probe.remove() } }""")
             page.locator(".assembly-result").first.wait_for()
             expect(page.locator(".compact-resource-list")).to_be_visible()
             page.locator(".compact-resource-main").first.click()

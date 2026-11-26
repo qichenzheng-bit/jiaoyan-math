@@ -21,14 +21,23 @@ import './cover.css'
 import './legacy-ui.css'
 import './math-content.css'
 
-/* Shared design system, then current workflow and shell overrides */
+/* Shared design system, then ordered compatibility blocks. Keep cascade order until each feature is migrated. */
 import './design-system.css'
 import './workflow-ui.css'
 import './intake-workflow.css'
 import './doc-work-v2.css'
-import './clean-workspace.css'
+import './styles/compat/clean-shell-and-workflows.css'
+import './styles/compat/clean-manual-intake.css'
+import './styles/compat/clean-inference.css'
 import './chat-layout-v3.css'
-import './slate-workspace.css'
+import './styles/compat/shell-appearance.css'
+import './styles/compat/manual-document.css'
+import './styles/compat/inline-attachments.css'
+import './styles/compat/header-and-mobile-intake.css'
+import './styles/compat/resource-and-production-hubs.css'
+import './styles/compat/composition.css'
+import './styles/compat/navigation-and-desktop.css'
+import './styles/compat/production-desktop.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(
