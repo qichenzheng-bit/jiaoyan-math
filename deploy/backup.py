@@ -46,6 +46,9 @@ EXPORTS = [
     ("teaching/intake/imports", "intake_imports", "true", "id"),
     ("teaching/intake/jobs", "intake_jobs", "true", "id"),
     ("teaching/intake/supplements", "intake_supplements", "true", "id"),
+    ("ai/work/sessions", "work_sessions", "true", "id"),
+    ("ai/work/materials", "work_materials", "true", "id"),
+    ("ai/work/batches", "work_batches", "true", "id"),
     ("ai/tasks/document_edits", "document_ai_edits", "true", "id"),
     ("ai/chats/sessions", "chat_sessions", "true", "id"),
     ("ai/chats/messages", "chat_messages", "true", "id"),
@@ -157,7 +160,9 @@ def logical_allowed(name):
             re.fullmatch(r"files/(originals|assets)/[0-9a-f-]{36}", name) is not None)
 
 
-def check_manifest(repo, manifest):
+WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
+
+def check_manifest(repo, manifest, allow_legacy=False):
     if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
         raise ValueError("invalid manifest")
     for name, entry in manifest["entries"].items():
@@ -167,7 +172,8 @@ def check_manifest(repo, manifest):
             expected = name + ".age." + str(index).zfill(4)
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
-    if not (set(FIXED) | set(SCHEMAS)).issubset(manifest["entries"]):
+    missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
+    if missing and not (allow_legacy and missing==WORK_EXPORTS):
         raise ValueError("incomplete database backup")
 
 
@@ -280,7 +286,7 @@ def backup():
         run(["git", "clone", "--depth=1", "--branch=main", "--single-branch", REMOTE, str(repo)], env=env)
         prior = read_json(safe_path(repo, MANIFEST))
         if prior is not None:
-            check_manifest(repo, prior)
+            check_manifest(repo, prior, allow_legacy=True)
         previous = prior["entries"] if prior else {}
         entries, index = {}, {}
         def publish(name, path, sha=None):
@@ -345,7 +351,7 @@ def restore(repo, identity, target, destination):
     if destination.exists() or not destination.is_absolute():
         raise ValueError("destination must be an unused absolute path")
     manifest = read_json(safe_path(repo, MANIFEST))
-    check_manifest(repo, manifest)
+    check_manifest(repo, manifest, allow_legacy=True)
     env = {k:v for k,v in os.environ.items() if not k.startswith("PG")}
     env.update(PGHOST="/var/run/postgresql", PGDATABASE=target, PGCONNECT_TIMEOUT="10")
     info = "host=/var/run/postgresql dbname=" + target + " connect_timeout=10"
@@ -375,7 +381,12 @@ def restore(repo, identity, target, destination):
         run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", str(work / SCHEMAS[0])], env=env)
         with psycopg.connect(info) as conn:
             with conn.cursor() as cur:
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+                restored_tables={r[0] for r in cur.fetchall()}
+                expected_tables={table for name,table in FIXED.items() if name in manifest['entries']} | EXCLUDED
+                if restored_tables != expected_tables:raise ValueError('restored schema and backup inventory mismatch')
                 for name, table in FIXED.items():
+                    if name not in manifest['entries']:continue
                     with (work / name).open("rb") as f, cur.copy("COPY public." + table + " FROM STDIN WITH (FORMAT CSV, HEADER TRUE, ENCODING 'UTF8')") as cp:
                         for chunk in iter(lambda: f.read(1024*1024), b""):
                             cp.write(chunk)

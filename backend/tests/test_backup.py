@@ -54,3 +54,16 @@ def test_manifest_checks_integrity_and_paths(tmp_path):
 def test_restore_rejects_production_database(tmp_path):
     with pytest.raises(ValueError, match="restore database name"):
         backup.restore(tmp_path, tmp_path/"identity", "jiaoyan", tmp_path/"files")
+
+
+def test_legacy_manifest_work_group_is_all_or_nothing(tmp_path):
+    entries={}
+    for name in (set(backup.FIXED)|set(backup.SCHEMAS))-backup.WORK_EXPORTS:
+        part=name+".age.0000"
+        path=tmp_path/part;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"data")
+        entries[name]={"parts":[{"path":part,"sha256":hashlib.sha256(b"data").hexdigest()}]}
+    manifest={"format":2,"entries":entries}
+    with pytest.raises(ValueError,match="incomplete"):backup.check_manifest(tmp_path,manifest)
+    backup.check_manifest(tmp_path,manifest,allow_legacy=True)
+    entries.pop("database/schema-pre.sql")
+    with pytest.raises(ValueError,match="incomplete"):backup.check_manifest(tmp_path,manifest,allow_legacy=True)

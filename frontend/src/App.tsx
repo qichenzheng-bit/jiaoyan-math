@@ -11,6 +11,7 @@ import TeachingLibrary from './pages/TeachingLibrary'
 import Qoder from './pages/Qoder'
 import Chat from './pages/Chat'
 import Work from './pages/Work'
+import OriginalLibrary from './pages/OriginalLibrary'
 import Graph from './pages/Graph'
 import DocWork from './pages/DocWork'
 import Intake from './pages/Intake'
@@ -85,7 +86,7 @@ export default function App(){
     <Route path="/resource-edit/:id" element={<ResourceEdit/>}/>
     <Route path="/project/intake" element={<Navigate to="/intake" replace/>}/>
     <Route path="/project/:id" element={<ProjectHub/>}/>
-    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/teaching-library'?<TeachingLibrary/>:m.path==='/products'?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/intelligence'?<Navigate to={'/work'+location.search} state={location.state} replace/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
+    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/original-library'?<OriginalLibrary/>:m.path==='/teaching-library'?<TeachingLibrary/>:m.path==='/products'?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/intelligence'?<Navigate to={'/work'+location.search} state={location.state} replace/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="/print/:id" element={<DocumentPrint/>}/>
     <Route path="/source-print/:id" element={<DocumentPrint source/>}/>
     <Route path="/intake-single" element={<Resources key="intake-single" intake/>}/>
