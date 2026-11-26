@@ -23,6 +23,9 @@ ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":
 ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["solution"],"instruction":"逐步推导","model":"Auto","state":"review","detail":"待确认","change_count":1,"changes":[{"uid":"ai-q1","field":"solution","before":"","after":r"由幂函数求导公式，$(x^2)'=2x$。"}],"accepted":[]}
 registration_preview={"revision":1,"items":[{"uid":"ai-q1","candidates":[],"knowledge":[{"id":"p4","name":"导数","code":"KP4","chapter":"微积分","matched":"导数"}],"chapter_suggestion":"微积分","peer_ids":[],"missing":["solution"]}],"similar_scan_limit":300}
 manual_saved={}
+video_test_enabled=False
+video_jobs=[]
+video_demo={"id":"video-preview","resource_id":items[0]["id"],"resource_revision":1,"source_snapshot":{"title":items[0]["title"],"problem":items[0]["content"],"answer":items[0]["answer"],"reference_solution":items[0]["solution"],"fps":60},"engine_id":"a"*32,"work_id":None,"created_at":1}
 def answer(route):
     from urllib.parse import urlsplit,parse_qs
     u=urlsplit(route.request.url);p=u.path.removeprefix("/api");q=parse_qs(u.query)
@@ -35,6 +38,16 @@ def answer(route):
       "/studio/presets":{"bilibili":[1200,900,7,7,7,7],"bilibili_wide":[1920,1080,8,8,8,8],"douyin":[1080,1440,9,12,8,8],"douyin_wide":[1440,1080,8,8,8,8],"douyin_full":[1080,1920,13,21,8,12],"xiaohongshu":[1080,1440,8,10,8,8],"wechat_channels":[1080,1260,8,10,8,8],"wechat_channels_wide":[1920,1080,8,8,8,8],"wechat_top":[900,383,6,8,28.72,28.72],"wechat_sub":[500,500,8,8,8,8]},
       "/qoder/usage/refresh":{"available":True,"source":"sdk","updated_at":1795656773,"packs":[{"kind":"userQuota","label":"套餐额度","total":100,"used":25,"remaining":75,"unit":"credits","available":True}]},"/studio/qoder-checkin":{"round":"2026-11-26","timezone":"Asia/Shanghai","accounts":[]},"/qiandao/state":{"enabled":False,"configured":False,"reason":"pat_missing","round":"2026-11-26","next_round":"2026-11-27T10:00:00+08:00","current":None,"history":[]},"/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if video_test_enabled:
+        if p=="/video/status":result={"available":True,"detail":"隔离测试引擎","source_revision":"preview"}
+        if p=="/video/projects":result=video_demo if route.request.method=="POST" else [video_demo]
+        if p=="/video/projects/video-preview":result={**video_demo,"lesson":{"status":"ready","has_video":False,"video_review_status":"pending","revision":1},"jobs":video_jobs.copy()}
+        if p=="/video/projects/video-preview/generate" and route.request.method=="POST":
+            video_jobs[:]=[{"id":"b"*32,"kind":"generate","status":"running","phase":"正在生成代码","overall":37}]
+            result={"id":"b"*32}
+    if p.startswith("/resources/") and p.count("/")==2:
+        match=next((r for r in items if p=="/resources/"+r["id"]),None)
+        if match is not None:result=match
     if p=="/documents" and route.request.method=="POST":
         body=json.loads(route.request.post_data)
         result={**body,"id":"assembly-demo","archived":False,"revision":1,"blocks":[{**b,"snapshot":next(r for r in items if r["id"]==b["resource_id"])} if b["kind"]=="reference" else b for b in body["blocks"]]}
@@ -365,13 +378,33 @@ with sync_playwright() as p:
                     assert page.locator(".clean-context-menu").count()==0
                 if name=="13-video":
                     expect(page.locator(".video-stage-track > div")).to_have_count(5)
-                    assert page.locator(".video-detail .reasoning-effort").count()==0
-                    page.get_by_role("button",name="更多选项",exact=True).click()
-                    effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
-                    effort.wait_for()
-                    effort.select_option("high")
-                    assert effort.input_value()=="high"
-                    page.get_by_role("button",name="更多选项",exact=True).click()
+                    expect(page.get_by_role("button",name="＋ 新建视频",exact=True)).to_be_visible()
+                    expect(page.get_by_label("推理强度",exact=True)).to_have_count(0)
+                    video_test_enabled=True
+                    video_jobs.clear()
+                    try:
+                        visit(page,"/videos",".video-new-card")
+                        page.get_by_role("button",name="＋ 新建视频",exact=True).click()
+                        page.locator(".video-question-row").first.click()
+                        expect(page.locator(".video-pick-preview .katex").first).to_be_visible()
+                        page.get_by_role("button",name="确认题目，下一步",exact=True).click()
+                        effort=page.locator(".video-settings").get_by_label("推理强度",exact=True)
+                        expect(effort).to_be_enabled()
+                        effort.select_option("high")
+                        assert effort.input_value()=="high"
+                        start=page.get_by_role("button",name="开始制作视频",exact=True)
+                        expect(start).to_be_enabled()
+                        with page.expect_request(lambda req:req.url.endswith("/video-preview/generate") and req.method=="POST") as sent:
+                            start.click()
+                        assert sent.value.post_data_json=={"effort":"high","model":"Auto"}
+                        expect(page.locator(".real-progress")).to_have_text("37%")
+                        expect(page.get_by_role("button",name="查看源码",exact=True)).to_have_count(0)
+                        video_jobs[0].pop("overall")
+                        expect(page.get_by_text("引擎未提供准确百分比",exact=True)).to_be_visible(timeout=10000)
+                        expect(page.locator(".real-progress")).to_have_count(0)
+                    finally:
+                        video_test_enabled=False
+                        video_jobs.clear()
                 if name=="02-bank":
                     page.get_by_role("button",name="高级筛选").click()
                     expect(page.get_by_label("章节",exact=True)).to_be_visible()
