@@ -8,7 +8,7 @@ type Pack={kind:string;label:string;remaining:number;total:number|null;used:numb
 type Change={at:number;from_at:number;delta:number;balance:number}
 type State={enabled:boolean;configured:boolean;reason:string|null;round:string;next_round:string;current:Claim|null;history:Claim[];quota?:{balance:number;at:number;packs:Pack[]}|null;quota_error?:string;changes?:Change[];daily?:{day:string;increase:number;decrease:number;intervals:number}|null}
 type Legacy={accounts:{id:string;name:string;recent:{id:string;data:{day:string;state:string;earned?:number|null;balance?:number|null}}[]}[]}
-const labels:Record<string,string>={claimed:'领取成功',already_claimed:'本轮已领取',pending:'等待核验',not_claimable:'当前不可领取',no_verified_campaign:'未找到本轮活动',ambiguous_campaign:'活动不明确',authorization_denied:'授权被拒绝',endpoint_unavailable:'接口不可用',upstream_rejected:'平台拒绝请求',pat_missing:'未配置 PAT',pat_invalid:'PAT 格式不正确',pat_permissions:'PAT 权限异常',unexpected_response:'平台数据无法识别',claim_unconfirmed:'结果尚未核实',rate_limited:'平台限流',upstream_unavailable:'平台暂不可用'}
+const labels:Record<string,string>={claimed:'领取成功',already_claimed:'本轮已领取',pending:'等待核验',not_claimable:'当前不可领取',campaigns_not_returned:'平台未返回活动列表，请稍后重试或核对官方客户端',no_verified_campaign:'已返回活动，但未识别到本轮签到',ambiguous_campaign:'活动不明确',authorization_denied:'授权被拒绝',endpoint_unavailable:'接口不可用',upstream_rejected:'平台拒绝请求',pat_missing:'未配置 PAT',pat_invalid:'PAT 格式不正确',pat_permissions:'PAT 权限异常',unexpected_response:'平台数据无法识别',claim_unconfirmed:'结果尚未核实',rate_limited:'平台限流',upstream_unavailable:'平台暂不可用'}
 const label=(s:string)=>labels[s]??'未知状态'
 const fmt=(v:number|null|undefined)=>v==null?'—':v.toLocaleString('zh-CN',{maximumFractionDigits:6})
 const date=(v:number)=>new Date(v*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})
