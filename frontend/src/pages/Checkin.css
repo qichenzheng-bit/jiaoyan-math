@@ -1,33 +1,41 @@
-.checkin-clean{max-width:760px;margin:0 auto;display:grid;gap:14px;padding-bottom:24px}
-.checkin-clean .panel{margin:0;padding:18px}
+.checkin-clean{max-width:980px;margin:0 auto;display:grid;gap:8px;padding-bottom:16px;font-size:14px}
+.checkin-clean .panel{margin:0;padding:10px 12px}
 .checkin-clean h1,.checkin-clean h2{margin:0}
-.checkin-clean h1{font-size:24px}
-.checkin-clean h2{font-size:16px}
-.checkin-header,.checkin-row,.checkin-event{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.checkin-header{padding:8px 0}
-.checkin-amount{font-size:clamp(30px,7vw,42px);font-weight:650;letter-spacing:-1.2px;line-height:1.2;margin:12px 0 6px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.checkin-amount small{font-size:14px;letter-spacing:0;font-weight:400}
-.checkin-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;padding:14px 0;border-top:1px solid var(--border,#e6e6e6)}
-.checkin-stats>div{display:grid;gap:6px}
-.checkin-stats strong{font-size:22px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.checkin-clean h1{font-size:18px}
+.checkin-clean h2{font-size:14px}
+.checkin-header,.checkin-row,.checkin-event{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.checkin-header{padding:2px 0}
+.checkin-header>div{display:flex;align-items:baseline;gap:8px}
+.checkin-clean button{min-height:28px;padding:4px 9px;font-size:12px}
+.checkin-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.checkin-stats>div{display:grid;gap:3px;min-width:0}
+.checkin-stats span{font-size:12px}
+.checkin-stats strong{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .checkin-in{color:#18804b}
 .checkin-out{color:#bc3c39}
-.checkin-block{display:block;margin-top:4px}
-.checkin-clean details{margin-top:8px}
-.checkin-clean summary{cursor:pointer;font-size:14px}
-.checkin-claim>.checkin-row+.checkin-row{margin:16px 0;padding-top:16px;border-top:1px solid var(--border,#e6e6e6)}
-.checkin-switch{display:flex;align-items:center;gap:8px;white-space:nowrap}
-.checkin-switch input{width:18px;height:18px;accent-color:#333}
-.checkin-filters{display:flex;gap:4px}
-.checkin-filters button{padding:5px 9px;font-size:12px}
+.checkin-block{display:block;margin-top:2px}
+.checkin-clean details{margin-top:4px}
+.checkin-clean summary{cursor:pointer;font-size:12px}
+.checkin-meta{margin-top:6px}
+.checkin-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;padding-top:8px;border-top:1px solid var(--border,#e6e6e6);font-size:12px}
+.checkin-controls>span{flex:1}
+.checkin-switch{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.checkin-switch input{width:15px;height:15px;accent-color:#333}
+.checkin-filters{display:flex;gap:3px}
 .checkin-filters button[aria-pressed=true]{background:var(--text,#232220);color:var(--surface,#fff)}
-.checkin-event{padding:12px 0;border-top:1px solid var(--border,#e6e6e6);font-variant-numeric:tabular-nums}
-.checkin-event:first-of-type{margin-top:12px}
+.checkin-event{padding:6px 0;border-top:1px solid var(--border,#e6e6e6);font-variant-numeric:tabular-nums}
+.checkin-event:first-of-type{margin-top:6px}
 .checkin-event>strong{white-space:nowrap}
-.checkin-ledger>small{display:block;margin:10px 0 14px}
-.checkin-empty{text-align:center;padding:18px 0;margin:0}
-.checkin-settings form{display:grid;gap:12px;margin:12px 0}
-.checkin-settings label{display:grid;gap:6px}
+.checkin-ledger>small{display:block;margin:5px 0 6px;font-size:11px}
+.checkin-table-wrap{overflow:auto;max-height:55vh}
+.checkin-table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.checkin-table th,.checkin-table td{text-align:right;padding:6px 4px;border-bottom:1px solid var(--border,#e6e6e6);white-space:nowrap}
+.checkin-table th:first-child,.checkin-table td:first-child{text-align:left}
+.checkin-table th{font-weight:500}
+.checkin-empty{text-align:center;padding:10px 0;margin:0;font-size:12px}
+.checkin-settings form{display:grid;gap:8px;margin:6px 0}
+.checkin-settings label{display:grid;gap:4px}
 .checkin-settings input{width:100%;min-width:0;box-sizing:border-box}
-.checkin-sdk>summary{padding:10px 0}
-@media(max-width:480px){.checkin-clean{gap:10px}.checkin-clean .panel{padding:14px}.checkin-stats strong{font-size:19px}.checkin-row{gap:8px}.checkin-filters button{padding:5px 7px}.checkin-clean .button-row{flex-wrap:wrap}}
+.checkin-sdk>summary{padding:4px 0}
+.checkin-footnote{font-size:11px}
+@media(max-width:480px){.checkin-clean .panel{padding:8px}.checkin-stats strong{font-size:14px}.checkin-row{gap:5px}.checkin-clean .button-row{flex-wrap:wrap}.checkin-controls{gap:6px}.checkin-table th,.checkin-table td{padding:5px 3px;font-size:11px}}
