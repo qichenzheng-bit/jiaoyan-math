@@ -129,7 +129,6 @@ def save_version(db,r):
     db.add(Version(item_id=r.id,revision=r.revision,snapshot=public(r),created_at=now()))
     # Keep file references for all historical revisions, even when the current file changes.
     if r.data.get("file_id"):storage.link_file(db,r.data["file_id"],"studio_item",r.id)
-    if r.data.get("cover_file_id"):storage.link_file(db,r.data["cover_file_id"],"studio_item",r.id)
 def qoder_round(at=None):
     current=(at or datetime.now(timezone.utc)).astimezone(timezone(timedelta(hours=8)))
     return (current-timedelta(hours=10)).date().isoformat()

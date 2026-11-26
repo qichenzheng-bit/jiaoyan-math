@@ -77,7 +77,7 @@ def snapshot(r):
         result[key] = result[key] or ""
         if len(result[key]) > size:
             raise HTTPException(422, f"题源字段 {key} 超过引擎限制")
-    if any("![" in result[k] for k in ("problem", "reference_solution", "answer", "analysis")):
+    if any("![" in result[k] or "[[img:" in result[k] for k in ("problem", "reference_solution", "answer", "analysis")):
         raise HTTPException(422, "含附图题源需先完成跨引擎附件迁移，暂不可直接生成")
     return result
 
@@ -173,6 +173,7 @@ def job_action(ident: str, job_id: str, action: Literal["cancel","retry"], db: S
 def approve(ident: str, body: CoverSelection|None=None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     admin_lock(db, user)
     row = row_for(db, ident)
+    if row.work_id and body is None:return view(row,db)
     rid = remote(row)
     lesson = engine.call("GET", f"/lessons/{rid}")
     if body:
