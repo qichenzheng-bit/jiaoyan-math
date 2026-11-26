@@ -2,7 +2,7 @@
 export type Method={name?:string;body:string;recommended?:boolean}
 export type QuestionData={version:1;stem:string;options?:{label:string;content:string}[];correct_options?:string[];subquestions?:{number:number;content:string;answer:string;methods:Method[]}[];blanks?:{number:number;answer:string}[];answer?:string;methods?:Method[];warnings?:string[];legacy_digest?:string|null}
 type Legacy={content:string;answer:string;solution:string}
-const cn=['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十','二十一','二十二','二十三','二十四','二十五','二十六','二十七','二十八','二十九','三十']
+const cn=["一","二","三","四","五","六","七","八","九","十","十一","十二","十三","十四","十五","十六","十七","十八","十九","二十"]
 export function methodText(methods:Method[]=[]){
  const rows=methods.filter(m=>m.body.trim()).map(m=>({...m,body:(m.name?m.name+'\n'+m.body:m.body).trim()}))
  if(!rows.length)return ''
