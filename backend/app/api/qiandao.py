@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy.orm import Session
 from app.core.db import get_db, session_factory
 from app.core.security import current_user, require_origin, audit
@@ -45,7 +45,10 @@ def view(db):
     if not isinstance(current,dict) or current.get("round")!=start.date().isoformat():current=None
     return {"enabled":state.get("enabled") is True,"configured":configured,"reason":reason,
             "round":start.date().isoformat(),"next_round":end.isoformat(),
-            "current":current,"history":state.get("history",[])[:30]}
+            "current":current,"history":state.get("history",[])[:30],
+            "quota":state.get("quota"),"quota_error":state.get("quota_error"),
+            "changes":state.get("changes",[])[:200],
+            "daily":state.get("daily") if (state.get("daily") or {}).get("day")==provider.datetime.now(provider.CN).date().isoformat() else None}
 
 def attempt(db, *, manual=False, epoch=None):
     # Existing production service uses a single process. Serialize manual and scheduled calls.
@@ -95,7 +98,7 @@ def auto(body:AutoPreference,db:Session=Depends(get_db),user:User=Depends(curren
     with LOCK:
         if body.enabled:
             try:provider.read_pat()
-            except provider.CampaignError:raise HTTPException(422,"请先在服务器配置独立 Qoder CN PAT")
+            except provider.CampaignError:raise HTTPException(422,"请先在签到助手配置 Qoder CN PAT")
         state=read_state(db)
         state["enabled"]=body.enabled
         audit(db,"qiandao.auto.update",user.id)
@@ -110,10 +113,92 @@ def run(db:Session=Depends(get_db),user:User=Depends(current_user)):
     db.commit()
     return attempt(db,manual=True)
 
+def apply_snapshot(state,snapshot):
+    """Ledger records observed net changes only, not inferred transactions."""
+    old=state.get("quota")
+    day=provider.datetime.fromtimestamp(snapshot["at"],provider.CN).date().isoformat()
+    daily=state.get("daily")
+    if not daily or daily.get("day")!=day:
+        daily={"day":day,"increase":0,"decrease":0,"intervals":0}
+    if old and snapshot["at"]>old["at"]:
+        before={p["kind"] for p in old["packs"]}
+        after={p["kind"] for p in snapshot["packs"]}
+        delta=round(snapshot["balance"]-old["balance"],6)
+        # A changed pack set may be incomplete, so establish a new baseline.
+        if before==after:
+            daily["intervals"]+=1
+            if delta:
+                entry={"at":snapshot["at"],"from_at":old["at"],"delta":delta,"balance":snapshot["balance"]}
+                state["changes"]=[entry]+state.get("changes",[])[:199]
+                key="increase" if delta>0 else "decrease"
+                daily[key]=round(daily[key]+abs(delta),6)
+    state["daily"]=daily
+    state["quota"]=snapshot
+    state.pop("quota_error",None)
+
+def refresh_quota(db,*,force=False):
+    with LOCK:
+        state=read_state(db)
+        now=time.time()
+        if now-state.get("quota_attempt_at",0)<(15 if force else 60):
+            return view(db)
+        state["quota_attempt_at"]=now
+        try:
+            provider.read_pat()
+            apply_snapshot(state,provider.quota_snapshot())
+        except provider.CampaignError as exc:
+            state["quota_error"]=exc.code
+        write_state(db,state)
+        return view(db)
+
+class PatInput(BaseModel):
+    pat:SecretStr=Field(min_length=11,max_length=4096)
+
+@router.post("/pat",dependencies=[Depends(require_origin)])
+def configure_pat(body:PatInput,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    with LOCK:
+        value=body.pat.get_secret_value().strip()
+        try:
+            try:old=provider.read_pat()
+            except provider.CampaignError:old=None
+            provider.save_pat(value)
+        except provider.CampaignError as exc:
+            raise HTTPException(422,{"pat_invalid":"PAT 格式不正确","authorization_denied":"平台拒绝 PAT 授权"}.get(exc.code,"PAT 验证失败，请检查授权或稍后再试")) from None
+        except OSError:
+            raise HTTPException(503,"服务器无法保存 PAT") from None
+        state=read_state(db)
+        if old!=value:
+            archive=state.get("archives",[])
+            previous={k:state[k] for k in ("history","last","changes","quota","daily") if k in state}
+            if previous:archive=[previous]+archive
+            state={"enabled":False,"history":[],"archives":archive[:5]}
+        audit(db,"qiandao.pat.update",user.id)
+        write_state(db,state)
+        return view(db)
+
+@router.delete("/pat",dependencies=[Depends(require_origin)])
+def remove_pat(db:Session=Depends(get_db),user:User=Depends(current_user)):
+    with LOCK:
+        state=read_state(db)
+        state["enabled"]=False
+        state["quota_error"]="pat_missing"
+        audit(db,"qiandao.pat.remove",user.id)
+        write_state(db,state)
+        try:provider.PAT_FILE.unlink(missing_ok=True)
+        except OSError:raise HTTPException(503,"无法删除 PAT，自动领取已关闭") from None
+        return view(db)
+
+@router.post("/quota/refresh",dependencies=[Depends(require_origin)])
+def quota_refresh(db:Session=Depends(get_db)):
+    return refresh_quota(db,force=True)
+
 def tick():
     with session_factory()() as db:
-        # No database writes and no network request while disabled.
-        if read_state(db).get("enabled") is True:attempt(db)
+        state=read_state(db)
+        if state.get("enabled") is True:attempt(db)
+        try:provider.read_pat()
+        except provider.CampaignError:return
+        refresh_quota(db)
 
 async def scheduler():
     await asyncio.sleep(30)
