@@ -15,7 +15,7 @@ function read(node:Node):string{
  return value
 }
 function drawMath(el:HTMLElement,raw:string){
- el.dataset.mathSource=raw;el.replaceChildren()
+ el.dataset.mathSource=raw;el.classList.remove('inline-math-invalid');el.replaceChildren()
  const display=raw.startsWith('$$')||raw.startsWith('\\[')
  const latex=raw.slice(raw.startsWith('$$')||raw.startsWith('\\')?2:1,raw.startsWith('$$')||raw.startsWith('\\')?-2:-1)
  try{if(latex.length>12000)throw Error('too long');katex.render(latex.replace(/\\lim(?=\s*_)/g,'\\lim\\limits'),el,{displayMode:display,throwOnError:true,trust:false,maxExpand:1000,maxSize:20})}catch{el.textContent=raw;el.classList.add('inline-math-invalid')}
@@ -44,7 +44,7 @@ export default function InlineMathEditor({label,value,onChange,locked,placeholde
   token.replaceChildren(input)
   input.addEventListener('input',e=>{e.stopPropagation();token.dataset.mathSource=input.value;emit()})
   input.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter'){e.preventDefault();input.blur()}if(e.key==='Escape'){input.value=raw;token.dataset.mathSource=raw;emit();input.blur()}})
-  input.addEventListener('blur',()=>{const edited=input.value;token.dataset.mathSource=edited;emit();if(formula.test(edited)){formula.lastIndex=0;drawMath(token,edited)}else{formula.lastIndex=0;token.replaceWith(document.createTextNode(edited))}},{once:true})
+  input.addEventListener('blur',()=>{const edited=input.value;token.dataset.mathSource=edited;emit();const parts=[...edited.matchAll(formula)];if(parts.length===1&&parts[0][0]===edited){drawMath(token,edited)}else{token.replaceWith(document.createTextNode(edited))}},{once:true})
   input.focus();input.setSelectionRange(0,input.value.length)
  }
  function insert(text:string){
