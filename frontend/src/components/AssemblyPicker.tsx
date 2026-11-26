@@ -1,48 +1,69 @@
-import {useEffect,useState} from 'react'
+import {useEffect,useState,useRef} from 'react'
 import {api} from '../auth'
 import ChatText from '../pages/ChatText'
 import {MathText} from './MathText'
 import type {R} from '../pages/DocWork'
 import './ManualWordWork.css'
-
+import './AssemblyPicker.css'
 type Kind='paper'|'handout'|'textbook'
-const size=20
-const names={paper:'试卷',handout:'讲义',textbook:'教材'}
+type Entry={id:string;title?:string;name?:string;subject?:string;source_type?:string}
+type Item=R&{knowledge_points?:{id:string;name:string}[]}
+const size=20,names={paper:'试卷',handout:'讲义',textbook:'教材'}
+function Multi({label,path,chosen,setChosen}:{label:string;path:string;chosen:Entry[];setChosen:(v:Entry[])=>void}){
+ const [q,setQ]=useState(''),[items,setItems]=useState<Entry[]>([]),[page,setPage]=useState(0),[total,setTotal]=useState(0),[error,setError]=useState('')
+ useEffect(()=>{const c=new AbortController();setError('');api<{items:Entry[];total:number}>(path+'&q='+encodeURIComponent(q)+'&limit=30&offset='+page*30,{signal:c.signal}).then(r=>{if(!c.signal.aborted){setItems(r.items??[]);setTotal(r.total??0)}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>c.abort()},[path,q,page])
+ return <details className="assembly-multi"><summary>{label}{chosen.length?'（'+chosen.length+'）':''}</summary><div className="assembly-multi-panel"><input placeholder={'搜索'+label} value={q} onChange={e=>{setQ(e.target.value);setPage(0)}}/>{error&&<small role="alert">{error}</small>}{chosen.length>0&&<button onClick={()=>setChosen([])}>清除已选</button>}{items.map(r=><label key={r.id}><input type="checkbox" checked={chosen.some(x=>x.id===r.id)} onChange={()=>setChosen(chosen.some(x=>x.id===r.id)?chosen.filter(x=>x.id!==r.id):[...chosen,r])}/><MathText compact content={r.title??r.name}/></label>)}<div className="button-row"><button disabled={!page} onClick={()=>setPage(v=>v-1)}>上一页</button><button disabled={(page+1)*30>=total} onClick={()=>setPage(v=>v+1)}>下一页</button></div></div></details>
+}
 export default function AssemblyPicker({kind,subjects,existing,occupied,append,busy,onConfirm,onCancel}:{kind:Kind;subjects:string[];existing:string[];occupied:number;append:boolean;busy:boolean;onConfirm:(items:R[],title:string)=>void;onCancel?:()=>void}){
- const [bank,setBank]=useState<'question'|'knowledge'>('question'),[q,setQ]=useState(''),[subject,setSubject]=useState(''),[type,setType]=useState(''),[difficulty,setDifficulty]=useState(''),[chapter,setChapter]=useState(''),[page,setPage]=useState(0),[items,setItems]=useState<R[]>([]),[total,setTotal]=useState(0),[cart,setCart]=useState<R[]>([]),[title,setTitle]=useState(''),[loading,setLoading]=useState(false),[error,setError]=useState('')
- const available=Math.max(0,200-occupied)
- const selected=new Set(cart.map(r=>r.id)),included=new Set(existing)
- useEffect(()=>{
-  const ctl=new AbortController();setLoading(true);setError('');setItems([])
+ const [bank,setBank]=useState<'question'|'knowledge'>('question'),[q,setQ]=useState(''),[subject,setSubject]=useState(''),[type,setType]=useState(''),[difficulty,setDifficulty]=useState(''),[chapter,setChapter]=useState(''),[origin,setOrigin]=useState(''),[originChapter,setOriginChapter]=useState(''),[sources,setSources]=useState<Entry[]>([]),[points,setPoints]=useState<Entry[]>([]),[related,setRelated]=useState(false),[video,setVideo]=useState(''),[usage,setUsage]=useState(''),[unit,setUnit]=useState(''),[advanced,setAdvanced]=useState(false),[chapters,setChapters]=useState<string[]>([]),[page,setPage]=useState(0),[items,setItems]=useState<Item[]>([]),[total,setTotal]=useState(0),[cart,setCart]=useState<Item[]>([]),[title,setTitle]=useState(''),[loading,setLoading]=useState(false),[error,setError]=useState(''),[active,setActive]=useState<Item>(),[pinned,setPinned]=useState(false),[showCart,setShowCart]=useState(false),[sourceInfo,setSourceInfo]=useState<unknown[]>([]),[sourceError,setSourceError]=useState(''),[position,setPosition]=useState({left:0,top:0})
+ const hoverTimer=useRef<number>(),closeTimer=useRef<number>()
+ const available=Math.max(0,200-occupied),selected=new Set(cart.map(r=>r.id)),included=new Set(existing)
+ useEffect(()=>{const ctl=new AbortController();setLoading(true);setError('');setItems([])
   const query=new URLSearchParams({kind:bank,q,subject,chapter,limit:String(size),offset:String(page*size)})
-  if(bank==='question'&&type)query.set('question_type',type)
-  // Difficulty is not a server-side filter on the existing library listing; do not fake full-library filtering.
-  const timer=window.setTimeout(()=>api<{items:R[];total:number}>('/resources?'+query,{signal:ctl.signal}).then(r=>{if(!ctl.signal.aborted){setItems(r.items);setTotal(r.total)}}).catch(e=>{if(!ctl.signal.aborted)setError(e.message||'题库读取失败')}).finally(()=>{if(!ctl.signal.aborted)setLoading(false)}),180)
+  if(bank==='question'){if(type)query.set('question_type',type);if(difficulty)query.set('difficulty',difficulty);if(video)query.set('video_state',video)}else if(unit)query.set('unit_type',unit)
+  if(origin)query.set('origin_type',origin);if(originChapter)query.set('origin_chapter',originChapter);if(usage)query.set('usage_state',usage)
+  sources.forEach(r=>query.append('source_ids',r.id));points.forEach(r=>query.append('knowledge_ids',r.id));if(related)query.set('include_related','true')
+  const timer=window.setTimeout(()=>api<{items:Item[];total:number}>('/resources?'+query,{signal:ctl.signal}).then(r=>{if(!ctl.signal.aborted){setItems(r.items);setTotal(r.total)}}).catch(e=>{if(!ctl.signal.aborted)setError(e.message||'资源读取失败')}).finally(()=>{if(!ctl.signal.aborted)setLoading(false)}),180)
   return()=>{window.clearTimeout(timer);ctl.abort()}
- },[bank,q,subject,type,chapter,page])
- const toggle=(r:R)=>setCart(prev=>prev.some(x=>x.id===r.id)?prev.filter(x=>x.id!==r.id):included.has(r.id)||prev.length>=available?prev:[...prev,r])
- const visible=items.filter(r=>!difficulty||r.difficulty===difficulty)
- return <section className="assembly-picker">
-  <header className="manual-word-toolbar"><strong>{append?'补充选题':'新建'+names[kind]+' · 选题'}</strong><span className="muted">{cart.length} 项已选</span>{onCancel&&<button type="button" disabled={busy} onClick={onCancel}>返回编排</button>}</header>
-  <div className="assembly-grid"><div className="assembly-library">
-   <div className="assembly-filters">
-    <div className="button-row"><button type="button" aria-pressed={bank==='question'} onClick={()=>{setBank('question');setPage(0)}}>题库</button>{kind!=='paper'&&<button type="button" aria-pressed={bank==='knowledge'} onClick={()=>{setBank('knowledge');setPage(0);setDifficulty('')}}>知识库</button>}</div>
-    <input aria-label="搜索题库" placeholder="编号、标题、题干" value={q} onChange={e=>{setQ(e.target.value);setPage(0)}}/>
-    <select aria-label="筛选科目" value={subject} onChange={e=>{setSubject(e.target.value);setPage(0)}}><option value="">全部科目</option>{subjects.map(s=><option key={s}>{s}</option>)}</select>
-    <input aria-label="筛选章节" placeholder="章节" value={chapter} onChange={e=>{setChapter(e.target.value);setPage(0)}}/>
-    {bank==='question'&&<><select aria-label="筛选题型" value={type} onChange={e=>{setType(e.target.value);setPage(0)}}><option value="">全部题型</option>{['选择题','单选题','多选题','填空题','综合题'].map(t=><option key={t}>{t}</option>)}</select><select aria-label="本页难度" value={difficulty} onChange={e=>setDifficulty(e.target.value)}><option value="">本页全部难度</option>{['简单','中等','困难'].map(t=><option key={t}>{t}</option>)}</select></>}
-   </div>
-   <div className="manual-word-side-head"><small>{loading?'正在读取…':'共 '+total+' 项'}</small><button type="button" disabled={busy||loading||!visible.some(r=>!included.has(r.id)&&!selected.has(r.id))||cart.length>=available} onClick={()=>setCart(prev=>[...prev,...visible.filter(r=>!included.has(r.id)&&!prev.some(x=>x.id===r.id)).slice(0,Math.max(0,available-prev.length))])}>加入本页</button></div>
-   {error&&<p role="alert">{error}</p>}
-   {!loading&&!visible.length&&<p className="muted">没有匹配的资源。</p>}
-   {visible.map(r=><article key={r.id} className="assembly-result"><div className="manual-word-side-head"><small>{r.code} · {r.subject||'未分类'} · {r.kind==='question'?r.question_type||'题目':'知识单元'}{r.difficulty?' · '+r.difficulty:''}</small><button type="button" aria-pressed={selected.has(r.id)} disabled={busy||included.has(r.id)||(!selected.has(r.id)&&cart.length>=available)} onClick={()=>toggle(r)}>{included.has(r.id)?'已在文档':selected.has(r.id)?'移出清单':'＋ 选入'}</button></div><strong><MathText compact content={r.title}/></strong><ChatText content={r.content}/><details><summary>查看答案、解析与证明</summary>{r.answer&&<ChatText content={r.answer}/>}{r.solution&&<ChatText content={r.solution}/>}{r.proof&&<ChatText content={r.proof}/>}</details></article>)}
-   <div className="button-row"><button type="button" disabled={page===0||loading} onClick={()=>setPage(p=>p-1)}>上一页</button><small>{page+1}/{Math.max(1,Math.ceil(total/size))}</small><button type="button" disabled={(page+1)*size>=total||loading} onClick={()=>setPage(p=>p+1)}>下一页</button></div>
-  </div><aside className="assembly-cart"><div className="manual-word-side-head"><strong>选题清单（{cart.length}）</strong><button type="button" disabled={busy||!cart.length} onClick={()=>setCart([])}>清空</button></div>
-   {!append&&<label>文档名称<input aria-label="文档名称" placeholder={'未命名'+names[kind]} value={title} maxLength={200} onChange={e=>setTitle(e.target.value)}/></label>}
-   {!cart.length&&<p className="muted">从左侧选入题目，跨页保留选择。</p>}
-   {cart.map((r,i)=><div key={r.id} className="assembly-cart-item"><div><small>{i+1}. {r.code}</small><MathText compact content={r.title||r.content.slice(0,80)}/></div><button type="button" disabled={busy} aria-label={'移除 '+r.code} onClick={()=>toggle(r)}>×</button></div>)}
-   <button type="button" className="primary" disabled={busy||!cart.length} onClick={()=>onConfirm(cart,title.trim()||'未命名'+names[kind])}>{busy?'处理中…':append?'加入 Word 工作台':'进入 Word 工作台'}</button>
-   <small className="muted">最多 200 个文档块；题库原题不会被修改。</small>
-  </aside></div>
+ },[bank,q,subject,type,difficulty,chapter,origin,originChapter,sources,points,related,video,usage,unit,page])
+ useEffect(()=>{const c=new AbortController();api<{chapter:string}[]>('/resources/chapters?kind='+bank+'&subject='+encodeURIComponent(subject),{signal:c.signal}).then(r=>{if(!c.signal.aborted)setChapters(Array.isArray(r)?[...new Set(r.map(x=>x.chapter).filter(Boolean))]:[])}).catch(()=>{});return()=>c.abort()},[bank,subject])
+ useEffect(()=>{if(!active)return;const c=new AbortController();setSourceInfo([]);setSourceError('');api<unknown[]>('/resources/'+active.id+'/sources',{signal:c.signal}).then(r=>{if(!c.signal.aborted)setSourceInfo(Array.isArray(r)?r:[])}).catch(e=>{if(!c.signal.aborted)setSourceError(e.message)});return()=>c.abort()},[active?.id])
+ useEffect(()=>{const listener=(e:KeyboardEvent)=>{if(e.key==='Escape'){setActive(undefined);setPinned(false);setShowCart(false)}};window.addEventListener('keydown',listener);return()=>{window.removeEventListener('keydown',listener);window.clearTimeout(hoverTimer.current);window.clearTimeout(closeTimer.current)}},[])
+ const toggle=(r:Item)=>setCart(prev=>prev.some(x=>x.id===r.id)?prev.filter(x=>x.id!==r.id):included.has(r.id)||prev.length>=available?prev:[...prev,r])
+ function reveal(r:Item,el:HTMLElement,pin:boolean){window.clearTimeout(hoverTimer.current);window.clearTimeout(closeTimer.current);const rect=el.getBoundingClientRect();setPosition({left:Math.max(12,Math.min(rect.left+20,window.innerWidth-512)),top:Math.max(12,Math.min(rect.bottom+4,window.innerHeight-390))});setActive(r);setPinned(pin)}
+ function leave(){window.clearTimeout(hoverTimer.current);if(!pinned)closeTimer.current=window.setTimeout(()=>setActive(undefined),200)}
+ function choose(label:string,value:string,onChange:(v:string)=>void,options:{v:string;t:string}[]){return <select aria-label={label} value={value} onChange={e=>{onChange(e.target.value);setPage(0)}}><option value="">全部{label}</option>{options.map(o=><option key={o.v} value={o.v}>{o.t}</option>)}</select>}
+ const opts=(a:string[])=>a.map(v=>({v,t:v}))
+ function move(i:number,n:number){setCart(old=>{const a=[...old],j=i+n;if(j>=0&&j<a.length)[a[i],a[j]]=[a[j],a[i]];return a})}
+ return <section className="assembly-picker compact-assembly">
+ <header className="manual-word-toolbar"><strong>{append?'补充选题':'新建'+names[kind]+' · 选择资源'}</strong><span className="muted">{cart.length} 项已选</span>{onCancel&&<button disabled={busy} onClick={onCancel}>返回编排</button>}</header>
+ <div className="assembly-grid"><div className="assembly-library">
+ <div className="assembly-filters"><div className="button-row"><button aria-pressed={bank==='question'} onClick={()=>{setBank('question');setPage(0);setChapter('')}}>题库</button>{kind!=='paper'&&<button aria-pressed={bank==='knowledge'} onClick={()=>{setBank('knowledge');setPage(0);setChapter('')}}>知识库</button>}</div>
+ <input aria-label="搜索题库" placeholder="编号、题干、知识点、来源" value={q} onChange={e=>{setQ(e.target.value);setPage(0)}}/>
+ {choose('科目',subject,v=>{setSubject(v);setChapter('');setPoints([])},opts(subjects))}
+ {choose('知识章节',chapter,setChapter,opts(chapters))}
+ {bank==='question'?<>{choose('题型',type,setType,opts(['选择题','单选题','多选题','填空题','综合题']))}{choose('难度',difficulty,setDifficulty,opts(['简单','中等','困难']))}</>:choose('知识单元类型',unit,setUnit,opts(['定义','定理','公式','性质','推论','方法']))}
+ <button aria-expanded={advanced} onClick={()=>setAdvanced(v=>!v)}>高级筛选 {advanced?'⌃':'⌄'}</button>
+ {advanced&&<div className="assembly-advanced">
+ {choose('来源类型',origin,v=>{setOrigin(v);setSources([])},[{v:'textbook',t:'教材'},{v:'handout',t:'讲义'},{v:'exam',t:'试卷'},{v:'other',t:'其他'}])}
+ <Multi label="具体来源" path={'/resources?kind=source&source_type='+origin} chosen={sources} setChosen={v=>{setSources(v);setPage(0)}}/>
+ <input aria-label="来源章节" placeholder="原资料章节（精确名称）" value={originChapter} onChange={e=>{setOriginChapter(e.target.value);setPage(0)}}/>
+ <Multi label="知识点" path={'/knowledge/points?subject='+encodeURIComponent(subject)} chosen={points} setChosen={v=>{setPoints(v);setPage(0)}}/>
+ <label><input type="checkbox" checked={related} onChange={e=>{setRelated(e.target.checked);setPage(0)}}/>包含下级、相关及前置知识点</label>
+ {bank==='question'&&choose('视频状态',video,setVideo,[{v:'made',t:'已有确认成片'},{v:'unmade',t:'未有确认成片'}])}
+ {choose('使用记录',usage,setUsage,[{v:'used',t:'已用于教学资料'},{v:'unused',t:'未使用'}])}
+ <button onClick={()=>{setQ('');setSubject('');setChapter('');setType('');setDifficulty('');setOrigin('');setSources([]);setOriginChapter('');setPoints([]);setRelated(false);setVideo('');setUsage('');setUnit('');setPage(0)}}>重置筛选</button></div>}
+ </div>
+ <div className="manual-word-side-head"><small>{loading?'正在读取…':'共 '+total+' 项'}</small><button disabled={busy||loading||!items.some(r=>!included.has(r.id)&&!selected.has(r.id))||cart.length>=available} onClick={()=>setCart(prev=>[...prev,...items.filter(r=>!included.has(r.id)&&!prev.some(x=>x.id===r.id)).slice(0,Math.max(0,available-prev.length))])}>加入本页</button></div>
+ {error&&<p role="alert">{error}</p>}{!loading&&!items.length&&<p className="muted">没有匹配的资源。</p>}
+ <div className="compact-resource-list">{items.map(r=><article key={r.id} className="assembly-result compact-result" onPointerEnter={e=>{if(e.pointerType==='mouse'&&!pinned){const el=e.currentTarget;window.clearTimeout(closeTimer.current);hoverTimer.current=window.setTimeout(()=>reveal(r,el,false),220)}}} onPointerLeave={leave}><button className="compact-resource-main" onClick={e=>reveal(r,e.currentTarget,true)}><span className="compact-resource-summary"><MathText compact content={r.content||r.title}/></span><small>{r.subject||'未分类'} · {r.kind==='question'?r.question_type||'题目':r.unit_type||'知识单元'}{r.difficulty?' · '+r.difficulty:''}</small></button><button aria-pressed={selected.has(r.id)} disabled={busy||included.has(r.id)||(!selected.has(r.id)&&cart.length>=available)} onClick={()=>toggle(r)}>{included.has(r.id)?'已在文档':selected.has(r.id)?'✓ 已选':'＋ 选入'}</button></article>)}</div>
+ <div className="button-row"><button disabled={page===0||loading} onClick={()=>setPage(p=>p-1)}>上一页</button><small>{page+1}/{Math.max(1,Math.ceil(total/size))}</small><button disabled={(page+1)*size>=total||loading} onClick={()=>setPage(p=>p+1)}>下一页</button></div></div>
+ <aside className={'assembly-cart '+(showCart?'cart-open':'')}><div className="manual-word-side-head"><strong>选题车（{cart.length}）</strong><button disabled={busy||!cart.length} onClick={()=>setCart([])}>清空</button><button className="assembly-mobile-only" onClick={()=>setShowCart(false)}>继续选取</button></div>
+ {!append&&<label>文档名称<input aria-label="文档名称" placeholder={'未命名'+names[kind]} value={title} maxLength={200} onChange={e=>setTitle(e.target.value)}/></label>}
+ {!cart.length&&<p className="muted">跨页保留已选资源。</p>}
+ {cart.map((r,i)=><div key={r.id} className="assembly-cart-item"><button className="compact-resource-main" onClick={e=>reveal(r,e.currentTarget,true)}><small>{i+1}. {r.code}</small><span className="compact-resource-summary"><MathText compact content={r.content||r.title}/></span></button><button disabled={!i} onClick={()=>move(i,-1)} aria-label="上移">↑</button><button disabled={i===cart.length-1} onClick={()=>move(i,1)} aria-label="下移">↓</button><button disabled={busy} aria-label={'移除 '+r.code} onClick={()=>toggle(r)}>×</button></div>)}
+ <button className="primary" disabled={busy||!cart.length} onClick={()=>onConfirm(cart,title.trim()||'未命名'+names[kind])}>{busy?'处理中…':append?'加入 Word 工作台':'进入 Word 工作台'}</button><small className="muted">最多 200 个文档块；原资源不会被修改。</small></aside></div>
+ <button className="primary assembly-mobile-only assembly-cart-toggle" onClick={()=>setShowCart(v=>!v)}>选题车 · {cart.length} 项</button>
+ {active&&<><div className={'assembly-preview-backdrop '+(pinned?'pinned':'')} onClick={()=>{setActive(undefined);setPinned(false)}}/><section key={active.id} role="dialog" aria-label="资源详情" className="assembly-preview" style={position} onPointerEnter={()=>window.clearTimeout(closeTimer.current)} onPointerLeave={leave}><header><strong>{active.kind==='question'?'题目详情':'知识单元详情'}</strong><button aria-label="关闭详情" onClick={()=>{setActive(undefined);setPinned(false)}}>×</button></header><div className="assembly-preview-body"><ChatText content={active.content||active.title}/>{[['参考答案',active.answer],['参考解析',[active.analysis,active.solution].filter(Boolean).join('\n\n')],['证明',active.proof],['关联知识点',active.knowledge_points?.map(p=>p.name).join('、')||active.tags?.join('、')]].filter(x=>x[1]).map(([label,value])=><details key={label}><summary>{label}</summary><ChatText content={value??''}/></details>)}<details><summary>题目来源</summary>{sourceError?<p>{sourceError}</p>:sourceInfo.length?sourceInfo.map((s,i)=>{const v=s as {source?:{title?:string};title?:string;source_title?:string;chapter?:string;original_question_number?:string};return <p key={i}><MathText compact content={v.source?.title||v.source_title||v.title||'关联来源'}/> {v.chapter} {v.original_question_number}</p>}):<p className="muted">暂无关联来源</p>}</details></div><footer><button className="primary" disabled={busy||included.has(active.id)||(!selected.has(active.id)&&cart.length>=available)} onClick={()=>toggle(active)}>{included.has(active.id)?'已在文档':selected.has(active.id)?'移出选题车':'加入选题车'}</button></footer></section></>}
  </section>
 }

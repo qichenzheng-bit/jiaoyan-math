@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
-from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument
+from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument, KnowledgeRelation, VideoProject
 from app.services import storage
 from app.services.inline_images import validate_images,protect_resource_images
 
@@ -151,7 +151,7 @@ def snapshot(db,row):
 def subjects(): return list(MATH_SUBJECTS)
 
 @router.get("")
-def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
     filters=[TeachingResource.archived==archived]
     if kind: filters.append(TeachingResource.kind==kind)
     if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
@@ -162,6 +162,31 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
     if difficulty: filters.append(TeachingResource.difficulty==difficulty)
     if source_id: filters.append(or_(TeachingResource.source_id==source_id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source_id))))
     if knowledge_id: filters.append(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).where(ResourceKnowledgeLink.knowledge_id==knowledge_id)))
+    if source_ids or origin_type or origin_chapter:
+        sources=select(TeachingResource.id).where(TeachingResource.kind=="source",TeachingResource.archived==False)
+        if source_ids:sources=sources.where(TeachingResource.id.in_(source_ids[:100]))
+        if origin_type:sources=sources.where(TeachingResource.source_type==origin_type)
+        links=select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id.in_(sources))
+        if origin_chapter:links=links.where(ResourceSourceLink.chapter==origin_chapter)
+        filters.append(TeachingResource.id.in_(links) if origin_chapter else or_(TeachingResource.source_id.in_(sources),TeachingResource.id.in_(links)))
+    if knowledge_ids:
+        ids=set(knowledge_ids[:100])
+        if include_related:
+            edges=list(db.execute(select(KnowledgeRelation.source_id,KnowledgeRelation.target_id,KnowledgeRelation.relation_type)))
+            roots=set(ids)
+            while True:
+                children={t for s,t,k in edges if k=="contains" and s in ids}
+                if children<=ids:break
+                ids.update(children)
+            ids.update(t for s,t,k in edges if s in roots and k in ("related","prerequisite"))
+            ids.update(s for s,t,k in edges if t in roots and k in ("related","prerequisite"))
+        filters.append(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).where(ResourceKnowledgeLink.knowledge_id.in_(ids))))
+    if video_state:
+        made=TeachingResource.id.in_(select(VideoProject.resource_id).where(VideoProject.work_id.is_not(None)))
+        filters.append(made if video_state=="made" else ~made)
+    if usage_state:
+        used=TeachingResource.id.in_(select(DocumentResourceReference.resource_id).join(TeachingDocument,TeachingDocument.id==DocumentResourceReference.document_id).where(TeachingDocument.kind.in_(("paper","handout","textbook")),TeachingDocument.archived==False))
+        filters.append(used if usage_state=="used" else ~used)
     if q.strip():
         term=q.strip()
         filters.append(or_(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
