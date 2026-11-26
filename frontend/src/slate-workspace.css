@@ -95,3 +95,10 @@
  .legacy-shell.clean-workspace .manual-intake-cards .manual-list-row>button{position:absolute;top:8px;right:8px;border:0;background:transparent;color:var(--accent);min-width:60px;min-height:36px;padding:4px 6px}
  .legacy-shell.clean-workspace .manual-intake-cards .manual-list-excerpt{padding:8px;margin-top:4px}
 }
+
+/* Desktop and mobile use identical high-contrast titles, not the previous dark foreground. */
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar){display:flex;justify-content:flex-start;align-items:center;gap:10px}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .breadcrumb{flex:1;justify-content:flex-start;color:var(--header-ink)}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .breadcrumb strong{color:var(--header-ink);font-size:15px;font-weight:600}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .topbar-actions{margin-left:auto}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .mode-left:empty{display:none}

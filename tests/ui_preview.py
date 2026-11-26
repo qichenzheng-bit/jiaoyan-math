@@ -338,11 +338,12 @@ with sync_playwright() as p:
                         expect(page.locator(".project-hub").get_by_role("link",name=label,exact=True)).to_be_visible()
                     assert page.locator(".project-hub").get_by_role("link",name="视频制作",exact=True).count()==0
                     page.locator("#workspace-navigation").get_by_role("link",name="资料录入",exact=True).click()
-                    page.wait_for_url("**/project/intake")
-                    page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
-                    intake_section=page.locator(".project-hub")
-                    assert intake_section.locator(".project-link").count()==1
-                    assert intake_section.get_by_role("link",name="手动录入",exact=True).get_attribute("href")=="/intake"
+                    page.wait_for_url("**/intake")
+                    page.locator(".manual-new").wait_for()
+                    expect(page.locator(".project-hub")).to_have_count(0)
+                    assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(255, 255, 255)"
+                    visit(page,"/project/intake",".manual-new")
+                    page.wait_for_url("**/intake")
                     page.locator("#workspace-navigation").get_by_role("link",name="教学制作",exact=True).click()
                     page.wait_for_url("**/project/creation")
                     page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
@@ -722,12 +723,10 @@ with sync_playwright() as p:
             menu.click()
             expect(drawer).to_be_visible()
             drawer.get_by_role("link",name="资料录入",exact=True).click()
-            page.wait_for_url("**/project/intake")
-            page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
-            expect(drawer).to_have_count(0)
-            page.locator(".project-hub").get_by_role("link",name="手动录入",exact=True).click()
             page.wait_for_url("**/intake")
+            expect(drawer).to_have_count(0)
             page.locator(".manual-new").wait_for()
+            expect(page.locator(".project-hub")).to_have_count(0)
             assert not page.locator(".nav.open").count()
             visit(page,"/sources",".bank-row")
             page.locator(".bank-row").first.click()
