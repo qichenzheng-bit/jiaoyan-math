@@ -43,12 +43,38 @@ def view(db):
         configured=False;reason=exc.code
     current=state.get("last")
     if not isinstance(current,dict) or current.get("round")!=start.date().isoformat():current=None
+    today=provider.datetime.now(provider.CN).date().isoformat()
+    rewards=confirmed_rewards(state)
+    today_reward=sum(r["delta"] for r in rewards if provider.datetime.fromtimestamp(r["at"],provider.CN).date().isoformat()==today)
     return {"enabled":state.get("enabled") is True,"configured":configured,"reason":reason,
             "round":start.date().isoformat(),"next_round":end.isoformat(),
             "current":current,"history":state.get("history",[])[:30],
             "quota":state.get("quota"),"quota_error":state.get("quota_error"),
-            "changes":state.get("changes",[])[:200],
+            "changes":state.get("changes",[])[:200],"rewards":rewards,"today_reward":today_reward,
             "daily":state.get("daily") if (state.get("daily") or {}).get("day")==provider.datetime.now(provider.CN).date().isoformat() else None}
+
+def confirmed_rewards(state):
+    """Derive verified awards from persisted claims, never infer them from balance."""
+    events=[]
+    seen=set()
+    for row in state.get("history",[]):
+        if row.get("state")!="claimed" or row.get("earned")!=100 or row.get("round") in seen:
+            continue
+        if not isinstance(row.get("at"),(int,float)):
+            continue
+        seen.add(row["round"])
+        events.append({"round":row["round"],"at":row["at"],"delta":100})
+    return events
+
+def sample_quota(state):
+    state["quota_attempt_at"]=time.time()
+    try:
+        apply_snapshot(state,provider.quota_snapshot())
+    except provider.CampaignError as exc:
+        state["quota_error"]=exc.code
+    except Exception:
+        state["quota_error"]="upstream_unavailable"
+        log.warning("Qoder quota refresh failed without exposing provider details")
 
 def attempt(db, *, manual=False, epoch=None):
     # Existing production service uses a single process. Serialize manual and scheduled calls.
@@ -67,6 +93,8 @@ def attempt(db, *, manual=False, epoch=None):
             if timestamp-last.get("at",0)<RETRY_SECONDS:return view(db)
         elif last.get("at") and timestamp-last["at"]<60:
             raise HTTPException(409,"请至少间隔 60 秒再试")
+        # Capture a fresh balance baseline before claiming when possible.
+        sample_quota(state)
         # Persist intent before external mutation so crashes do not create an immediate duplicate.
         record={"round":day,"state":"pending","earned":None,"at":timestamp,"attempts":last.get("attempts",0)+1,
                 "mode":"manual" if manual else "auto"}
@@ -84,6 +112,10 @@ def attempt(db, *, manual=False, epoch=None):
         state["history"]=[record]+[v for v in state.get("history",[]) if v.get("round")!=day][:29]
         state["last"]=record
         write_state(db,state)
+        if record.get("state") in ("claimed","already_claimed"):
+            # Bypass ordinary refresh throttling after an acknowledged award.
+            sample_quota(state)
+            write_state(db,state)
         return view(db)
 
 @router.get("/state")
@@ -120,12 +152,12 @@ def apply_snapshot(state,snapshot):
     daily=state.get("daily")
     if not daily or daily.get("day")!=day:
         daily={"day":day,"increase":0,"decrease":0,"intervals":0}
-    if old and snapshot["at"]>old["at"]:
+    if old and snapshot["at"]>=old["at"]:
         before={p["kind"] for p in old["packs"]}
         after={p["kind"] for p in snapshot["packs"]}
         delta=round(snapshot["balance"]-old["balance"],6)
         # A changed pack set may be incomplete, so establish a new baseline.
-        if before==after:
+        if before==after and old.get("source")==snapshot.get("source"):
             daily["intervals"]+=1
             if delta:
                 entry={"at":snapshot["at"],"from_at":old["at"],"delta":delta,"balance":snapshot["balance"]}
@@ -142,12 +174,7 @@ def refresh_quota(db,*,force=False):
         now=time.time()
         if now-state.get("quota_attempt_at",0)<(15 if force else 60):
             return view(db)
-        state["quota_attempt_at"]=now
-        try:
-            provider.read_pat()
-            apply_snapshot(state,provider.quota_snapshot())
-        except provider.CampaignError as exc:
-            state["quota_error"]=exc.code
+        sample_quota(state)
         write_state(db,state)
         return view(db)
 
