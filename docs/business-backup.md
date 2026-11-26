@@ -11,12 +11,12 @@
 ```json
 {"recipient":"age1...真实公钥","ssh_key":"~/jiaoyan-app/config/backup-deploy-key","known_hosts":"~/jiaoyan-app/config/backup-known-hosts"}
 ```
-5. 在代码部署成功后，以 jiaoyan 用户执行 `bash ~/jiaoyan-app/current/deploy/enable-backup.sh`。首次上传及远端提交验证成功后才启用定时器。查看 `systemctl --user status jiaoyan-backup.timer`，手动备份 `systemctl --user start jiaoyan-backup.service`。失败详情（脱敏）位于 ~/jiaoyan-app/backup-state/status.json；最后成功记录独立保存。
+5. 在代码部署成功后，以 jiaoyan 用户执行 `bash ~/jiaoyan-app/current/deploy/enable-backup.sh`。首次上传及远端提交验证成功后才启用定时器。网页「系统设置 → 数据与存储」支持查看状态及提交立即备份。查看 `systemctl --user status jiaoyan-backup.timer`，手动备份 `systemctl --user start jiaoyan-backup.service`。失败详情（脱敏）位于 ~/jiaoyan-app/backup-state/status.json；最后成功记录独立保存。
 6. 如果系统尚未配置 linger，以管理员确认 `loginctl show-user jiaoyan -p Linger`；本项目 bootstrap 已设置。
 
 ## 格式与边界
 
-PostgreSQL 同一 REPEATABLE READ 只读快照内导出 pre/post schema 和分类 CSV，所有 CSV 均经过 age 公钥加密。按内容散列只重加密变化条目，未变化的密文复用并校验；大密文32MiB分片。Git 一次提交原子发布清单及所有文件，推送后核对远端分支。私有本地索引仅保留散列与公开接收者，不存明文。没有变化时不提交。删除条目只移除当前清单里的对应密文，Git 历史仍保留。目录中不含源文件名称（附件仅使用 UUID）。每次扫描登记附件，确保文件大小与 SHA256 正确；归档附件同样备份。不包含未登记文件、视频成片、缓存及运行依赖。数据库中的 users / sessions 只备份表结构，审核记录匿名化；settings 仅允许已知非敏感键；签到历史过滤且恢复后自动领取关闭。业务正文可能含人工粘贴的敏感信息，始终加密；禁止将凭据写入业务正文。
+PostgreSQL 同一 REPEATABLE READ 只读快照内导出 pre/post schema 和分类 CSV，所有导出文件先 gzip 压缩，再经过 age 公钥加密。按内容散列只重加密变化条目，未变化的密文复用并校验；大密文32MiB分片。Git 一次提交原子发布清单及所有文件，推送后核对远端分支。私有本地索引仅保留散列与公开接收者，不存明文。没有变化时不提交。删除条目只移除当前清单里的对应密文，Git 历史仍保留。目录中不含源文件名称（附件仅使用 UUID）。每次扫描登记附件，确保文件大小与 SHA256 正确；归档附件同样备份。不包含未登记文件、视频成片、缓存及运行依赖。数据库中的 users / sessions 只备份表结构，审核记录匿名化；settings 仅允许已知非敏感键；签到历史过滤且恢复后自动领取关闭。业务正文可能含人工粘贴的敏感信息，始终加密；禁止将凭据写入业务正文。
 
 当前明确支持教研主数据库及其附件。独立视频引擎的内部数据库、Manim 源码、微调历史、成片尚未接入；现有 video_projects 元数据已备份。尚未实现的 AI 记忆、商品数据等目录仍为空。新增数据表或未识别资源类型将使备份失败，必须更新分类映射并验收。Git 仓库不适合无限增长的大量二进制；需监控容量，后续可迁移对象存储。临时明文只在服务器私有 staging 目录，正常退出删除；异常断电可能残留，管理员应在服务停止后安全清理 backup-state/run-*，不要删除配置或 index.json。禁止在不可信的公开仓库 PR 上运行生产 Runner；建议进一步将备份凭据隔离到独立服务账号/私有部署 Runner。
 

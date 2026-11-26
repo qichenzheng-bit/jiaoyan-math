@@ -5,12 +5,14 @@ Run as the existing jiaoyan account. No production restore or credential export.
 import argparse
 import csv
 import fcntl
+import gzip
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -156,7 +158,7 @@ def logical_allowed(name):
 
 
 def check_manifest(repo, manifest):
-    if manifest.get("format") != 1 or not isinstance(manifest.get("entries"), dict):
+    if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
         raise ValueError("invalid manifest")
     for name, entry in manifest["entries"].items():
         if not logical_allowed(name) or not entry.get("parts"):
@@ -292,7 +294,12 @@ def backup():
                 encrypted = work / "cipher.age"
                 encrypted.unlink(missing_ok=True)
                 # Public recipient only; the decryption key is never needed on the production host.
-                run(["age", "-r", recipient, "-o", str(encrypted), str(path)])
+                compressed = work / "compressed.gz"
+                with path.open("rb") as src, compressed.open("wb") as dst:
+                    with gzip.GzipFile(filename="", mode="wb", fileobj=dst, mtime=0) as gz:
+                        shutil.copyfileobj(src, gz, 1024 * 1024)
+                run(["age", "-r", recipient, "-o", str(encrypted), str(compressed)])
+                compressed.unlink()
                 parts = []
                 with encrypted.open("rb") as f:
                     for i, chunk in enumerate(iter(lambda: f.read(CHUNK), b"")):
@@ -313,7 +320,7 @@ def backup():
                 for part in entry["parts"]:
                     if part["path"] not in keep:
                         safe_path(repo, part["path"]).unlink()
-            manifest = {"format": 1, "created_at": now(), "entries": entries}
+            manifest = {"format": 2, "created_at": now(), "entries": entries}
             write_json(safe_path(repo, MANIFEST), manifest)
             check_manifest(repo, manifest)
             run(["git", "add", "-A"], cwd=repo, env=env)
@@ -359,7 +366,11 @@ def restore(repo, identity, target, destination):
                             out.write(chunk)
             plain = safe_path(work, name)
             plain.parent.mkdir(parents=True, exist_ok=True)
-            run(["age", "-d", "-i", str(identity), "-o", str(plain), str(enc)])
+            compressed = work / "compressed.gz"
+            run(["age", "-d", "-i", str(identity), "-o", str(compressed), str(enc)])
+            with gzip.open(compressed, "rb") as src, plain.open("wb") as out:
+                shutil.copyfileobj(src, out, 1024 * 1024)
+            compressed.unlink()
             enc.unlink()
         run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", str(work / SCHEMAS[0])], env=env)
         with psycopg.connect(info) as conn:
@@ -390,7 +401,6 @@ def restore(repo, identity, target, destination):
             out = destination / ("original" if sub == "originals" else "generated") / ident
             out.parent.mkdir(mode=0o700, exist_ok=True)
             # Temporary directory may be on a different filesystem.
-            import shutil
             shutil.copyfile(work / name, out)
             out.chmod(0o600)
     print("Rehearsal restored. Create a new administrator; never switch production automatically.")
