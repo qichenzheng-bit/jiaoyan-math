@@ -25,6 +25,7 @@ ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":
 ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["solution"],"instruction":"逐步推导","model":"Auto","state":"review","detail":"待确认","change_count":1,"changes":[{"uid":"ai-q1","field":"solution","before":"","after":r"由幂函数求导公式，$(x^2)'=2x$。"}],"accepted":[]}
 registration_preview={"revision":1,"items":[{"uid":"ai-q1","candidates":[],"knowledge":[{"id":"p4","name":"导数","code":"KP4","chapter":"微积分","matched":"导数"}],"chapter_suggestion":"微积分","peer_ids":[],"missing":["solution"]}],"similar_scan_limit":300}
 manual_saved={}
+manual_approved={}
 video_test_enabled=False
 video_jobs=[]
 video_demo={"id":"video-preview","resource_id":items[0]["id"],"resource_revision":1,"source_snapshot":{"title":items[0]["title"],"problem":items[0]["content"],"answer":items[0]["answer"],"reference_solution":items[0]["solution"],"fps":60},"engine_id":"a"*32,"work_id":None,"created_at":1}
@@ -94,7 +95,14 @@ def answer(route):
     if p.endswith("/manual-review") and route.request.method=="POST":
         body=manual_saved.get(p.split("/")[2],ai_doc)
         rows=[{"uid":b["uid"],"number":i+1,"kind":b["kind"],"title":b.get("title") or b["content"][:80],"action":"create","errors":[],"warnings":["答案未填写"] if not b.get("answer") else []} for i,b in enumerate(body["blocks"]) if b["kind"] in ("question","knowledge")]
-        result={"revision":body["revision"],"rows":rows}
+        result={"revision":body["revision"],"rows":rows,"reviewed_uids":manual_approved.get(p.split("/")[2],[])}
+    if p.endswith("/manual-review-progress") and route.request.method=="POST":
+        ident=p.split("/")[2]
+        body=json.loads(route.request.post_data)
+        approved=manual_approved.setdefault(ident,[])
+        if body["approved"] and body["uid"] not in approved:approved.append(body["uid"])
+        elif not body["approved"] and body["uid"] in approved:approved.remove(body["uid"])
+        result={"revision":body["revision"],"reviewed_uids":approved}
     if p.endswith("/manual-commit") and route.request.method=="POST":
         body=manual_saved[p.split("/")[2]]
         saved=[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"id":"saved-"+b["uid"],"code":"QNEW","revision":1}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]
@@ -852,6 +860,8 @@ with sync_playwright() as p:
             visit(page,"/work?job=review-clean&review=1",".wg-review-editor .katex")
             expect(page.get_by_role("button",name="通过并继续",exact=True)).to_be_enabled()
             expect(page.get_by_role("button",name="确认生成录入文档",exact=True)).to_be_disabled()
+            expect(page.locator(".wg-review-source")).to_be_visible()
+            expect(page.locator(".wg-review-editor")).to_be_visible()
             page.get_by_role("button",name="原始资料",exact=True).click()
             expect(page.locator(".wg-review-source")).to_be_visible()
             expect(page.locator(".wg-review-editor")).not_to_be_visible()
@@ -1063,6 +1073,12 @@ with sync_playwright() as p:
             page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
             page.get_by_role("button",name="检查并入库",exact=True).click()
             page.get_by_role("heading",name="入库审核",exact=True).wait_for()
+            expect(page.get_by_role("button",name="确认入库",exact=True)).to_be_disabled()
+            progress=page.locator(".manual-unified-review [role=progressbar]")
+            total=int(progress.get_attribute("aria-valuemax"))
+            for i in range(total):
+                page.get_by_role("button",name="通过并继续",exact=True).click()
+                expect(progress).to_have_attribute("aria-valuenow",str(i+1))
             if page.locator(".manual-review-accept input").count():page.locator(".manual-review-accept input").check()
             page.get_by_role("button",name="确认入库",exact=True).click()
             page.get_by_role("dialog",name="确认入库").get_by_role("button",name="确认",exact=True).click()

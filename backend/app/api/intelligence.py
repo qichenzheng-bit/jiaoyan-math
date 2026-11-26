@@ -32,6 +32,7 @@ class Review(BaseModel):
     revision:int=Field(ge=1)
     items:list[docs.Block]=Field(max_length=100)
     reviewed_uids:list[str]|None=Field(default=None,max_length=100)
+    review_current_uid:str|None=Field(default=None,max_length=36)
     confirmed_pages:dict[str,dict[str,StrictInt]]|None=Field(default=None,max_length=100)
 class Confirm(BaseModel):
     revision:int=Field(ge=1)
@@ -230,6 +231,10 @@ def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(curre
         if key in provenance:provenance[key]={uid:loc for uid,loc in provenance[key].items() if uid in valid}
     if "external_sources" in provenance:
         provenance["external_sources"]={b["uid"]:{field:loc for field,loc in provenance["external_sources"].get(b["uid"],{}).items() if b.get(field)==loc.get("excerpt")} for b in items if b["uid"] in provenance["external_sources"]}
+    if body.review_current_uid is not None:
+        if body.review_current_uid not in valid:raise HTTPException(422,"审核位置不存在")
+        provenance["review_current_uid"]=body.review_current_uid
+    elif provenance.get("review_current_uid") not in valid:provenance.pop("review_current_uid",None)
     j.provenance=provenance
     j.items=items;j.revision+=1;j.updated_at=now();audit(db,"intelligence.review",user.id);db.commit();return view(j,True)
 def append_candidates(db,j):

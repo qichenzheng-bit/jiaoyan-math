@@ -680,7 +680,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         image_review=client.post(image_path+"/manual-review",headers=origin,json={"revision":draft_image.json()["revision"]})
         assert image_review.status_code==200,image_review.text
         assert not image_review.json()["rows"][0]["errors"],image_review.text
-        image_commit=client.post(image_path+"/manual-commit",headers=origin,json={"revision":draft_image.json()["revision"],"accept_warnings":True})
+        revision=draft_image.json()["revision"]
+        assert client.post(image_path+"/manual-commit",headers=origin,json={"revision":revision,"accept_warnings":True,"require_reviewed":True}).status_code==409
+        checked=client.post(image_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"image-q","approved":True})
+        assert checked.status_code==200,checked.text
+        assert checked.json()["reviewed_uids"]==["image-q"]
+        assert client.post(image_path+"/manual-review",headers=origin,json={"revision":revision}).json()["reviewed_uids"]==["image-q"]
+        # An edited item loses approval, even after closing the workbench.
+        modified=client.put(image_path+"/manual-draft",headers=origin,json={**draft_image.json(),"blocks":[{**image_blocks[0],"answer":"2"}]})
+        assert modified.status_code==200,modified.text
+        assert client.post(image_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"image-q","approved":True}).status_code==409
+        revision=modified.json()["revision"]
+        assert client.post(image_path+"/manual-review",headers=origin,json={"revision":revision}).json()["reviewed_uids"]==[]
+        assert client.post(image_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"image-q","approved":True}).status_code==200
+        image_commit=client.post(image_path+"/manual-commit",headers=origin,json={"revision":revision,"accept_warnings":True,"require_reviewed":True})
         assert image_commit.status_code==200,image_commit.text
         saved_image_doc=image_commit.json()["document"]
         saved_image_id=saved_image_doc["blocks"][0]["resource_id"]

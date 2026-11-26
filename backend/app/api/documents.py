@@ -1,5 +1,6 @@
 """Persistent Word-like block drafts. No browser-supplied snapshots or filesystem paths."""
 import json
+import hashlib
 from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,7 +13,7 @@ from app.core.security import current_user, require_origin, now, audit
 from app.core.solution_methods import normalize_subject, parse_methods, format_methods
 from app.core.content_normalization import canonical_text, question_fingerprint
 from difflib import SequenceMatcher
-from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink
+from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink, Setting
 from app.services import storage
 from app.services.inline_images import image_ids,validate_images,protect_resource_images
 from app.api import resources as bank, qoder
@@ -846,6 +847,12 @@ def registration_detail(id:str,ident:str,db:Session=Depends(get_db)):
 class ManualRevision(BaseModel):
     revision:int=Field(ge=1)
     accept_warnings:bool=False
+    require_reviewed:bool=False
+
+class ManualProgress(BaseModel):
+    revision:int=Field(ge=1)
+    uid:str=Field(min_length=1,max_length=36)
+    approved:bool
 
 @router.put("/{id}/manual-draft",dependencies=[Depends(require_origin)])
 def manual_draft(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -867,11 +874,12 @@ def delete_manual(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     audit(db,"document.manual.delete",user.id);db.commit()
     return {"deleted":True}
 
-def manual_review_data(db,d):
+def manual_review_data(db,d,only_uid=None):
     if not d.source_id:raise HTTPException(422,"资料尚未关联来源")
     bank.active_source(db,d.source_id)
     rows=[]
     for n,b in enumerate(d.blocks,1):
+        if only_uid is not None and b["uid"]!=only_uid:continue
         kind=b["kind"]
         if kind not in ("question","knowledge") and not b.get("edit_reference_revision"):continue
         actual_kind=(b.get("snapshot") or {}).get("kind") if kind=="reference" else kind
@@ -900,11 +908,47 @@ def manual_review_data(db,d):
         rows.append({"uid":b["uid"],"number":n,"kind":actual_kind,"title":b.get("title") or b.get("content","")[:80],"action":action,"errors":errors,"warnings":warnings})
     return {"revision":d.revision,"rows":rows}
 
+def manual_review_key(d):
+    return "intake.review."+d.id
+
+def manual_review_state(db,d):
+    pref=db.get(Setting,manual_review_key(d))
+    try:
+        state=json.loads(pref.value) if pref else {}
+        return state if isinstance(state,dict) else {}
+    except (ValueError,TypeError):return {}
+
+def manual_item_digest(d,b):
+    value={k:v for k,v in b.items() if k!="question_data"}
+    return hashlib.sha256(json.dumps([d.source_id,d.subject,value],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+
+def manual_reviewed(d,state):
+    return [b["uid"] for b in d.blocks if state.get(b["uid"])==manual_item_digest(d,b)]
+
+@router.post("/{id}/manual-review-progress",dependencies=[Depends(require_origin)])
+def manual_review_progress(id:str,body:ManualProgress,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.kind!="intake" or d.archived or d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    checked=manual_review_data(db,d,body.uid)["rows"]
+    if not checked:raise HTTPException(422,"待审核条目不存在")
+    if body.approved and checked[0]["errors"]:raise HTTPException(422,"请先处理本条审核问题")
+    state=manual_review_state(db,d)
+    valid=set(manual_reviewed(d,state));state={uid:state[uid] for uid in valid}
+    b=next(b for b in d.blocks if b["uid"]==body.uid)
+    if body.approved:state[body.uid]=manual_item_digest(d,b)
+    else:state.pop(body.uid,None)
+    db.merge(Setting(key=manual_review_key(d),value=json.dumps(state)))
+    audit(db,"document.manual.review.progress",user.id);db.commit()
+    return {"revision":d.revision,"reviewed_uids":manual_reviewed(d,state)}
+
 @router.post("/{id}/manual-review",dependencies=[Depends(require_origin)])
 def manual_review(id:str,body:ManualRevision,db:Session=Depends(get_db)):
     d=row(db,id)
     if d.kind!="intake" or d.archived or d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
-    return manual_review_data(db,d)
+    review=manual_review_data(db,d)
+    approved=set(manual_reviewed(d,manual_review_state(db,d)))
+    review["reviewed_uids"]=[r["uid"] for r in review["rows"] if r["uid"] in approved and not r["errors"]]
+    return review
 
 @router.post("/{id}/manual-commit",dependencies=[Depends(require_origin)])
 def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -913,6 +957,8 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     review=manual_review_data(db,d)
     if not review["rows"]:raise HTTPException(422,"没有待入库的资源")
     if any(r["errors"] for r in review["rows"]):raise HTTPException(422,"仍有必须处理的问题，请重新检查")
+    if body.require_reviewed and not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
+        raise HTTPException(409,"请先逐条完成审核")
     if any(r["warnings"] for r in review["rows"]) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
     saved=manual_save(id,Draft.model_validate(public(d)),db,user)
     counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0}
