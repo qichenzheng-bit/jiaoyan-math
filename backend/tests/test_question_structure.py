@@ -12,7 +12,7 @@ def test_explicit_structure_and_compatibility_projection():
     assert b.content=="求极限 $x$\nA. $-1$\nB. $1$" and b.answer=="B"
     assert b.question_data.options[0].content=="$-1$"
     assert b.question_data.methods[0].name=="直接法"
-    draft=Draft.model_validate({**b.model_dump(),"kind":"question"})
+    draft=Draft.model_validate({**b.model_dump(),"kind":"question","subject":"高等数学"})
     assert draft.question_data==b.question_data
     changed=Draft.model_validate({**draft.model_dump(),"answer":"A"})
     assert changed.answer=="A" and changed.question_data.correct_options==["A"]
