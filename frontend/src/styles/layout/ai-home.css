@@ -1,0 +1,26 @@
+/* Same home structure in both modes, while keeping the existing conversation composer. */
+.shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]{justify-content:safe center;gap:16px;--chat-column:740px;overflow:visible}
+.shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.chat-scroll{flex:0 1 auto;min-height:0;width:100%;padding:0;justify-content:center;overflow:auto}
+.shell.legacy-shell.clean-workspace .ai-home .ai-home-welcome{width:100%;margin:0 auto;padding:0;gap:0}
+.shell.legacy-shell.clean-workspace .ai-home .chat-home-heading{padding:0}
+.shell.legacy-shell.clean-workspace .ai-home .chat-home-heading h1{font-size:clamp(23px,3vw,30px);font-weight:550;line-height:1.4;letter-spacing:-.025em}
+.shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.compact-composer{flex:0 0 auto;margin:0 auto;width:min(100%,var(--chat-column));max-width:var(--chat-column);padding:12px 14px 9px}
+.shell.legacy-shell.clean-workspace .ai-home>.compact-composer>textarea{min-height:48px}
+.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;width:min(100%,var(--chat-column));margin:0 auto;flex:none}
+.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>a,.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>button{display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line);border-radius:20px;color:var(--muted);background:transparent;font-size:12px;min-height:33px;box-shadow:none}
+.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>a:hover,.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>button:hover,.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>button[aria-pressed=true]{background:var(--selected);color:var(--ink)}
+.shell.legacy-shell.clean-workspace .ai-home>.chat-warning,.shell.legacy-shell.clean-workspace .ai-home>.work-busy-state{width:min(100%,var(--chat-column));margin:0 auto;flex:none;overflow-wrap:anywhere}
+.shell.legacy-shell.clean-workspace .ai-home:has(.chat-reference-picker){gap:10px}
+@media(max-width:760px){
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]{gap:12px}
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.compact-composer{padding:9px 10px}
+ .shell.legacy-shell.clean-workspace .ai-home .chat-home-heading h1{font-size:23px}
+ .shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>a,.shell.legacy-shell.clean-workspace .ai-home .ai-home-shortcuts>button{padding:6px 9px;font-size:12px}
+ html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace.chat-route{height:var(--composer-visible-height,100dvh)}
+ html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]{justify-content:flex-end;gap:8px}
+ html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .ai-home>.chat-scroll,html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .ai-home>.ai-home-shortcuts{display:none}
+ html[data-composer-keyboard=true] .composer-inference-panel{max-height:calc(var(--composer-visible-height,100dvh) * .45)}
+}
+@media(max-height:480px){.shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]{justify-content:safe center;gap:8px}.shell.legacy-shell.clean-workspace .ai-home .chat-home-heading h1{font-size:20px}}
+
+@media(max-height:480px){.shell.legacy-shell.clean-workspace .ai-home>.ai-home-shortcuts{flex-shrink:1}.shell.legacy-shell.clean-workspace .ai-home>.chat-scroll{min-height:0}}
