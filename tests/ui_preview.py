@@ -16,7 +16,7 @@ points=[dict(id=f"p{i}",code=f"KP{i}",name=n,subject="高等数学",chapter="微
 edges=[dict(source_id=f"p{a}",target_id=f"p{b}",relation_type="contains") for a,b in [(0,1),(0,2),(1,3),(1,4),(1,5),(2,6),(2,7),(2,8)]]
 demo_chat={"id":"chat-demo","title":"录入建议示例","project":"","pinned":False,"archived":False,"updated_at":1,
  "messages":[{"id":"msg-user","role":"user","content":"请录入一道题：求 $x^2$ 的导数。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[]},
- {"id":"msg-ai","role":"assistant","content":"可以整理为题目草稿，请确认。","state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[],"intake_intent":"question"}]}
+ {"id":"msg-ai","role":"assistant","content":"可以整理为题目草稿，请确认。\n\n### 解法说明\n\n| 方法 | 结果 |\n| --- | --- |\n| 幂函数 | $2x$ |\n\n"+'```wg-card\n{"type":"comparison","title":"解法对比","items":[{"label":"方法一","text":"直接求导"},{"label":"方法二","text":"定义法"}]}\n```',"state":"done","detail":"","model":"Auto","attachments":[],"resource_refs":[],"intake_intent":"question"}]}
 review_job={"id":"review-demo","title":"补充示例","state":"review","detail":"待人工核对","revision":1,"document_id":None,"input_text":"求导数","items":[{"uid":"review-item","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"","solution":"","analysis":"","proof":"","chapter":"","question_type":"","unit_type":""}]}
 review_suggestion={"id":"supplement-demo","job_id":"review-demo","item_uid":"review-item","base_revision":1,"fields":["answer","solution"],"state":"review","detail":"AI生成待确认","proposal":{"answer":"$2x$","solution":r"利用幂函数求导公式，$(x^2)'=2x$。"},"accepted":[],"model":"Auto"}
 ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"$2x$","solution":"","analysis":"","proof":"","chapter":"","question_type":"解答题","unit_type":"","resource_id":None,"file_id":None,"width":100}]}
@@ -180,6 +180,11 @@ with sync_playwright() as p:
                     expect(page.locator(".chat-home-recent")).to_be_visible()
                     expect(page.get_by_role("heading",name="今天想研究什么？")).to_be_visible()
                     expect(page.locator("[data-chat-layout=v3] .chat-home-links a").first).to_be_visible()
+                    expect(page.get_by_role("button",name="检索题库",exact=True)).to_be_visible()
+                    page.get_by_role("button",name="检索题库",exact=True).click()
+                    expect(page.get_by_label("检索题库编号、标题或正文")).to_be_visible()
+                    page.locator(".chat-reference-picker").get_by_role("button",name="关闭").click()
+                    assert page.get_by_role("button",name="发送消息").locator("svg").count()==1
                     page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
                     page.get_by_role("button",name="添加与工具").click()
                     page.get_by_role("button",name="转录入",exact=True).click()
@@ -209,6 +214,10 @@ with sync_playwright() as p:
                     assert page.locator(".material-import").count()==0
                 if name=="19-intake-intent":
                     page.locator(".chat-intake-suggestion").wait_for()
+                    expect(page.locator(".rich-reply table")).to_be_visible()
+                    expect(page.locator(".rich-card").get_by_role("button",name="方法二")).to_be_visible()
+                    page.locator(".rich-card").get_by_role("button",name="方法二").click()
+                    expect(page.locator(".rich-card").get_by_text("定义法",exact=True)).to_be_visible()
                     assert page.locator(".chat-message.user .chat-message-body").evaluate("(el)=>getComputedStyle(el).width !== getComputedStyle(el.parentElement).width")
                     expect(page.locator(".chat-message-actions").get_by_role("button",name="复制",exact=True).first).to_be_visible()
                     assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0

@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react'
 const paths:Record<string,ReactNode>={
+ 'send-up':<path d="M12 19V5m-6 6 6-6 6 6" strokeWidth="2.2"/>,
+ down:<path d="M12 5v14m-6-6 6 6 6-6" strokeWidth="2"/>,
+ stop:<rect x="6" y="6" width="12" height="12" rx="1.6" fill="currentColor" stroke="none"/>,
+ 'chevron-down':<path d="m6 9 6 6 6-6"/>,
  copy:<><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
  check:<path d="m5 12 4 4L19 6"/>,
  more:<><circle cx="5" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.8" fill="currentColor" stroke="none"/></>,
