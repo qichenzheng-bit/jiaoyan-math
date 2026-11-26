@@ -515,6 +515,11 @@ with sync_playwright() as p:
             page.set_viewport_size({"width":1600,"height":900})
             visit(page,"/papers",".assembly-result")
             page.locator(".assembly-result").first.wait_for()
+            expect(page.locator(".compact-resource-list")).to_be_visible()
+            page.locator(".compact-resource-main").first.click()
+            expect(page.get_by_role("dialog",name="资源详情")).to_be_visible()
+            assert page.locator(".assembly-preview details[open]").count()==0
+            page.get_by_role("button",name="关闭详情").click()
             page.get_by_role("button",name="＋ 选入",exact=True).first.click()
             page.get_by_role("button",name="＋ 选入",exact=True).first.click()
             expect(page.locator(".assembly-cart-item")).to_have_count(2)

@@ -3,11 +3,11 @@ from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
-from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile, FileReference
+from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile
 from app.api.resources import admin_lock
 from app.api.studio import save_version
 from app.services import video_engine as engine, storage
@@ -49,11 +49,8 @@ def save_cover(db,row,item,body):
     image=db.get(StoredFile,body.file_id)
     if not image or image.archived or image.media_type!="image/png":
         raise HTTPException(422,"请选择有效的视频截帧")
-    old=item.data.get("cover_file_id")
     storage.link_file(db,body.file_id,"studio_item",item.id)
     item.data={**item.data,"cover_file_id":body.file_id,"cover_timestamp":body.timestamp,"cover_revision":body.revision}
-    if old and old!=body.file_id:
-        db.execute(delete(FileReference).where(FileReference.file_id==old,FileReference.owner_type=="studio_item",FileReference.owner_id==item.id))
 
 
 def row_for(db, ident):

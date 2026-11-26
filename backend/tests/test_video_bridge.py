@@ -60,3 +60,19 @@ def test_video_effort_override_is_validated(monkeypatch):
     with pytest.raises(HTTPException) as exc:video.prepare_model(None,"max")
     assert exc.value.status_code==422
     assert len(calls)==2
+
+
+def test_cover_selection_stores_reference(monkeypatch):
+    from app.api import video
+    from types import SimpleNamespace
+    image=SimpleNamespace(archived=False,media_type="image/png")
+    item=SimpleNamespace(id="work",data={"category":"video"})
+    db=SimpleNamespace(get=lambda model,id:image)
+    refs=[]
+    monkeypatch.setattr(video.storage,"link_file",lambda db,file_id,owner,ident:refs.append((file_id,owner,ident)))
+    body=video.CoverSelection(file_id="cover",timestamp=23.5,revision=3)
+    video.save_cover(db,None,item,body)
+    assert item.data["cover_file_id"]=="cover" and item.data["cover_timestamp"]==23.5
+    assert item.data["cover_revision"]==3 and refs==[("cover","studio_item","work")]
+    image.media_type="image/jpeg"
+    with pytest.raises(HTTPException):video.save_cover(db,None,item,body)

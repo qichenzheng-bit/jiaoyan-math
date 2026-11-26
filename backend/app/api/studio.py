@@ -93,11 +93,16 @@ def validate(db,body,ident=None):
         if any(len(t)>60 for t in d["tags"]):raise HTTPException(422,"标签过长")
         d["tags"]=list(dict.fromkeys(t.strip() for t in d["tags"] if t.strip()))
     if body.kind=="work":
+        old=db.get(Item,ident) if ident else None
+        if old and old.data.get("video_project_id") and (d["category"]!="video" or d["video_project_id"]!=old.data["video_project_id"]):raise HTTPException(422,"视频作品的关联不可修改")
         if d["category"]=="video":
             from app.models import VideoProject
             link=db.get(VideoProject,d["video_project_id"]) if d["video_project_id"] else None
             if not link or not ident or link.work_id!=ident or d["resource_id"]!=link.resource_id:
                 raise HTTPException(422,"视频作品必须由视频审核归档生成")
+            if old:
+                for key in ("cover_file_id","cover_timestamp","cover_revision"):
+                    if key in old.data:d[key]=old.data[key]
         elif d["video_project_id"]:
             raise HTTPException(422,"视频项目仅用于视频作品")
         for key,cls in (("document_id",TeachingDocument),("resource_id",TeachingResource)):
@@ -124,6 +129,7 @@ def save_version(db,r):
     db.add(Version(item_id=r.id,revision=r.revision,snapshot=public(r),created_at=now()))
     # Keep file references for all historical revisions, even when the current file changes.
     if r.data.get("file_id"):storage.link_file(db,r.data["file_id"],"studio_item",r.id)
+    if r.data.get("cover_file_id"):storage.link_file(db,r.data["cover_file_id"],"studio_item",r.id)
 def qoder_round(at=None):
     current=(at or datetime.now(timezone.utc)).astimezone(timezone(timedelta(hours=8)))
     return (current-timedelta(hours=10)).date().isoformat()
