@@ -905,6 +905,44 @@ with sync_playwright() as p:
                 panel.get_by_role("button",name="高",exact=True).click()
                 expect(panel).to_have_count(0)
                 assert page.locator("#mode-more-panel .reasoning-effort").count()==0
+            # Server-reported capabilities, not hardcoded front-end model/effort choices.
+            live_models={"source":"cli","models":[{"id":"Auto","label":"Auto","efforts":["medium","high"]}]+[{"id":f"preview-model-{n}","label":f"Preview Model {n}","efforts":["low","xhigh"]} for n in range(7)]}
+            refresh_calls=[]
+            def live_catalog_route(route):
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(live_models))
+            def refresh_catalog_route(route):
+                refresh_calls.append(route.request.method)
+                live_models["models"]=[*live_models["models"],{"id":"new-live-model","label":"New Live Model","efforts":["disabled","low","xhigh"]}]
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(live_models))
+            context.route("**/api/qoder/models",live_catalog_route)
+            context.route("**/api/qoder/models/refresh",refresh_catalog_route)
+            try:
+                visit(page,"/work","[data-chat-layout=v3] .compact-composer")
+                page.get_by_role("button",name="打开模型选择",exact=True).click()
+                panel=page.locator(".composer-inference-panel")
+                search=panel.get_by_role("searchbox",name="搜索模型")
+                expect(search).to_be_visible()
+                panel.get_by_role("button",name="刷新模型",exact=True).click()
+                search.fill("New Live Model")
+                fresh_model=panel.get_by_role("button",name="New Live Model",exact=True)
+                expect(fresh_model).to_be_visible()
+                assert refresh_calls==["POST"]
+                fresh_model.click()
+                efforts=panel.get_by_role("group",name="推理强度",exact=True)
+                expect(efforts.get_by_role("button",name="极高",exact=True)).to_be_visible()
+                expect(efforts.get_by_role("button",name="关闭",exact=True)).to_be_visible()
+                expect(efforts.get_by_role("button",name="高",exact=True)).to_have_count(0)
+                expect(efforts.get_by_role("button",name="中",exact=True)).to_have_count(0)
+                expect(efforts.get_by_role("button",name="默认",exact=True)).to_have_attribute("aria-pressed","true")
+                efforts.get_by_role("button",name="极高",exact=True).click()
+                expect(panel).to_have_count(0)
+                page.get_by_role("button",name="打开模型选择",exact=True).click()
+                expect(panel.get_by_role("button",name="New Live Model",exact=True)).to_have_attribute("aria-pressed","true")
+                expect(panel.get_by_role("button",name="极高",exact=True)).to_have_attribute("aria-pressed","true")
+                page.keyboard.press("Escape")
+            finally:
+                context.unroute("**/api/qoder/models",live_catalog_route)
+                context.unroute("**/api/qoder/models/refresh",refresh_catalog_route)
             visit(page,"/chat",".chat-home-recent")
             page.get_by_role("button",name="添加与工具").click()
             expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
