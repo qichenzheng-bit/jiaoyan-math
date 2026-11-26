@@ -1,3 +1,4 @@
+import {confirmAction} from '../components/WorkspaceConfirm'
 import {useEffect,useRef,useState,type FormEvent} from 'react'
 import {api} from '../auth'
 import './QoderCompact.css'
@@ -65,7 +66,7 @@ export default function Qoder(){
     }catch(e){setMessage('');throw e}
   })
  }
- async function disconnect(){if(!window.confirm('退出本系统 AI？聊天、录入与视频模型调用将停止，直到你主动重新登录。官方 CLI 凭据不会被删除。'))return;await action('disconnect',async()=>{loginRevision.current++;const login=await api<Login>('/qoder/login/disconnect',{method:'POST'});setStatus(prev=>prev?{...prev,login,verified_at:null,retained_auth:false,user_disconnected:true}:prev);setCatalog(undefined);setMessage('已退出本系统 AI');await refresh()})}
+ async function disconnect(){if(!await confirmAction('退出本系统 AI？聊天、录入与视频模型调用将停止，直到你主动重新登录。官方 CLI 凭据不会被删除。'))return;await action('disconnect',async()=>{loginRevision.current++;const login=await api<Login>('/qoder/login/disconnect',{method:'POST'});setStatus(prev=>prev?{...prev,login,verified_at:null,retained_auth:false,user_disconnected:true}:prev);setCatalog(undefined);setMessage('已退出本系统 AI');await refresh()})}
  async function discover(automatic=false){await action('models',async()=>{
    setMessage(automatic?'授权完成，正在拉取最新模型…':'正在拉取最新模型…')
    try{

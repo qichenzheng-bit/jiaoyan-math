@@ -248,8 +248,9 @@ with sync_playwright() as p:
                     page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
                     page.get_by_role("button",name="发送资料").click()
                     page.locator(".work-review-preview .katex").first.wait_for()
-                    page.once("dialog",lambda dialog:dialog.accept())
                     page.get_by_role("button",name="移除资料").click()
+                    page.get_by_role("dialog",name="确认操作").get_by_role("button",name="确认",exact=True).click()
+                    expect(page.get_by_role("button",name="移除资料")).to_have_count(0)
                     assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
                     page.get_by_role("button",name="更多选项",exact=True).click()
                     expect(page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型")).to_be_visible()
