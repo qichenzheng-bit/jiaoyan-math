@@ -7,6 +7,7 @@ import {MathText} from './MathText'
 import ChatText from '../pages/ChatText'
 import {Icon} from './Icon'
 import InlineMathEditor from './InlineMathEditor'
+import './ManualWordWork.css'
 import {PrintableDocument} from '../pages/DocumentPrint'
 
 export const questionTypes=['选择题','填空题','综合题']
