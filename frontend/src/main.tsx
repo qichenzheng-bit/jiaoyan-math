@@ -27,6 +27,7 @@ import './workflow-ui.css'
 import './intake-workflow.css'
 import './doc-work-v2.css'
 import './clean-workspace.css'
+import './chat-layout-v3.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(

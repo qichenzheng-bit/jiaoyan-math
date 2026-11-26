@@ -178,6 +178,8 @@ with sync_playwright() as p:
                     assert not effort.is_visible()
                     assert page.locator(".intake-chat-prompts").count()==0
                     expect(page.locator(".chat-home-recent")).to_be_visible()
+                    expect(page.get_by_role("heading",name="今天想研究什么？")).to_be_visible()
+                    expect(page.locator("[data-chat-layout=v3] .chat-home-links a").first).to_be_visible()
                     page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
                     page.get_by_role("button",name="添加与工具").click()
                     page.get_by_role("button",name="转录入",exact=True).click()
@@ -639,6 +641,8 @@ with sync_playwright() as p:
             expect(page.locator(".mobile-tabs")).to_have_count(0)
             expect(page.get_by_label("输入消息")).to_be_visible()
             expect(page.locator(".clean-chat > .compact-composer")).to_be_visible()
+            expect(page.get_by_role("heading",name="今天想研究什么？")).to_be_visible()
+            assert page.locator("[data-chat-layout=v3] .compact-composer").evaluate("(el)=>el.getBoundingClientRect().bottom <= innerHeight")
             expect(page.locator(".mode-switch")).to_be_visible()
             page.get_by_role("button",name="添加与工具").click()
             expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
