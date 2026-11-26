@@ -394,6 +394,17 @@ def test_migration_and_login(tmp_path, monkeypatch):
         check={"kind":"checkin","title":"签到","data":{"account_id":account["id"],"day":"2026-11-25","state":"success","earned":2}}
         assert client.post("/api/studio",headers=origin,json=check).status_code==200
         assert client.post("/api/studio",headers=origin,json=check).status_code==409
+        other=client.post("/api/studio",headers=origin,json={"kind":"account","title":"旧平台","data":{"platform":"codebuddy"}}).json()
+        state=client.get("/api/studio/qoder-checkin").json()
+        assert [a["id"] for a in state["accounts"]]==[account["id"]]
+        confirm={"account_id":account["id"],"round":state["round"],"earned":100,"balance":250}
+        assert client.post("/api/studio/qoder-checkin/confirm",headers=origin,json={**confirm,"account_id":other["id"]}).status_code==422
+        assert client.post("/api/studio/qoder-checkin/confirm",headers=origin,json={**confirm,"round":"2000-01-01"}).status_code==409
+        first=client.post("/api/studio/qoder-checkin/confirm",headers=origin,json=confirm)
+        assert first.status_code==200,first.text
+        assert client.post("/api/studio/qoder-checkin/confirm",headers=origin,json=confirm).json()["id"]==first.json()["id"]
+        assert client.get("/api/studio/qoder-checkin").json()["accounts"][0]["current"]["data"]["state"]=="success"
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
