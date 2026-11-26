@@ -580,7 +580,7 @@ with sync_playwright() as p:
                     page.locator(".fc-inspector").get_by_role("button",name="完成",exact=True).click()
                     expect(page.locator(".fc-inspector")).not_to_be_visible()
                     assert page.evaluate("document.documentElement.scrollWidth<=window.innerWidth+2")
-                    page.set_viewport_size({"width":1440,"height":900"})
+                    page.set_viewport_size({"width":1440,"height":900})
 
                 capture(page,path=str(OUT/(name+".png")),full_page=False)
         if GROUP in {'all','editors'}:
