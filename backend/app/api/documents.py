@@ -479,7 +479,7 @@ def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
         for r in recent[b["kind"]]:
             if r.id in seen:continue
             matcher=SequenceMatcher(None,query,canonical_text(r.content)[:1200])
-            if matcher.real_quick_ratio()<threshold or matcher.quick_ratio()<threshold:continue
+            if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
             score=matcher.ratio()
             if score>=.75:similar.append((score,r))
         candidates=[candidate(r,v,b) for r in strict]+[candidate(r,v,b,round(s,3)) for s,r in sorted(similar,key=lambda x:-x[0])[:5]]
@@ -595,7 +595,7 @@ def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
         scanned+=1
         if ident in seen or not query:continue
         matcher=SequenceMatcher(None,query,canonical_text(content))
-        if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
+        if matcher.real_quick_ratio()<threshold or matcher.quick_ratio()<threshold:continue
         score=matcher.ratio()
         if score>=threshold:
             best.append((score,ident))

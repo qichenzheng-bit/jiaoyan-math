@@ -282,6 +282,7 @@ with sync_playwright() as p:
             assert page.locator(".manual-list-row").count()==4
             page.get_by_role("button",name="整套预览",exact=True).click()
             assert page.locator(".manual-intake-preview .katex").count()>0
+            page.get_by_role("button",name="全部题目",exact=True).click()
             page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.screenshot(path=str(OUT/"27-mobile-card.png"),full_page=False)
