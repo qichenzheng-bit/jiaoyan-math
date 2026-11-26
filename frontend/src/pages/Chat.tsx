@@ -32,12 +32,13 @@ export default function Chat(){
  useEffect(()=>{const el=inputRef.current;if(el){el.style.height='0px';el.style.height=Math.min(Math.max(el.scrollHeight,30),144)+'px'}},[draft,active?.archived])
  useEffect(()=>{if(!toolsOpen)return;const outside=(e:PointerEvent)=>{if(!composerRef.current?.contains(e.target as Node))setToolsOpen(false)};const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setToolsOpen(false)};document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape)}},[toolsOpen])
  useWorkspaceGuard({busy,dirty:Boolean(draft.trim()||files.length||refs.length||retrieve),message:'当前输入尚未发送，确认离开？',allow:path=>path==='/chat?session='+encodeURIComponent(activeId.current)})
- useEffect(()=>{const reset=()=>void fresh();window.addEventListener('wg-chat-new',reset);return()=>window.removeEventListener('wg-chat-new',reset)},[draft,busy,files,refs,running])
+ useEffect(()=>{const reset=()=>void fresh();window.addEventListener('wg-chat-new',reset);return()=>window.removeEventListener('wg-chat-new',reset)},[draft,busy,files,refs,running,retrieve])
  function failure(e:unknown){setError(e instanceof Error?e.message:'请求失败')}
  async function copyMessage(id:string,content:string){
   try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(content);setCopied(id);return}}catch{/* fallback for HTTP */}
   const field=document.createElement('textarea');field.value=content;field.readOnly=true;field.style.cssText='position:fixed;left:0;top:0;opacity:0;pointer-events:none';document.body.appendChild(field);field.select();field.setSelectionRange(0,content.length);try{if(!document.execCommand('copy'))throw new Error('复制失败，请长按正文复制');setCopied(id)}catch(e){failure(e)}finally{field.remove()}
  }
+ useEffect(()=>{const update=(e:Event)=>{const session=(e as CustomEvent<Session>).detail;if(!session?.id)return;setActive(current=>current?.id===session.id?{...current,...session}:current)};window.addEventListener('wg-chat-session-updated',update);return()=>window.removeEventListener('wg-chat-session-updated',update)},[])
  function list(){window.dispatchEvent(new Event('wg-recent-changed'))}
  useEffect(()=>{const c=new AbortController();Promise.all([getModelCatalog(),api<ModelPreferences>('/qoder/preferences',{signal:c.signal}),api<{chat_available?:boolean}>('/qoder/status',{signal:c.signal})]).then(([m,p,s])=>{if(!c.signal.aborted){setOptions(m.models);setCatalog(m);const saved=modelChoice('chat',p.model,p.effort??'default');setModel(saved.model);setEffort(saved.effort);setReady(Boolean(s.chat_available));setReadyChecked(true)}}).catch(e=>{if(!c.signal.aborted){setReadyChecked(true);failure(e)}});return()=>c.abort()},[])
 

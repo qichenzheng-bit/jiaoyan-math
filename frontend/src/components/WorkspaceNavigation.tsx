@@ -33,9 +33,9 @@ export function WorkspaceLink({onApproved,onClick,to,...props}:LinkProps&{onAppr
  return <Link {...props} to={to} onClick={e=>{
   onClick?.(e)
   if(e.defaultPrevented||e.button!==0||e.metaKey||e.altKey||e.ctrlKey||e.shiftKey||(props.target&&props.target!=='_self')||props.reloadDocument)return
+  if(path===location.pathname+location.search+location.hash&&props.state===undefined){e.preventDefault();onApproved?.();return}
   if(!needsGuard(path)){onApproved?.();return}
   e.preventDefault()
-  if(path===location.pathname+location.search+location.hash&&props.state===undefined)return
   void guardNavigation(path).then(ok=>{if(!ok)return;onApproved?.();navigate(to,{replace:props.replace,state:props.state,relative:props.relative,preventScrollReset:props.preventScrollReset})})
  }}/>
 }

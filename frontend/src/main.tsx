@@ -41,6 +41,7 @@ import './styles/compat/navigation-and-desktop.css'
 import './styles/compat/production-desktop.css'
 import './styles/resource-components.css'
 import './styles/interaction-components.css'
+import './styles/layout/sidebar-navigation.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(

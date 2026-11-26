@@ -1,0 +1,29 @@
+/* Sidebar structure and history interactions, independent of the page layout. */
+.shell.clean-workspace .nav .clean-nav-group-head{min-width:0;display:flex;align-items:center;gap:2px}
+.shell.clean-workspace .nav .clean-nav-group-head>.clean-group-link{flex:1;min-width:0;min-height:36px;padding:7px 8px}
+.shell.clean-workspace .nav .nav-expander{flex:none;display:grid;place-items:center;width:24px;height:30px;padding:0;border:0;background:transparent;color:var(--muted);border-radius:5px}
+.shell.clean-workspace .nav .nav-expander:hover{background:var(--hover)}
+.shell.clean-workspace .nav .nav-expander[aria-expanded=true] svg{transform:rotate(90deg)}
+.shell.clean-workspace .nav .clean-nav-children{padding-left:18px;display:grid;gap:0}
+.shell.clean-workspace .nav .clean-nav-children .nav-child{font-size:12px;min-height:30px;padding:5px 8px}
+.nav-section-divider{height:1px;background:var(--line);margin:5px 8px}
+.shell.clean-workspace .nav .nav-history-date>small{display:block;padding:7px 8px 2px;color:var(--muted);font-size:11px}
+.nav-history-main{display:flex;align-items:center;gap:1px;min-width:0}
+.shell.clean-workspace .nav .nav-history-main>a{min-height:30px;flex:1;min-width:0;font-size:12px;padding:5px 6px;gap:6px}
+.shell.clean-workspace .nav .nav-history-main>a>svg{flex:none;color:var(--muted)}
+.shell.clean-workspace .nav .nav-record-more{width:24px;min-width:24px;min-height:28px;border:0;background:transparent;border-radius:6px;padding:3px;color:var(--muted);opacity:0}
+.nav-history-row:hover .nav-record-more,.nav-history-row:focus-within .nav-record-more,.nav-record-more[aria-expanded=true]{opacity:1!important}
+.nav-record-actions,.nav-record-rename{display:grid;gap:3px;background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px;margin:2px 0 4px}
+.shell.clean-workspace .nav .nav-record-actions button{text-align:left;font-size:12px;border:0;background:transparent;padding:6px;color:var(--ink);min-height:28px}
+.shell.clean-workspace .nav .nav-record-actions button:hover{background:var(--hover)}
+.nav-record-rename input{width:100%;min-width:0;font-size:12px}.nav-record-rename>div{display:flex;justify-content:flex-end;gap:4px}.nav-record-rename button{font-size:12px;padding:4px}
+.nav-history-error{color:var(--danger)!important}
+.shell.clean-workspace .nav .side-foot{border-top:1px solid var(--line);padding-top:5px;max-height:42%;overflow:visible}
+.nav-fixed-tools{display:grid;gap:1px;margin-bottom:5px}
+.shell.clean-workspace .nav .nav-fixed-tools a{display:flex;align-items:center;gap:8px;padding:6px 8px;min-height:32px;border-radius:7px;color:var(--ink);font-size:12px;white-space:nowrap}
+.shell.clean-workspace .nav .nav-fixed-tools a:hover,.shell.clean-workspace .nav .nav-fixed-tools a.active{background:var(--selected)}
+.shell.clean-workspace.is-collapsed .nav .nav-fixed-tools a{justify-content:center;padding:5px}
+.shell.clean-workspace.is-collapsed .nav .nav-fixed-tools .nav-text{display:none}
+.shell.clean-workspace.is-collapsed .nav .nav-expander,.shell.clean-workspace.is-collapsed .nav .clean-nav-children{display:none}
+@media(max-width:760px){.shell.clean-workspace .nav .clean-nav-group-head>.clean-group-link{min-height:42px}.shell.clean-workspace .nav .nav-expander{height:40px;width:32px}.shell.clean-workspace .nav .clean-nav-children .nav-child{min-height:36px}.shell.clean-workspace .nav .nav-record-more{opacity:1;min-height:34px}.shell.clean-workspace .nav .nav-history-main>a{min-height:35px}.nav-record-rename input{font-size:16px}.shell.clean-workspace .nav .nav-fixed-tools a{min-height:34px}.shell.clean-workspace .nav .side-foot{padding-bottom:env(safe-area-inset-bottom)}}
+@media(max-height:480px){.shell.clean-workspace .nav .side-foot{max-height:none}.shell.clean-workspace .nav .nav-fixed-tools{grid-template-columns:repeat(3,minmax(0,1fr))}.shell.clean-workspace .nav .nav-fixed-tools a{justify-content:center;padding:4px}.shell.clean-workspace .nav .nav-fixed-tools .nav-text{display:none}.shell.clean-workspace.is-collapsed .nav .nav-fixed-tools{grid-template-columns:1fr}}

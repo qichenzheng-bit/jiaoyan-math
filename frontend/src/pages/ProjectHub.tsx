@@ -3,7 +3,7 @@ import {api} from '../auth'
 import {Link,useParams} from 'react-router-dom'
 import {Icon} from '../components/Icon'
 import {workspaceGroups,modules} from '../navigation'
-const intro:Record<string,string>={intake:'AI 整理或手动录入来源；在卡片工作台编辑题目与知识单元。',teaching:'管理数学教学资源、知识体系及自编资料。',creation:'制作视频、组卷、组讲义和组教材，完成后导出。',publishing:'设计并导出教学内容封面。',sales:'管理课程与资料商品、订单和交付。'}
+const intro:Record<string,string>={intake:'AI 整理或手动录入来源；在卡片工作台编辑题目与知识单元。',teaching:'管理数学教学资源、知识体系及自编资料。',creation:'制作视频、组卷、组讲义和组教材，完成后导出。',publishing:'管理教学作品，设计并导出教学内容封面。',sales:'管理课程与资料商品、订单和交付。'}
 export default function ProjectHub(){
  const {id}=useParams(),group=workspaceGroups.find(g=>g.id===id),[counts,setCounts]=useState<Record<string,string>>({})
  useEffect(()=>{if(id!=='teaching')return;const c=new AbortController();const pairs=[['/resources','/resources?kind=question&limit=1','道题'],['/knowledge-library','/resources?kind=knowledge&limit=1','个知识单元'],['/sources','/resources?kind=source&limit=1','份来源'],['/graph','/knowledge/points?limit=1','个知识点']];void Promise.all(pairs.map(async ([key,url,unit])=>{try{const v=await api<{total:number}>(url,{signal:c.signal});if(!c.signal.aborted&&typeof v.total==='number')setCounts(old=>({...old,[key]:v.total+' '+unit}))}catch{}}));return()=>c.abort()},[id])
