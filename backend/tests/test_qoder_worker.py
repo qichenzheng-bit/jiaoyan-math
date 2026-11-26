@@ -65,3 +65,11 @@ def test_catalog_efforts_are_explicit_only():
     assert worker.parse_catalog('MODEL\nAuto\nFast')=={"Auto":[],"Fast":[]}
     assert worker.parse_catalog('{"models":[{"id":"Qwen","efforts":["high","low","--help"]},{"id":"Fast"}]}')=={"Qwen":["low","high"],"Fast":[]}
     assert worker.parse_catalog('MODEL\nAuto\nQwen efforts: low, high')=={"Auto":[],"Qwen":["low","high"]}
+
+
+def test_official_model_info_thinking_config():
+    import json
+    rows=[{"value":"Qwen3.8-Max","isEnabled":True,"thinking_config":{"disabled":{},"enabled":{"efforts":{"high":{"is_default":True},"max":{},"--help":{}}}}},{"value":"Auto"},{"value":"Disabled","isEnabled":False,"efforts":["high"]}]
+    result=worker.parse_catalog(json.dumps({"models":rows}))
+    assert set(result["Qwen3.8-Max"])=={"disabled","high","max"}
+    assert result["Auto"]==[] and "Disabled" not in result

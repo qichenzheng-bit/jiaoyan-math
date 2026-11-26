@@ -9,7 +9,7 @@ export function effortOptions(catalog:ModelCatalog|undefined,model:string,video=
 }
 export default function ReasoningEffort({catalog,model,value,onChange,disabled=false,video=false}:{catalog?:ModelCatalog;model:string;value:string;onChange:(e:string)=>void;disabled?:boolean;video?:boolean}){
  const options=effortOptions(catalog,model,video)
- return <label className="reasoning-effort" title={options.length===1?'CLI 尚未报告此模型可选推理档位，使用模型默认。':'选择本次调用的推理强度'}><span>推理</span><select aria-label="推理强度" value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>{!options.includes(value)&&<option value={value} disabled>{labels[value]??value}（已不可用）</option>}{options.map(e=><option key={e} value={e}>{labels[e]??e}</option>)}</select></label>
+ return <label className="reasoning-effort" title={options.length===1?'CLI 尚未报告此模型可选推理档位；请在 AI 登录与模型中刷新并查看执行服务版本。':'选择本次调用的推理强度'}><span>推理</span><select aria-label="推理强度" value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>{!options.includes(value)&&<option value={value} disabled>{labels[value]??value}（已不可用）</option>}{options.map(e=><option key={e} value={e}>{labels[e]??e}</option>)}</select></label>
 }
 
 // The topbar owns the only interactive inference control; page state owns the actual request.

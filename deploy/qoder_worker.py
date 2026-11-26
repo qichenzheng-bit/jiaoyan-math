@@ -95,11 +95,21 @@ def parse_catalog(output):
     result = {}
     if isinstance(rows, list):
         for row in rows:
-            ident = row if isinstance(row, str) else row.get("id", row.get("model_id", "")) if isinstance(row,dict) else ""
+            ident = row if isinstance(row, str) else row.get("id", row.get("model_id", row.get("value", ""))) if isinstance(row,dict) else ""
             if not isinstance(ident,str) or not MODEL_ID.fullmatch(ident):
                 continue
+            if isinstance(row,dict) and row.get("isEnabled") is False:continue
             values = row.get("efforts", row.get("reasoning_efforts", [])) if isinstance(row,dict) else []
-            result[ident] = [e for e in SUPPORTED_EFFORTS if isinstance(values,list) and e in values]
+            explicit = set(v for v in values if isinstance(v,str)) if isinstance(values,(list,dict)) else set()
+            # Official ModelInfo uses thinking_config.enabled.efforts (a keyed map).
+            for record in (row, row.get("serverModel",{})) if isinstance(row,dict) else ():
+                config=record.get("thinking_config") if isinstance(record,dict) else None
+                if not isinstance(config,dict):continue
+                enabled=config.get("enabled")
+                if isinstance(enabled,dict) and isinstance(enabled.get("efforts"),dict):
+                    explicit.update(enabled["efforts"])
+                if isinstance(config.get("disabled"),dict):explicit.add("disabled")
+            result[ident] = [e for e in SUPPORTED_EFFORTS if e in explicit]
     else:
         result = {name: [] for name in parse_models(clean)}
         for line in clean.splitlines():
@@ -243,7 +253,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 7, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 8, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
