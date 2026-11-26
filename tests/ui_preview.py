@@ -1,7 +1,7 @@
 """Actual compiled React screenshots with isolated, synthetic API responses. No production credentials."""
 from pathlib import Path
 import json
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 OUT=Path("ui-screenshots");OUT.mkdir(exist_ok=True)
 subjects=["高等数学","线性代数","概率论与数理统计","数学分析","高等代数"]
 source={"id":"source-preview","code":"SDEMO0001","kind":"source","title":"考研数学（一）示例试卷","subject":"高等数学","content":"示例资料","source_type":"exam","tags":[],"archived":False,"revision":1}
@@ -42,9 +42,17 @@ def answer(route):
         matches=[{"resource":items[1],"match_kind":"similar","similarity":.87},{"resource":items[2],"match_kind":"similar","similarity":.80}] if "测试查重" in body["content"] else []
         result={"items":matches,"scanned":len(items),"threshold":.80,"total":len(matches),"scope":"full_active_question_bank"}
 
-    if p=="/documents/ai-demo/manual-save" and route.request.method=="POST":
+    if p in ("/documents/ai-demo/manual-save","/documents/demo/manual-save") and route.request.method=="POST":
         body=json.loads(route.request.post_data)
-        result={**body,"revision":body["revision"]+1,"blocks":[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"code":"QNEW","kind":b["kind"],"id":"saved-"+b["uid"]}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]}
+        saved=[]
+        for b in body["blocks"]:
+            if b.get("edit_reference_revision"):
+                snapshot={**b["snapshot"],**{key:b[key] for key in ("title","content","answer","solution","analysis","proof","question_type")},"revision":b["edit_reference_revision"]+1}
+                saved.append({**b,"edit_reference_revision":None,"snapshot":snapshot})
+            elif b["kind"] in ("question","knowledge"):
+                saved.append({**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"code":"QNEW","kind":b["kind"],"id":"saved-"+b["uid"],"revision":1}})
+            else:saved.append(b)
+        result={**body,"revision":body["revision"]+1,"blocks":saved}
     if p=="/documents/ai-demo/ai-edits":result=[ai_edit]
     if p.endswith("/registration-history"):result=[]
     if p=="/documents/ai-demo/registration-preview":result=registration_preview
@@ -292,7 +300,8 @@ with sync_playwright() as p:
             page.locator(".manual-intake-preview .katex").first.wait_for()
             page.screenshot(path=str(OUT/"25-word-intake-preview.png"),full_page=False)
             page.get_by_role("button",name="编辑",exact=True).click()
-            page.evaluate("sessionStorage.removeItem('wg-doc-recovery:ai-demo')")
+            page.get_by_role("button",name="保存整套资料",exact=True).click()
+            page.get_by_text("已保存并直接入库",exact=True).wait_for()
         if name=="04-word":
             page.locator(".manual-word-work .katex").first.wait_for()
             outline=page.locator(".manual-word-outline nav button")
@@ -332,8 +341,8 @@ with sync_playwright() as p:
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.screenshot(path=str(OUT/"24-word-mobile.png"),full_page=False)
             page.set_viewport_size({"width":1600,"height":900})
-            # Restore the original fixture without carrying local recovery to another test.
-            page.evaluate("sessionStorage.removeItem('wg-doc-recovery:demo')")
+            page.get_by_role("button",name="保存整套资料",exact=True).click()
+            page.get_by_text("已保存并直接入库",exact=True).wait_for()
         if name=="06-cover":
             page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
             page.locator(".math-cover-art .katex").first.wait_for()
