@@ -479,7 +479,7 @@ def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
         for r in recent[b["kind"]]:
             if r.id in seen:continue
             matcher=SequenceMatcher(None,query,canonical_text(r.content)[:1200])
-            if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
+            if matcher.real_quick_ratio()<threshold or matcher.quick_ratio()<threshold:continue
             score=matcher.ratio()
             if score>=.75:similar.append((score,r))
         candidates=[candidate(r,v,b) for r in strict]+[candidate(r,v,b,round(s,3)) for s,r in sorted(similar,key=lambda x:-x[0])[:5]]
@@ -584,29 +584,30 @@ def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
     values=bank.clean(bank.Draft(kind="question",title="查重",content=body.content,answer=body.answer,solution=body.solution),db)
     exact_rows=list(db.scalars(select(Resource).where(Resource.kind=="question",Resource.archived==False,
         or_(Resource.fingerprint==values["fingerprint"],Resource.stem_key==values["stem_key"]))
-        .order_by((Resource.fingerprint==values["fingerprint"]).desc(),Resource.updated_at.desc(),Resource.id).limit(10)))
+        .order_by((Resource.fingerprint==values["fingerprint"]).desc(),Resource.updated_at.desc(),Resource.id)))
     seen={r.id for r in exact_rows}
-    query=canonical_text(body.content)[:1500]
+    query=canonical_text(body.content)
+    threshold=.80
     best=[];scanned=0
-    # Select only small text columns and stream; load full question bodies for top results only.
+    # Stream the full active library. Keep every qualifying match, not only the top ten.
     for ident,content in db.execute(select(Resource.id,Resource.content).where(Resource.kind=="question",Resource.archived==False)
                 .execution_options(yield_per=100)):
         scanned+=1
         if ident in seen or not query:continue
-        matcher=SequenceMatcher(None,query,canonical_text(content)[:1500])
+        matcher=SequenceMatcher(None,query,canonical_text(content))
         if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
         score=matcher.ratio()
-        if score>=.75:
-            best.append((score,ident));best=sorted(best,key=lambda x:(-x[0],x[1]))[:10]
+        if score>=threshold:
+            best.append((score,ident))
     def result(r,kind,score):
         tags=list(db.scalars(select(KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(
             ResourceKnowledgeLink.resource_id==r.id,KnowledgePointCatalog.status=="active")))
         return {"resource":{**bank.view(r),"knowledge_tags":list(dict.fromkeys([*r.tags,*tags]))[:20]},"match_kind":kind,"similarity":round(score,3)}
     items=[result(r,match_kind(r,values),1) for r in exact_rows]
-    for score,ident in best[:max(0,10-len(items))]:
+    for score,ident in sorted(best,key=lambda x:(-x[0],x[1])):
         r=db.get(Resource,ident)
         if r and not r.archived:items.append(result(r,"similar",score))
-    return {"items":items,"scanned":scanned,"scope":"full_active_question_bank"}
+    return {"items":items,"scanned":scanned,"threshold":threshold,"total":len(items),"scope":"full_active_question_bank"}
 
 def manual_knowledge(db,subject,chapter,names):
     from app.api.knowledge import norm
