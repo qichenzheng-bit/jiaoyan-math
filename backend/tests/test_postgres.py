@@ -733,6 +733,25 @@ def test_migration_and_login(tmp_path, monkeypatch):
         m=mats[0]
         assert client.post(perf_base+"/materials/"+m["id"]+"/batches",headers=origin,json={"start":201,"end":211}).status_code==422
         assert client.post(perf_base+"/materials/"+m["id"]+"/batches",headers=origin,json={"start":201,"end":210}).status_code==200
+        # F4.1.1: one index, explicit relationships, filtering, safe record preferences.
+        index="/api/intake-records"
+        listing=client.get(index,params={"q":"大资料性能回归"}).json()
+        assert listing["total"]==1 and listing["items"][0]["status"]=="intaking"
+        record=listing["items"][0]
+        assert record["method"]=="ai" and record["href"].startswith("/work?workspace=")
+        assert client.get(index,params={"q":"perf-fixture-0.pdf","method":"ai"}).json()["total"]==1
+        assert client.get(index,params={"q":"大资料性能回归","method":"manual"}).json()["total"]==0
+        assert client.patch(index+"/"+record["id"],headers=origin,json={"title":"性能教材组","hidden":True}).status_code==200
+        assert client.get(index,params={"q":"性能教材组"}).json()["total"]==0
+        assert client.get(index,params={"q":"性能教材组","hidden":True}).json()["total"]==1
+        assert client.get(perf_base).status_code==200
+        assert client.patch(index+"/"+record["id"],headers=origin,json={"hidden":False}).status_code==200
+        assert client.get(index,params={"q":"性能教材组"}).json()["total"]==1
+        combined=client.get(index,params={"q":"分批追加测试"}).json()
+        assert combined["total"]==1
+        assert any(a["href"]=="/intake?doc="+existing_doc["id"] for a in combined["items"][0]["actions"])
+        assert all(r["document_id"]!=existing_doc["id"] for r in client.get(index,params={"method":"manual","limit":100}).json()["items"])
+        assert len(client.get(index,params={"limit":1}).json()["items"])==1
         # Permanent deletion keeps historical metadata, respects references and never races a backup.
         from sqlalchemy import text as sql_text
         from app.models import StoredFile, FileReference

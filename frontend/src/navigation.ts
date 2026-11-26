@@ -6,7 +6,7 @@ export const modules:Module[]=[
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
  {path:'/original-library',name:'原始资料库',desc:'管理上传的原件、处理进度与回收区',icon:'files',group:'resources',ready:true},
- {path:'/intake',name:'手动录入',desc:'在同一资料文档内录入题目与知识单元',icon:'intake',group:'resources',ready:true},
+ {path:'/intake',name:'资料录入',desc:'统一手动录入、AI 工作及历史资料',icon:'intake',group:'resources',ready:true},
  {path:'/intelligence',name:'AI 智能录入',desc:'原文提取与草稿审核',icon:'spark',group:'resources',ready:true},
  {path:'/teaching-library',name:'教学资料库',desc:'自己组编的试卷、讲义和教材',icon:'files',group:'resources',ready:true},
  {path:'/resources',name:'题库',desc:'题目、查重与检索',icon:'resources',group:'resources',ready:true},
@@ -32,7 +32,7 @@ function entry(path:string,name?:string):WorkspaceEntry{
 // Global sidebar is organized by work purpose, not implementation module.
 export const workspaceGroups:WorkspaceGroup[]=[
  {id:'intake',name:'资料录入',icon:'intake',sections:[
-  {id:'intake',name:'录入方式',entries:[{path:'/intake?mode=document',name:'新建资料',icon:'files'},{path:'/intake',name:'我的资料 / 手动录入',icon:'intake'},entry('/original-library')]},
+  {id:'intake',name:'录入方式',entries:[{path:'/intake',name:'录入首页',icon:'intake'},entry('/original-library')]},
  ]},
  {id:'teaching',name:'教学教研',icon:'book',sections:[
   {id:'resources',name:'基础资源',entries:[entry('/resources'),entry('/knowledge-library'),entry('/sources'),entry('/graph')]},

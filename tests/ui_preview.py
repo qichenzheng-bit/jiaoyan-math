@@ -51,6 +51,10 @@ def answer(route):
             result={"plan_id":"agent-plan","job_id":"review-agent-match","revision":1,"fields":["answer"],"pending":False,"candidates":[{"batch_id":"reference-batch","file_id":"reference-file","file_name":"参考答案.pdf","start":21,"end":25,"eligible_count":1,"targets":[{"uid":"review-item","title":"导数计算","fields":["answer"]}]}],"unavailable":[]}
         else:
             route.fulfill(status=200,content_type="application/json",body="null");return
+    if p=="/intake-records":
+        records=[{"id":"d:demo","title":doc["title"],"source_type":"exam","method":"manual","status":"registered","href":"/intake?doc=demo","action":"查看资料","actions":[{"state":"registered","label":"查看资料","href":"/intake?doc=demo"}],"progress":["4 道题"],"file_names":[],"updated_at":1,"hidden":False},{"id":"j:review-demo","title":"AI 审核示例","source_type":"uncategorized","method":"ai","status":"review","href":"/work?job=review-demo&review=1","action":"继续审核","actions":[{"state":"review","label":"继续审核","href":"/work?job=review-demo&review=1"}],"progress":["0/1 条已审核"],"file_names":[],"updated_at":2,"hidden":False}]
+        records=[r for r in records if (not q.get("q") or q["q"][0] in r["title"]) and (not q.get("status") or q["status"][0]==r["status"]) and (not q.get("source_type") or q["source_type"][0]==r["source_type"]) and (not q.get("method") or q["method"][0]==r["method"])]
+        result={"items":records,"total":len(records)}
     if p=="/workspaces":result=[]
     if p=="/workspaces/agent-work-demo":
         result={"id":"agent-work-demo","title":"持续工作预览","materials":[{"id":"agent-material","file":{"id":"agent-pdf","name":"高等数学.pdf","media_type":"application/pdf"},"total_units":100,"verified_units":5,"next_unit":6,"batches":[{"id":"agent-batch","start":1,"end":5,"units":[],"verified":True}]}]}
@@ -297,11 +301,20 @@ with sync_playwright() as p:
                 assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
                 page.evaluate("document.fonts.ready")
                 if name=="01-intake":
-                    expect(page.locator(".intake-entry")).to_have_count(1)
-                    expect(page.locator(".intake-entry[href='/work']")).to_have_count(0)
+                    expect(page.locator(".intake-entry")).to_have_count(2)
+                    expect(page.locator(".intake-entry[href='/work?workspace=new']")).to_be_visible()
                     expect(page.locator(".intake-entry[href='/intake?mode=document']")).to_be_visible()
                     assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
-                    expect(page.get_by_role("button",name="其他",exact=True)).to_be_visible()
+                    expect(page.get_by_label("资料类型",exact=True)).to_be_visible()
+                    expect(page.locator(".intake-record")).to_have_count(2)
+                    page.get_by_role("button",name="待审核",exact=True).click()
+                    expect(page.locator(".intake-record")).to_have_count(1)
+                    expect(page.locator(".intake-record-name")).to_contain_text("AI 审核示例")
+                    page.get_by_role("button",name="全部",exact=True).click()
+                    page.get_by_label("搜索资料",exact=True).fill("考研")
+                    expect(page.locator(".intake-record")).to_have_count(1)
+                    page.get_by_label("搜索资料",exact=True).fill("")
+                    expect(page.locator(".intake-record")).to_have_count(2)
                 if name=="16-intake-document":
                     expect(page.get_by_text("整份资料不限定科目，逐条填写科目。",exact=True)).to_be_visible()
                     page.get_by_role("button",name="试卷",exact=True).click()
