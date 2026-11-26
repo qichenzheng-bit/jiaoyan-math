@@ -89,3 +89,14 @@ def test_sdk_catalog_is_preferred(monkeypatch):
 def test_missing_sdk_is_safe(monkeypatch,tmp_path):
     monkeypatch.setattr(worker,"SDK_PYTHON",tmp_path/"missing")
     assert worker.sdk_catalog("/usr/bin/qoderclicn")== (None,"sdk_missing")
+
+
+def test_sdk_display_names_match_cli_preferences():
+    rows=[
+      {"value":"qmodel_latest","displayName":"Qwen4-Max","isEnabled":True,"thinking_config":{"disabled":{},"enabled":{"efforts":{"xhigh":{},"high":{"is_default":True},"low":{}}}}},
+      {"value":"auto","displayName":"Auto","thinking_config":None},
+      {"value":"dmodel","displayName":"DeepSeek-V4-Pro","thinking_config":{"enabled":{"efforts":{"high":{},"max":{}}}}},
+      {"value":"gmodel","displayName":"GLM-5.3","isEnabled":False,"thinking_config":{"enabled":{"efforts":{"high":{}}}}},
+      {"value":"unknown","thinking_config":{"enabled":{"efforts":{"high":{}}}}}
+    ]
+    assert worker.parse_sdk_catalog({"models":rows})=={"Qwen4-Max":["disabled","low","high","xhigh"],"Auto":[],"DeepSeek-V4-Pro":["high","max"]}

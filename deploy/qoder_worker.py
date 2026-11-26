@@ -121,21 +121,33 @@ def parse_catalog(output):
                 result[ident]=[e for e in SUPPORTED_EFFORTS if e in re.split(r"[, /|]+",values.lower())]
     return dict(list(result.items())[:200])
 
+def parse_sdk_catalog(payload):
+    # SDK value is the internal identifier; CLI expects display names for built-in
+    # models. Keep existing UI/DB identifiers and never map by list position.
+    rows=[]
+    seen=set()
+    for row in payload.get("models",[]):
+        if not isinstance(row,dict) or row.get("isEnabled") is False:continue
+        value=row.get("value")
+        name=row.get("displayName")
+        if not isinstance(value,str) or not MODEL_ID.fullmatch(value):continue
+        if value in ("auto","fast"):name=value.capitalize()
+        if not isinstance(name,str) or not MODEL_ID.fullmatch(name):continue
+        if name in seen:continue
+        seen.add(name)
+        rows.append({**row,"id":name})
+    return parse_catalog(json.dumps({"models":rows}))
+
 SDK_CATALOG_SCRIPT = r"""
 import asyncio, json, sys
 from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth
 
 async def main():
-    options = QoderAgentOptions(auth=qodercli_auth(), cli_path=sys.argv[1],
-        cwd=sys.argv[2], tools=[], allowed_tools=[], skills=[], mcp_servers={},
-        strict_mcp_config=True, extra_args={"no-session-persistence": None})
-    client = QoderSDKClient(options=options)
-    await client.connect()
-    try:
+    options = QoderAgentOptions(auth=qodercli_auth(), tools=[],
+        allowed_tools=[], cwd=sys.argv[2])
+    async with QoderSDKClient(options=options) as client:
         models = await client.get_available_models()
         print(json.dumps({"models": models}, ensure_ascii=False))
-    finally:
-        await client.disconnect()
 
 asyncio.run(main())
 """
@@ -145,7 +157,8 @@ def sdk_catalog(exe):
     try:
         with tempfile.TemporaryDirectory(prefix="qoder-sdk-models-") as work:
             proc=subprocess.Popen([str(SDK_PYTHON),"-c",SDK_CATALOG_SCRIPT,exe,work],
-                cwd=work,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+                cwd=work,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,
+                env={**os.environ,"PATH":str(Path(exe).parent)+os.pathsep+os.environ.get("PATH","")})
             try:
                 out,_=proc.communicate(timeout=25)
             except subprocess.TimeoutExpired:
@@ -154,7 +167,7 @@ def sdk_catalog(exe):
         if proc.returncode!=0:return None,"sdk_failed"
         payload=json.loads(out.decode("utf-8"))
         if not isinstance(payload,dict) or not isinstance(payload.get("models"),list):return None,"sdk_invalid"
-        metadata=parse_catalog(json.dumps(payload))
+        metadata=parse_sdk_catalog(payload)
         if not metadata:return None,"sdk_empty"
         return metadata,"sdk"
     except (OSError,ValueError):
@@ -302,7 +315,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 9, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 10, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
