@@ -19,18 +19,21 @@ from app.api.intelligence import router as intelligence_router
 from app.api.tasks import router as task_router
 from app.api.studio import router as studio_router
 from app.api.video import router as video_router
+from app.api.qiandao import router as qiandao_router, scheduler as qiandao_scheduler
 
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(model_refresh_loop())
+    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler())]
     try:
         yield
     finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.version,
@@ -48,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(task_router, prefix="/api")
     app.include_router(studio_router, prefix="/api")
     app.include_router(video_router, prefix="/api")
+    app.include_router(qiandao_router, prefix="/api")
 
     @app.middleware("http")
     async def no_cache(request: Request, call_next):
