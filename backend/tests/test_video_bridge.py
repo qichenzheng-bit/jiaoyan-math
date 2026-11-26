@@ -45,3 +45,18 @@ def test_video_model_syncs_both_groups(monkeypatch):
 
     video_engine.configure_production_model("Fast","high")
     assert all(group["reasoning_effort"]=="high" for group in state.values())
+
+
+def test_video_effort_override_is_validated(monkeypatch):
+    from app.api import video, qoder
+    monkeypatch.setattr(qoder,"video_model_preference",lambda db:"Fast")
+    monkeypatch.setattr(qoder,"stored_effort",lambda db,key:"medium")
+    monkeypatch.setattr(qoder,"available_models",lambda:{"source":"cli","models":[{"id":"Fast","efforts":["medium","high"]}]})
+    calls=[]
+    monkeypatch.setattr(video_engine,"configure_production_model",lambda model,effort:calls.append((model,effort)))
+    video.prepare_model(None)
+    video.prepare_model(None,"high")
+    assert calls==[("Fast","medium"),("Fast","high")]
+    with pytest.raises(HTTPException) as exc:video.prepare_model(None,"max")
+    assert exc.value.status_code==422
+    assert len(calls)==2

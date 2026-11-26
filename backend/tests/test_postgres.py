@@ -217,7 +217,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert new["code"]!=same["code"] and new["id"]!=same["id"]
         assert client.get("/api/resources/"+same["id"]).json()["content"]==same["content"]
         from app.api import qoder
-        monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
+        monkeypatch.setattr(qoder,"available_models",lambda:{"source":"cli","models":[{"id":"Auto","efforts":["high","medium"]},{"id":"Qwen4-Max","efforts":["low"]}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto","video_model":"Auto","effort":"default","video_effort":"default"}
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Qwen4-Max"}).status_code==200
         assert client.get("/api/qoder/preferences").json()=={"model":"Qwen4-Max","video_model":"Auto","effort":"default","video_effort":"default"}
@@ -227,16 +227,21 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Unknown"}).status_code==422
         assert client.put("/api/qoder/preferences",json={"model":"Auto"}).status_code==403
         from app.api import qoder as chat_qoder
+        worker_calls=[]
         def fake_worker(method,path,body=None):
             if path=="/status": return {"chat_available":True}
-            if path=="/chat/start": return {"state":"running"}
+            if path=="/chat/start":
+                worker_calls.append(body)
+                return {"state":"running"}
             return {"state":"done","answer":"2","detail":""}
         monkeypatch.setattr(chat_qoder,"request",fake_worker)
         session=client.post("/api/chat/sessions",headers=origin,json={})
         assert session.status_code==200,session.text
         chat_id=session.json()["id"]
-        reply=client.post("/api/chat/sessions/"+chat_id+"/turn",headers=origin,json={"content":"1+1","model":"Auto"})
+        reply=client.post("/api/chat/sessions/"+chat_id+"/turn",headers=origin,json={"content":"1+1","model":"Auto","effort":"high"})
         assert reply.status_code==200,reply.text
+        assert worker_calls[-1]["effort"]=="high"
+        assert client.post("/api/chat/sessions/"+chat_id+"/turn",headers=origin,json={"content":"测试","model":"Auto","effort":"max"}).status_code==422
         assert reply.json()["messages"][-1]["content"]=="2"
         assert client.patch("/api/chat/sessions/"+chat_id,headers=origin,json={"pinned":True}).json()["pinned"]
         assert client.get("/api/chat/sessions").json()[0]["id"]==chat_id
@@ -266,11 +271,15 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/intelligence/chat-source/missing").status_code==404
         def fake_ingest(method,path,body=None):
             if path=="/status":return {"chat_available":True}
-            if path=="/chat/start":return {"state":"running"}
+            if path=="/chat/start":
+                worker_calls.append(body)
+                return {"state":"running"}
             return {"state":"done","answer":'[{"kind":"question","title":"测试提取","content":"求极限"}]'}
         monkeypatch.setattr(qoder,"request",fake_ingest)
-        imported_job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"文件导入","text":"test file","import_id":import_id})
+        imported_job=client.post("/api/intelligence/jobs",headers=origin,json={"title":"文件导入","text":"test file","import_id":import_id,"effort":"medium"})
         assert imported_job.status_code==200,imported_job.text
+        assert worker_calls[-1]["effort"]=="medium"
+        assert imported_job.json()["provenance"]["effort"]=="medium"
         assert imported_job.json()["provenance"]["file_id"]==item["id"]
         assert imported_job.json()["provenance"]["edited"] is False
         assert client.post("/api/files/"+item["id"]+"/archive",headers=origin).status_code==409
