@@ -397,6 +397,13 @@ def test_migration_and_login(tmp_path, monkeypatch):
                 assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ready["id"]}).json()["state"]=="confirmed"
                 assert client.get(agent_url).json()["id"]==ready["id"]
                 assert client.get(wb).json()["materials"][0]["batches"]==[]
+                dispatched=client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]})
+                assert dispatched.status_code==200,dispatched.text
+                assert dispatched.json()["state"]=="dispatched"
+                bid=dispatched.json()["result"]["batch_id"]
+                assert client.get(wb).json()["materials"][0]["batches"][0]["id"]==bid
+                assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]}).json()["result"]["batch_id"]==bid
+                assert client.get(agent_url).json()["result"]["batch_id"]==bid
             for page in (1,2):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
                 assert batch.status_code==200,batch.text

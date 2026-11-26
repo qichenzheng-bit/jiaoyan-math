@@ -37,6 +37,7 @@ class Intent(BaseModel):
         elif not self.file_id:raise ValueError("missing file")
         if self.action=="recognize":
             if self.batch_id or self.count is None:raise ValueError("missing range")
+            if self.start is not None and self.start+self.count-1>10000:raise ValueError("range out of bounds")
         elif self.start is not None or self.count is not None:raise ValueError("unexpected range")
         if self.action in ("open_batch","organize","review") and not self.batch_id:raise ValueError("missing batch")
         if self.action=="attach" and self.batch_id:raise ValueError("unexpected batch")
@@ -154,7 +155,56 @@ def confirm(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(
     from app.api import workspaces as w
     s=w.workspace(db,ident,True);r=current(s)
     if not r or r["id"]!=body.plan_id or r["state"] not in ("ready","confirmed"):raise HTTPException(409,"计划已变化")
-    if resolve(db,Intent.model_validate(r["intent"]))!=r["plan"]:raise HTTPException(409,"资料或进度已变化，请重新规划")
+    if r["state"]=="ready" and resolve(db,Intent.model_validate(r["intent"]))!=r["plan"]:raise HTTPException(409,"资料或进度已变化，请重新规划")
     if r["state"]=="ready":
-        r={**r,"state":"confirmed","detail":"计划已确认"};save(db,s,r);audit(db,"work.agent.confirm",user.id);db.commit()
+        r={**r,"state":"confirmed","detail":"计划已确认，尚未执行"};save(db,s,r);audit(db,"work.agent.confirm",user.id);db.commit()
+    return public(r)
+
+
+@router.post("/{ident}/agent/dispatch",dependencies=[Depends(require_origin)])
+def dispatch(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    """Idempotent dispatch of an explicitly confirmed plan, using the existing guarded tools.
+    The exact range is frozen at confirmation, not recomputed during recovery.
+    Recognition itself still proceeds page by page and pauses for review.
+    """
+    from app.api import workspaces as w
+    s=w.workspace(db,ident,True);r=current(s)
+    if not r or r["id"]!=body.plan_id or r["state"] not in ("confirmed","dispatched"):
+        raise HTTPException(409,"请先确认当前计划")
+    if r["state"]=="dispatched":return public(r)
+    p=r["plan"];intent=Intent.model_validate(r["intent"])
+    if p["action"]=="clarify":raise HTTPException(422,"澄清不是执行操作")
+    # Recheck all originals before attaching, including previously attached files.
+    ids=sorted(set([intent.file_id,*intent.reference_ids]))
+    originals=list(db.scalars(w.original_query().where(StoredFile.id.in_(ids),StoredFile.archived==False)))
+    if len(originals)!=len(ids):raise HTTPException(409,"原件已不可用，请重新规划")
+    # Existing tools commit independently. Exact range creation and organization are idempotent.
+    linked=w.attach(ident,w.Attach(file_ids=ids),db,user)
+    m=next((x for x in linked["materials"] if x["file"]["id"]==intent.file_id),None)
+    if not m or m["file"].get("archived"):raise HTTPException(409,"资料不可用")
+    result={"material_id":m["id"],"action":p["action"]}
+    if p["action"]=="recognize":
+        b=w.create_batch(ident,m["id"],w.Range(start=p["start"],end=p["end"]),db,user)
+        result["batch_id"]=b["id"]
+    elif p["action"]!="attach":
+        b=w.read_batch(ident,p["batch_id"],db)
+        result["batch_id"]=b["id"]
+        if p["action"]=="organize":
+            job=w.organize(ident,b["id"],w.Organize(model=r["model"],effort=r["effort"],intent=p["focus"]),db,user)
+            result["job_id"]=job["id"]
+        elif p["action"]=="review":
+            if not b["job_id"]:raise HTTPException(409,"该批尚无整理任务")
+            result["job_id"]=b["job_id"]
+    # Another tab may have created a newer plan while these guarded tools committed.
+    s=w.workspace(db,ident,True)
+    latest=current(s)
+    if latest and latest["id"]==r["id"]:
+        if latest["state"]=="dispatched":return public(latest)
+        r={**latest,"state":"dispatched","result":result,"detail":"已进入对应工作流程，结果仍需核对"}
+        save(db,s,r);audit(db,"work.agent.dispatch",user.id);db.commit()
+        return public(r)
+    # Do not move an older record to the end or overwrite the new current plan.
+    r={**r,"state":"dispatched","result":result,"detail":"已进入对应工作流程"}
+    s.agent_history=[r if x["id"]==r["id"] else x for x in (s.agent_history or [])]
+    audit(db,"work.agent.dispatch",user.id);db.commit()
     return public(r)
