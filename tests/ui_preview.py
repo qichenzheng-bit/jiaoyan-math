@@ -1,3 +1,4 @@
+import os
 """Actual compiled React screenshots with isolated, synthetic API responses. No production credentials."""
 from pathlib import Path
 import json
@@ -96,7 +97,9 @@ def answer(route):
     if result is None:result={}
     route.fulfill(status=200,content_type="application/json",body=json.dumps(result,ensure_ascii=False))
 with sync_playwright() as p:
-    browser=p.chromium.launch(headless=True)
+    # Hosted CI already supplies Chrome; local developers can use Playwright Chromium.
+    channel=os.environ.get('WG_BROWSER_CHANNEL')
+    browser=p.chromium.launch(headless=True, **({'channel':channel} if channel else {}))
     context=browser.new_context(viewport={"width":1600,"height":900},device_scale_factor=1)
     context.route("**/api/**",answer)
     page=context.new_page()
