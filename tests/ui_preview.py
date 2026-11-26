@@ -39,7 +39,9 @@ def answer(route):
             result={**json.loads(route.request.post_data),"revision":2}
     if p=="/documents/manual-matches" and route.request.method=="POST":
         body=json.loads(route.request.post_data)
-        result={"items":[{"resource":items[1],"match_kind":"similar","similarity":.87}] if "测试查重" in body["content"] else [],"scanned":len(items),"scope":"full_active_question_bank"}
+        matches=[{"resource":items[1],"match_kind":"similar","similarity":.87},{"resource":items[2],"match_kind":"similar","similarity":.80}] if "测试查重" in body["content"] else []
+        result={"items":matches,"scanned":len(items),"threshold":.80,"total":len(matches),"scope":"full_active_question_bank"}
+
     if p=="/documents/ai-demo/manual-save" and route.request.method=="POST":
         body=json.loads(route.request.post_data)
         result={**body,"revision":body["revision"]+1,"blocks":[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"code":"QNEW","kind":b["kind"],"id":"saved-"+b["uid"]}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]}
@@ -317,15 +319,20 @@ with sync_playwright() as p:
     page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
     page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
     page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
-    page.get_by_label("知识标签",exact=True).fill("导数")
-    page.get_by_label("知识标签",exact=True).press("Enter")
+    page.get_by_role("button",name="选择已有知识点",exact=True).click()
+    page.locator(".manual-tag-catalog").get_by_role("button",name="导数 · 微积分",exact=True).click()
+    page.get_by_label("知识标签",exact=True).fill("新知识点")
+    page.get_by_role("button",name="新增标签",exact=True).click()
+    assert page.get_by_role("button",name="移除知识标签 新知识点",exact=True).is_visible()
     assert page.get_by_role("button",name="移除知识标签 导数",exact=True).is_visible()
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 解答题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("测试查重")
-    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).wait_for()
+    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.wait_for()
+    assert page.locator(".manual-match").count()==2
+    assert page.get_by_text("相似度 80.0%",exact=False).is_visible()
     page.once("dialog",lambda dialog:dialog.accept())
-    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).click()
+    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.click()
     assert page.get_by_label("题目",exact=True).get_attribute("contenteditable")=="false"
     assert page.get_by_text("已选择原题 QDEMO0002",exact=False).is_visible()
     page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()

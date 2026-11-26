@@ -167,6 +167,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert found.status_code==200,found.text
         assert found.json()["scope"]=="full_active_question_bank"
         assert any(x["resource"]["id"]==original["id"] and x["match_kind"]=="exact" for x in found.json()["items"])
+        assert found.json()["threshold"]==0.8
+        # More than ten equal stems must all survive duplicate search.
+        match_ids=set()
+        stem="求函数在给定区间上的极限值并写出详细计算步骤"
+        for j in range(12):
+            variant=client.post("/api/resources",headers=origin,json={"kind":"question","title":"查重测试","subject":"高等数学","content":stem,"answer":str(j),"solution":"逐步计算"})
+            assert variant.status_code==200,variant.text
+            match_ids.add(variant.json()["id"])
+        matched=client.post("/api/documents/manual-matches",headers=origin,json={"content":stem,"answer":"0","solution":"逐步计算"})
+        assert matched.status_code==200,matched.text
+        assert match_ids <= {x["resource"]["id"] for x in matched.json()["items"]}
+        assert all(x["similarity"]>=0.8 for x in matched.json()["items"])
+        assert matched.json()["total"]==len(matched.json()["items"])
+
         new_source=client.post("/api/documents/setup",headers=origin,json={"title":"复用试卷","subject":"线性代数","source_type":"exam"}).json()
         reuse_path="/api/documents/"+new_source["id"]+"/manual-save"
         reused_block={**draft_blocks[1],"question_type":original["question_type"],"uid":"reuse-question","reuse_resource_id":original["id"],"reuse_revision":original["revision"],"knowledge_tags":["矩阵运算","矩阵乘法"]}
