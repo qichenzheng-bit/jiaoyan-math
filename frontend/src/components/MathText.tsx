@@ -39,7 +39,7 @@ function textNodes(value:string,compact:boolean):ReactNode[]{
 function nodes(content:string,compact:boolean):ReactNode[]{return mathTokens(content).map((t,i)=>{
  if(t.kind==='math'){
   // AMS display wrappers are normalized for KaTeX without changing the stored formula.
-  const latex=t.value.replace(/^\\begin\{(?:align\*?|split)\}([\s\S]*)\\end\{(?:align\*?|split)\}$/,'\\begin{aligned}$1\\end{aligned}').replace(/^\\begin\{gather\*?\}([\s\S]*)\\end\{gather\*?\}$/,'\\begin{gathered}$1\\end{gathered}').replace(/^\\begin\{equation\*?\}([\s\S]*)\\end\{equation\*?\}$/,'$1')
+  const latex=t.value
   return <MathFormula key={i} latex={latex} display={!compact&&Boolean(t.display)} />
  }
  if(t.kind==='image'){const image=inlineImage(t.value);return image?<span key={i} className={'stored-inline-image'+(compact?' compact':'')} style={{width:compact?undefined:image.width+'%'}}><img src={image.url} alt="配图" loading="lazy"/></span>:<span key={i}>{t.value}</span>}

@@ -1,6 +1,7 @@
 import {createContext,useContext,useCallback,useLayoutEffect,useRef,type Ref} from 'react'
 import {inlineImagePattern,inlineImage,imageToken} from './inlineImages'
-import katex from 'katex'
+import {renderMathHtml,mathError} from './mathRendering'
+import 'katex/dist/katex.min.css'
 export const InlineImageUpload=createContext<((file:File,complete:(id:string)=>void,failed:()=>void)=>void)|null>(null)
 
 const formula=/(?<!\\)\$\$[\s\S]+?(?<!\\)\$\$|(?<![\\$])\$(?!\$)[^\n]+?(?<!\\)\$(?!\$)|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g
@@ -22,7 +23,8 @@ function drawMath(el:HTMLElement,raw:string){
  el.dataset.mathSource=raw;el.classList.remove('inline-math-invalid');el.replaceChildren()
  const display=raw.startsWith('$$')||raw.startsWith('\\[')
  const latex=raw.slice(raw.startsWith('$$')||raw.startsWith('\\')?2:1,raw.startsWith('$$')||raw.startsWith('\\')?-2:-1)
- try{if(latex.length>12000)throw Error('too long');katex.render(latex.replace(/\\lim(?=\s*_)/g,'\\lim\\limits'),el,{displayMode:display,throwOnError:true,trust:false,maxExpand:1000,maxSize:20})}catch{el.textContent=raw;el.classList.add('inline-math-invalid')}
+ el.removeAttribute('aria-invalid');el.title='点击编辑 LaTeX'
+ try{el.innerHTML=renderMathHtml(latex,display)}catch{el.textContent=raw;el.classList.add('inline-math-invalid');el.setAttribute('aria-invalid','true');el.title=mathError(latex)+' 点击编辑原公式。'}
  el.classList.toggle('inline-math-display',display)
 }
 function makeToken(raw:string){

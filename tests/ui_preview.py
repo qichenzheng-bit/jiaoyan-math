@@ -471,6 +471,8 @@ with sync_playwright() as p:
                     expect(page.get_by_label("章节",exact=True)).to_be_visible()
                     page.get_by_role("button",name="收起筛选").click()
                     page.locator(".bank-detail .katex").first.wait_for()
+                    # Inline limit notation uses an under-script, not a side subscript.
+                    assert page.locator(".bank-list .katex .op-limits").count()>0
                     assert page.locator(".bank-list .katex").count()>0
                 if name=="25-word-ai":
                     page.locator(".manual-word-work").wait_for()
@@ -582,6 +584,7 @@ with sync_playwright() as p:
                     page.get_by_role("button",name="＋ 公式",exact=True).click()
                     page.locator(".fc-art .katex").first.wait_for()
                     page.get_by_label("LaTeX 源码",exact=True).fill(r"\lim\limits_{x\to0}\frac{\sin x}{x}")
+                    page.locator(".fc-art .katex .op-limits").first.wait_for()
                     page.get_by_role("button",name="＋ 文字",exact=True).click()
                     page.get_by_label("内容（支持 LaTeX）",exact=True).fill("极限计算")
                     page.get_by_label("Y",exact=True).fill("100")
@@ -785,6 +788,19 @@ with sync_playwright() as p:
             assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
             page.get_by_role("button",name="切换卡片版").click()
             assert page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")==r"$\frac{1}{x^2}$"
+            editor=page.get_by_label("题目",exact=True)
+            editor.fill(r"求 $\lim\nolimits_{x\to0}\frac{\sin x}{x}$。")
+            editor.blur()
+            editor.locator(".inline-math-token .op-limits").wait_for()
+            assert editor.locator(".inline-math-token").get_attribute("data-math-source")==r"$\lim\nolimits_{x\to0}\frac{\sin x}{x}$"
+            editor.fill(r"求 $\frac{1}{x$。")
+            editor.blur()
+            expect(editor.locator(".inline-math-invalid")).to_have_attribute("aria-invalid","true")
+            assert editor.locator(".inline-math-invalid").get_attribute("data-math-source")==r"$\frac{1}{x$"
+            editor.fill(r"求 $\frac{1}{x^2}$ 的导数。")
+            editor.blur()
+            editor.locator(".inline-math-token .katex").wait_for()
+
             expect(page.get_by_role("button",name="＋ 选择题",exact=True)).to_have_count(0)
             page.get_by_role("button",name="下一条 · 新增",exact=True).click()
             expect(page.get_by_label("题目",exact=True)).to_have_count(0)
