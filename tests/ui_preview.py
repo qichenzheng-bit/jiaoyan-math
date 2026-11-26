@@ -307,7 +307,8 @@ with sync_playwright() as p:
             assert page.locator(".manual-word-matches .manual-match").count()==2
             page.locator(".manual-word-paper-tail").first.click()
             expect(page.locator(".manual-word-editor")).to_have_count(0)
-            expect(page.locator(".manual-word-paper .katex")).to_have_count(2)
+            expect(page.locator(".manual-word-paper .manual-word-stem .katex").first).to_be_visible()
+            expect(page.locator(".manual-word-paper .manual-word-stem").first.locator(".katex")).to_have_count(2)
             page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
             expect(page.get_by_label("题目",exact=True).locator(".inline-math-token").nth(0)).to_have_attribute("data-math-source","$x^3$")
             page.get_by_role("button",name="完成编辑",exact=True).click()
