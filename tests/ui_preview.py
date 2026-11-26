@@ -391,7 +391,8 @@ with sync_playwright() as p:
     with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-save") and req.method=="POST") as request_info:
         page.get_by_role("button",name="保存整套资料",exact=True).click()
     submitted=request_info.value.post_data_json
-    assert len(submitted["blocks"])==5
+    assert len(submitted["blocks"])==7
+    assert [b["heading_level"] for b in submitted["blocks"] if b["kind"]=="heading"]==[1,2]
     assert submitted["blocks"][0]["difficulty"]=="中等"
     assert submitted["blocks"][1]["question_type"]=="多选题"
     page.get_by_text("已保存并直接入库",exact=True).wait_for()
