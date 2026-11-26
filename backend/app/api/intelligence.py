@@ -317,6 +317,11 @@ class SupplementStart(Confirm):
     revise:bool=False
 class SourceSupplementStart(SupplementStart):
     source_batch_id:str=Field(min_length=1,max_length=36)
+class BatchSourceStart(Confirm):
+    item_uids:list[str]=Field(min_length=1,max_length=10)
+    fields:list[Literal["answer","solution","analysis","proof"]]=Field(min_length=1,max_length=4)
+    source_batch_id:str=Field(min_length=1,max_length=36)
+    instruction:str=Field(default="",max_length=2000)
 class SupplementAccept(Confirm):
     fields:list[SupplementField]=Field(min_length=1,max_length=5)
 
@@ -422,8 +427,72 @@ def source_match(id:str,body:SourceSupplementStart,db:Session=Depends(get_db),us
             s=find_supplement(db,id,s.id);s.state="failed";s.detail=str(e.detail)[:400];s.updated_at=now();db.commit()
     return supplement_view(s)
 
+def batch_match_targets(items,ids,fields):
+    if len(ids)!=len(set(ids)) or len(fields)!=len(set(fields)):
+        raise HTTPException(422,"条目或字段重复")
+    by_uid={x["uid"]:x for x in items}
+    targets=[]
+    for uid in ids:
+        item=by_uid.get(uid)
+        if not item or item.get("reuse_resource_id"):raise HTTPException(422,"条目不存在或已关联已有题目")
+        missing=[k for k in fields if k in allowed_supplements(item) and k in {"answer","solution","analysis","proof"}]
+        if not missing:raise HTTPException(422,"选中条目没有所需的缺失字段，请调整选择")
+        targets.append({"item":item,"fields":missing})
+    return targets
+
+def parse_batch_source(raw,targets,reference):
+    if not isinstance(raw,str):raise ValueError('invalid batch response')
+    raw=raw.strip();fence=chr(96)*3
+    if raw.startswith(fence+"json") and raw.endswith(fence):raw=raw[7:-3].strip()
+    data=json.loads(raw)
+    allowed={t["item"]["uid"]:t["fields"] for t in targets}
+    if not isinstance(data,dict) or set(data)-set(allowed):raise ValueError("unknown target")
+    results={}
+    for uid,fields in allowed.items():
+        try:results[uid]=literal_source_proposal(json.dumps(data.get(uid,{}),ensure_ascii=False),fields,reference)
+        except (ValueError,TypeError):results[uid]={}
+    return results
+
+@router.post("/jobs/{id}/source-match-batch",dependencies=[Depends(require_origin)])
+def source_match_batch(id:str,body:BatchSourceStart,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    j=get_job(db,id)
+    if j.state!="review" or j.revision!=body.revision:raise HTTPException(409,"草稿版本冲突，请先保存")
+    if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
+        raise HTTPException(409,"请先处理当前建议")
+    targets=batch_match_targets(j.items,body.item_uids,body.fields)
+    b,m,f=source_batch(db,body.source_batch_id,True);meta=source_meta(b,m,f)
+    prompt=("匹配多条教学资料与已核对的参考原文。仅输出JSON对象，外层键为条目的uid，值为对应的字段对象。"
+        "字段值必须是参考正文中连续且完全相同的原文片段。禁止自行解题、改写或补造。题号相同不代表题目相同。"
+        "不确定对应关系时省略字段或该条目；全部无法确定时输出空对象。"
+        "\n待匹配条目及允许字段："+json.dumps(targets,ensure_ascii=False)+"\n用户提示："+body.instruction+"\n【参考正文】\n"+b.verified_text+"\n【参考正文结束】")
+    if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"条目和参考正文过长，请减少本次选择")
+    if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"Qoder执行服务未就绪")
+    group=str(uuid4());first=targets[0]
+    s=IntakeSupplement(id=group,job_id=j.id,item_uid=first["item"]["uid"],base_revision=j.revision,base_item={**first["item"],"_wg_source":meta,"_wg_source_group":group,"_wg_source_targets":targets},fields=first["fields"],instruction=body.instruction,model=j.model,state="running",detail="批量匹配"+str(len(targets))+"个条目",proposal={},accepted=[],created_at=now(),updated_at=now())
+    db.add(s);storage.link_file(db,f.id,"intake_supplement",s.id)
+    audit(db,"intelligence.source_match.batch",user.id);db.commit()
+    try:qoder.request("POST","/chat/start",{"id":s.id,"model":s.model,"prompt":prompt,**qoder.assistant_effort(db,s.model)})
+    except HTTPException as e:
+        if e.status_code not in (503,504):
+            s=find_supplement(db,id,s.id);s.state="failed";s.detail=str(e.detail)[:400];s.updated_at=now();db.commit()
+    return supplement_view(s)
+
+def finish_batch_source(db,s,raw):
+    snapshot=s.base_item or {};targets=snapshot["_wg_source_targets"];meta=snapshot["_wg_source"];group=snapshot["_wg_source_group"]
+    b,m,f=source_batch(db,meta["batch_id"],True)
+    proposals=parse_batch_source(raw,targets,b.verified_text)
+    for index,t in enumerate(targets):
+        item=t["item"];proposal=proposals[item["uid"]]
+        base={**item,"_wg_source_group":group,"_wg_source":{**meta,"pages":{k:source_page(v,b) for k,v in proposal.items()}}}
+        row=s if index==0 else IntakeSupplement(id=str(uuid4()),job_id=s.job_id,item_uid=item["uid"],base_revision=s.base_revision,fields=t["fields"],instruction=s.instruction,model=s.model,accepted=[],created_at=s.created_at)
+        row.base_item=base;row.proposal=proposal;row.state="review" if proposal else "failed"
+        row.detail="找到原文片段，待逐条确认" if proposal else "未匹配到可靠原文，原条目未修改"
+        row.updated_at=now()
+        if index:
+            db.add(row);storage.link_file(db,f.id,"intake_supplement",row.id)
+
 def supplement_view(s):
-    return {**{k:getattr(s,k) for k in ("id","job_id","item_uid","base_revision","fields","instruction","model","state","detail","proposal","accepted","created_at","updated_at")},"revise":bool((s.base_item or {}).get("_wg_revision")),"source":(s.base_item or {}).get("_wg_source")}
+    return {**{k:getattr(s,k) for k in ("id","job_id","item_uid","base_revision","fields","instruction","model","state","detail","proposal","accepted","created_at","updated_at")},"revise":bool((s.base_item or {}).get("_wg_revision")),"source":(s.base_item or {}).get("_wg_source"),"source_group":(s.base_item or {}).get("_wg_source_group"),"target_count":len((s.base_item or {}).get("_wg_source_targets",[])) or None}
 
 def find_supplement(db,job_id,ident):
     s=db.scalar(select(IntakeSupplement).where(IntakeSupplement.job_id==job_id,IntakeSupplement.id==ident).with_for_update())
@@ -443,6 +512,8 @@ def sync_supplement(db,s):
         if state=="done":
             try:
                 meta=(s.base_item or {}).get("_wg_source")
+                if (s.base_item or {}).get("_wg_source_targets"):
+                    finish_batch_source(db,s,r.get("answer",""));s.updated_at=now();db.commit();return
                 if meta:
                     b,m,f=source_batch(db,meta["batch_id"])
                     s.proposal=literal_source_proposal(r.get("answer",""),s.fields,b.verified_text)
@@ -461,6 +532,8 @@ def supplements(id:str,db:Session=Depends(get_db)):
     rows=list(db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==j.id).order_by(IntakeSupplement.created_at.desc(),IntakeSupplement.id).limit(100)))
     for s in rows:
         if s.state=="running":sync_supplement(db,s)
+    # A completed group may have created further pending rows in the same transaction.
+    rows=list(db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==id).order_by(IntakeSupplement.created_at.desc(),IntakeSupplement.id).limit(100)))
     return [supplement_view(s) for s in rows]
 
 @router.post("/jobs/{id}/supplements",dependencies=[Depends(require_origin)])
@@ -505,6 +578,7 @@ def supplement_accept(id:str,ident:str,body:SupplementAccept,db:Session=Depends(
     snapshot=dict(s.base_item or {})
     revise=bool(snapshot.pop("_wg_revision",False))
     source=snapshot.pop("_wg_source",None)
+    group=snapshot.pop("_wg_source_group",None)
     if source:source_batch(db,source["batch_id"])
     if item!=snapshot:raise HTTPException(409,"原条目已变化")
     replacement=apply_supplement(item,s.proposal,body.fields,revise=revise)
@@ -528,7 +602,15 @@ def supplement_accept(id:str,ident:str,body:SupplementAccept,db:Session=Depends(
             else:mapping.pop(s.item_uid,None)
             provenance[key]=mapping
     j.provenance=provenance
-    j.revision+=1;j.updated_at=now();s.accepted=body.fields;s.state="accepted";s.updated_at=now()
+    previous=j.revision;j.revision+=1;j.updated_at=now();s.accepted=body.fields;s.state="accepted";s.updated_at=now()
+    if group:
+        # Rebase only unchanged, pending siblings in this exact group, never stale external edits.
+        for other in db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==id,IntakeSupplement.id!=ident,IntakeSupplement.state=="review",IntakeSupplement.base_revision==previous)):
+            prior=dict(other.base_item or {})
+            if prior.pop("_wg_source_group",None)!=group:continue
+            prior.pop("_wg_source",None)
+            current=next((x for x in j.items if x["uid"]==other.item_uid),None)
+            if current==prior:other.base_revision=j.revision
     audit(db,"intelligence.supplement.accept",user.id);db.commit();return view(j,True)
 
 @router.post("/jobs/{id}/supplements/{ident}/discard",dependencies=[Depends(require_origin)])

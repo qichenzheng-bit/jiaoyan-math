@@ -375,6 +375,9 @@ def test_migration_and_login(tmp_path, monkeypatch):
             wb="/api/workspaces/"+w["id"]
             mat=client.post(wb+"/materials",headers=origin,json={"file_ids":[fid]}).json()["materials"][0]
             existing_doc=None
+            initial_plan=client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至2页'}).json()
+            assert initial_plan['candidates'][0]['file_id']==fid and initial_plan['candidates'][0]['start']==1 and initial_plan['candidates'][0]['end']==2
+            assert client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至11页'}).status_code==422
             for page in (1,2):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
                 assert batch.status_code==200,batch.text
@@ -435,6 +438,41 @@ def test_migration_and_login(tmp_path, monkeypatch):
                     assert len(client.get("/api/documents/"+appended["id"]+"/origin").json()["batches"])==2
                     assert client.post(jb+"/document",headers=origin,json=conversion).json()["document_id"]==appended["id"]
                 existing_doc=appended
+            # A single batch match request yields independently reviewable proposals.
+            from app.api import qoder
+            def multi_ingest(method,path,body=None):
+                if path=="/status":return {"chat_available":True}
+                if path=="/chat/start":return {"state":"running"}
+                return {"state":"done","answer":json.dumps([{"kind":"question","title":"批量题"+str(i),"content":"独立题目"+str(i)} for i in range(3)],ensure_ascii=False)}
+            patch.setattr(qoder,"request",multi_ingest)
+            multi=client.post("/api/intelligence/jobs",headers=origin,json={"title":"批量匹配测试","text":"三个独立测试题"}).json()
+            mj="/api/intelligence/jobs/"+multi["id"]
+            multi=client.get(mj).json()
+            uids=[x["uid"] for x in multi["items"]]
+            assert len(uids)==3
+            reference=client.get(mj+"/source-batches?q=notes.txt").json()[0]
+            calls=[]
+            def multi_match(method,path,body=None):
+                if path=="/status":return {"chat_available":True}
+                if path=="/chat/start":calls.append(body);return {"state":"running"}
+                return {"state":"done","answer":json.dumps({uids[0]:{"answer":"test file"},uids[1]:{"answer":"test file"},uids[2]:{"answer":"invented value"}})}
+            patch.setattr(qoder,"request",multi_match)
+            payload={"revision":multi["revision"],"item_uids":uids,"fields":["answer"],"source_batch_id":reference["batch_id"]}
+            group=client.post(mj+"/source-match-batch",headers=origin,json=payload)
+            assert group.status_code==200,group.text
+            assert len(calls)==1
+            suggestions=client.get(mj+"/supplements").json()
+            grouped=[s for s in suggestions if s["source_group"]==group.json()["id"]]
+            assert len(grouped)==3 and sum(s["state"]=="review" for s in grouped)==2
+            assert all(x["answer"]=="" for x in client.get(mj).json()["items"])
+            current=multi
+            for uid in uids[:2]:
+                suggestion=next(s for s in client.get(mj+"/supplements").json() if s["item_uid"]==uid)
+                assert suggestion["base_revision"]==current["revision"]
+                accepted=client.post(mj+"/supplements/"+suggestion["id"]+"/accept",headers=origin,json={"revision":current["revision"],"fields":["answer"]})
+                assert accepted.status_code==200,accepted.text
+                current=accepted.json()
+            assert [i["answer"] for i in current["items"]]==["test file","test file",""]
 
         from app.api import qoder
         def fake_document_edit(method,path,body=None):

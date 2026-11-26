@@ -14,6 +14,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
 from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument, DocumentRegistration, IntakeSupplement
 from app.services import storage, material_import as imp
+from app.services.recognition_plan import parse_instruction, matching_names, propose_range
 from app.api import intelligence as ai
 
 router=APIRouter(prefix="/workspaces",dependencies=[Depends(current_user)])
@@ -204,6 +205,26 @@ def create(body:Create,db:Session=Depends(get_db),user:User=Depends(current_user
     if not body.title.strip():raise HTTPException(422,"请输入工作名称")
     s=WorkSession(id=str(uuid4()),title=body.title.strip(),created_at=now(),updated_at=now());db.add(s);audit(db,"work.create",user.id);db.commit()
     return session_view(s)
+@router.get("/{ident}/recognition-plan")
+def recognition_plan(ident:str,instruction:str=Query(min_length=1,max_length=500),selected_id:str|None=None,db:Session=Depends(get_db)):
+    s=workspace(db,ident)
+    try:request=parse_instruction(instruction)
+    except ValueError as e:raise HTTPException(422,str(e))
+    files=list(db.scalars(original_query().where(StoredFile.archived==False,StoredFile.media_type=="application/pdf").order_by(StoredFile.name,StoredFile.id)))
+    candidates=matching_names(files,instruction,request["hint"])
+    if not candidates and not request["hint"]:
+        if selected_id and not request["unfinished"]:
+            m=material(db,s,selected_id)
+            candidates=[f for f in files if f.id==m.file_id]
+        else:candidates=files
+    result=[]
+    for f in candidates:
+        batches=file_batches(db,f.id);row=library_row(db,f)
+        if request["unfinished"] and row["total_units"] is not None and row["verified_units"]>=row["total_units"]:continue
+        result.append({"file_id":f.id,"file_name":f.name,**propose_range(request,batches,row["total_units"],row["next_unit"]),"total_units":row["total_units"],"verified_units":row["verified_units"]})
+        if len(result)>=21:break
+    return {"candidates":result[:20],"more":len(result)>20}
+
 @router.get("/{ident}")
 def read(ident:str,db:Session=Depends(get_db)):
     s=workspace(db,ident)

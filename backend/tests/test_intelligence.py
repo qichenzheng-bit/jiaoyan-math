@@ -78,3 +78,14 @@ def test_source_matching_only_accepts_exact_excerpts():
     assert source_page("答案为1",b)==2
     b.units[1]["text"]="答案为1"
     assert source_page("答案为1",b) is None
+
+
+def test_batch_reference_proposals_are_independent():
+    from app.api.intelligence import batch_match_targets,parse_batch_source
+    items=[{"uid":"a","kind":"question","answer":"","solution":"已有解析"},{"uid":"b","kind":"question","answer":"","solution":""}]
+    targets=batch_match_targets(items,["a","b"],["answer","solution"])
+    assert [t["fields"] for t in targets]==[["answer"],["answer","solution"]]
+    result=parse_batch_source('{"a":{"answer":"原答案1"},"b":{"answer":"不存在"}}',targets,"第一题 原答案1")
+    assert result=={"a":{"answer":"原答案1"},"b":{}}
+    with pytest.raises(ValueError):parse_batch_source('{"c":{"answer":"原答案1"}}',targets,"原答案1")
+    with pytest.raises(HTTPException):batch_match_targets(items,["a","a"],["answer"])
