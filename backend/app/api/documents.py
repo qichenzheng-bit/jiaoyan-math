@@ -29,6 +29,7 @@ class Block(BaseModel):
     chapter:str=Field(default="",max_length=120)
     subject:str|None=Field(default=None,max_length=40)
     knowledge_tags:list[str]=Field(default_factory=list,max_length=20)
+    dedup_reason:str=Field(default="",max_length=200)
     edit_reference_revision:int|None=Field(default=None,ge=1)
     reuse_resource_id:str|None=Field(default=None,max_length=36)
     reuse_revision:int|None=Field(default=None,ge=1)
@@ -58,6 +59,11 @@ def row(db,id):
     return d
 def summary(d):return {k:getattr(d,k) for k in ("id","title","kind","subject","source_id","revision","archived","created_at","updated_at")}
 def public(d):return {**summary(d),"blocks":d.blocks}
+def intake_summary(db,d):
+    src=db.get(Resource,d.source_id) if d.source_id else None
+    counts={k:sum(b.get("kind")==k or (b.get("kind")=="reference" and (b.get("snapshot") or {}).get("kind")==k) for b in d.blocks) for k in ("question","knowledge")}
+    pending=any(b.get("kind") in ("question","knowledge") or b.get("edit_reference_revision") for b in d.blocks)
+    return {**summary(d),"source_type":src.source_type if src else "other","counts":counts,"intake_state":"draft" if pending or not sum(counts.values()) else "registered"}
 def validate(db,body,previous,*,allow_reference_edits=False):
     if not body.title.strip():raise HTTPException(422,"文档标题不能为空")
     if body.source_id:
@@ -101,12 +107,13 @@ def references(db,d):
     for id in existing-files:db.delete(db.get(FileReference,(id,"teaching_document",d.id)))
     for id in files-existing:storage.link_file(db,id,"teaching_document",d.id)
 @router.get("")
-def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["intake","handout","paper","textbook"]|None=None,source_id:str|None=Query(None,max_length=36),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["intake","handout","paper","textbook"]|None=None,source_id:str|None=Query(None,max_length=36),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),source_type:Literal["exam","textbook","handout","other"]|None=None,db:Session=Depends(get_db)):
     stmt=select(Doc).where(Doc.archived==archived)
     if q.strip():stmt=stmt.where(Doc.title.contains(q.strip(),autoescape=True))
     if kind:stmt=stmt.where(Doc.kind==kind)
     if source_id:stmt=stmt.where(Doc.source_id==source_id)
-    return {"items":[summary(d) for d in db.scalars(stmt.order_by(Doc.updated_at.desc(),Doc.id).offset(offset).limit(limit))],"total":db.scalar(select(func.count()).select_from(stmt.subquery()))}
+    if source_type:stmt=stmt.where(Doc.source_id.in_(select(Resource.id).where(Resource.kind=="source",Resource.source_type==source_type)))
+    return {"items":[intake_summary(db,d) if d.kind=="intake" else summary(d) for d in db.scalars(stmt.order_by(Doc.updated_at.desc(),Doc.id).offset(offset).limit(limit))],"total":db.scalar(select(func.count()).select_from(stmt.subquery()))}
 @router.post("",dependencies=[Depends(require_origin)])
 def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user)
@@ -220,7 +227,7 @@ def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(cu
 class SetupRequest(BaseModel):
     title:str=Field(min_length=1,max_length=200)
     subject:str=Field(default="",max_length=40)
-    source_type:Literal["exam","textbook","handout"]="exam"
+    source_type:Literal["exam","textbook","handout","other"]="exam"
     existing_source_id:str|None=Field(default=None,max_length=36)
     edition:str=Field(default="",max_length=60)
     exam_type:str=Field(default="",max_length=80)
@@ -228,16 +235,19 @@ class SetupRequest(BaseModel):
     nature:str=Field(default="",max_length=60)
     note:str=Field(default="",max_length=1000)
     intro:str=Field(default="",max_length=4000)
+    author:str=Field(default="",max_length=200)
+    volume:str=Field(default="",max_length=60)
+    origin:str=Field(default="",max_length=1000)
 
 @router.post("/setup",dependencies=[Depends(require_origin)])
 def setup(body:SetupRequest,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user)
     if not body.title.strip():raise HTTPException(422,"录入批次标题不能为空")
-    text="\n".join(x for x in (body.nature,body.note,body.intro) if x.strip()) or body.title
+    text="\n".join(x for x in (("作者 / 机构："+body.author) if body.author.strip() else "",("分册："+body.volume) if body.volume.strip() else "",("资料来源："+body.origin) if body.origin.strip() else "",body.nature,body.note,body.intro) if x.strip()) or body.title
     if body.existing_source_id:
         s=bank.active_source(db,body.existing_source_id,True)
     else:
-        data=bank.clean(bank.Draft(kind="source",title=body.title,subject='' if body.source_type=='exam' else body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.edition),db)
+        data=bank.clean(bank.Draft(kind="source",title=body.title,subject='' if body.source_type=='exam' else body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=" ".join(x for x in (body.edition,body.volume) if x.strip())[:60]),db)
         bank.guard_source_identity(db,data)
         s=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
         db.add(s);db.flush();bank.snapshot(db,s)
@@ -580,6 +590,8 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
     return public(d)
 
 class ManualSearch(BaseModel):
+    kind:Literal["question","knowledge"]="question"
+    title:str=Field(default="",max_length=200)
     content:str=Field(min_length=1,max_length=50000)
     answer:str=Field(default="",max_length=20000)
     solution:str=Field(default="",max_length=50000)
@@ -587,6 +599,19 @@ class ManualSearch(BaseModel):
 @router.post("/manual-matches",dependencies=[Depends(require_origin)])
 def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
     """Full active library, exact/stem matches first; text similarity is not mathematical equivalence."""
+    if body.kind=="knowledge":
+        query=canonical_text(body.content)
+        title=canonical_text(body.title)
+        items=[];scanned=0
+        for resource in db.scalars(select(Resource).where(Resource.kind=="knowledge",Resource.archived==False).execution_options(yield_per=100)):
+            scanned+=1
+            same_title=bool(title and title==canonical_text(resource.title))
+            matcher=SequenceMatcher(None,query,canonical_text(resource.content))
+            score=matcher.ratio() if query and matcher.real_quick_ratio()>=.8 and matcher.quick_ratio()>=.8 else 0
+            if same_title or score>=.8:
+                items.append({"resource":bank.view(resource),"match_kind":"same_title" if same_title else "exact" if score==1 else "similar","similarity":round(score,3)})
+        items.sort(key=lambda x:(x["match_kind"]!="same_title",-x["similarity"],x["resource"]["id"]))
+        return {"items":items,"scanned":scanned,"threshold":.8,"total":len(items),"scope":"full_active_knowledge_bank"}
     values=bank.clean(bank.Draft(kind="question",title="查重",content=body.content,answer=body.answer,solution=body.solution),db)
     exact_rows=list(db.scalars(select(Resource).where(Resource.kind=="question",Resource.archived==False,
         or_(Resource.fingerprint==values["fingerprint"],Resource.stem_key==values["stem_key"]))
@@ -710,14 +735,14 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             chapter=b["chapter"],question_type=question_type,difficulty=b["difficulty"],unit_type=b["unit_type"],
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
         primary=data.pop("source_id")
-        tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[])) if b["kind"]=="question" else ([],[])
+        tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[]))
         before=None
         if b.get("reuse_resource_id"):
             r=bank.existing(db,b["reuse_resource_id"],True)
-            if r.archived or r.kind!="question" or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
+            if r.archived or r.kind!=b["kind"] or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
             # Prevent an edited draft from silently reusing a different question.
-            if any(data[k]!=getattr(r,k) for k in ("kind","content","answer","solution","subject","chapter","question_type","difficulty")):
+            if any(data[k]!=getattr(r,k) for k in (("kind","content","answer","solution","subject","chapter","question_type","difficulty") if b["kind"]=="question" else ("kind","title","content","proof","subject","chapter","unit_type"))):
                 raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
             before=bank.view(r)
             changed=attach_review_source(db,r,primary)
@@ -731,7 +756,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             # Never mutate a candidate when the user edits a similar question.
             if db.scalar(bank.exact(db,data).limit(1)):
                 data["dedup_override"]=True
-                data["dedup_reason"]="手动录入：保留独立条目及其来源"
+                data["dedup_reason"]=b.get("dedup_reason","").strip() or "手动录入：保留独立条目及其来源"
             data["tags"]=tags
             r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**data,source_id=None,
                 revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
@@ -763,3 +788,75 @@ def registration_detail(id:str,ident:str,db:Session=Depends(get_db)):
     r=db.get(DocumentRegistration,ident)
     if not r or r.document_id!=id:raise HTTPException(404,"入库记录不存在")
     return {"id":r.id,"base_revision":r.base_revision,"result_revision":r.result_revision,"entries":r.entries,"created_at":r.created_at}
+
+class ManualRevision(BaseModel):
+    revision:int=Field(ge=1)
+    accept_warnings:bool=False
+
+@router.put("/{id}/manual-draft",dependencies=[Depends(require_origin)])
+def manual_draft(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.archived or d.kind!="intake" or body.kind!="intake" or d.revision!=body.revision or d.source_id!=body.source_id:
+        raise HTTPException(409,"录入草稿版本或来源冲突，请重新加载")
+    d.blocks=validate(db,body,d.blocks,allow_reference_edits=True)
+    d.title=body.title.strip();d.subject=normalize_subject(body.subject);d.revision+=1;d.updated_at=now()
+    references(db,d);audit(db,"document.manual.draft",user.id);db.commit()
+    return public(d)
+
+@router.delete("/{id}/manual",dependencies=[Depends(require_origin)])
+def delete_manual(id:str,body:ManualRevision,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.kind!="intake" or d.archived or d.revision!=body.revision:
+        raise HTTPException(409,"资料已变化，请刷新")
+    # Tombstone retains registration history and resource/source provenance.
+    d.archived=True;d.revision+=1;d.updated_at=now()
+    audit(db,"document.manual.delete",user.id);db.commit()
+    return {"deleted":True}
+
+def manual_review_data(db,d):
+    if not d.source_id:raise HTTPException(422,"资料尚未关联来源")
+    bank.active_source(db,d.source_id)
+    rows=[]
+    for n,b in enumerate(d.blocks,1):
+        kind=b["kind"]
+        if kind not in ("question","knowledge") and not b.get("edit_reference_revision"):continue
+        actual_kind=(b.get("snapshot") or {}).get("kind") if kind=="reference" else kind
+        errors=[];warnings=[];action="update" if kind=="reference" else "reuse" if b.get("reuse_resource_id") else "create"
+        if not b.get("content","").strip():errors.append("正文不能为空")
+        if actual_kind=="knowledge" and not b.get("title","").strip():errors.append("知识单元名称不能为空")
+        if not normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject):errors.append("请选择科目")
+        if actual_kind=="question":
+            if not b.get("question_type","").strip():errors.append("请选择题型")
+            if not b.get("answer","").strip():warnings.append("答案未填写")
+            if not b.get("solution","").strip():warnings.append("解析未填写")
+        if actual_kind=="knowledge" and not b.get("unit_type","").strip():warnings.append("知识类型未填写")
+        if actual_kind=="question" and not b.get("knowledge_tags"):warnings.append("未关联知识点")
+        if action=="reuse":
+            resource=db.get(Resource,b["reuse_resource_id"])
+            if not resource or resource.archived or resource.kind!=actual_kind or resource.revision!=b.get("reuse_revision"):errors.append("引用资源已变化，请重新查重")
+        elif action=="create" and not errors and not b.get("dedup_reason","").strip():
+            matches=manual_matches(ManualSearch(kind=actual_kind,title=b.get("title",""),content=b["content"],answer=b.get("answer",""),solution=b.get("solution","")),db)
+            if matches["total"]:errors.append("存在重复候选，请返回条目选择使用已有资源或说明独立保留原因")
+        rows.append({"uid":b["uid"],"number":n,"kind":actual_kind,"title":b.get("title") or b.get("content","")[:80],"action":action,"errors":errors,"warnings":warnings})
+    return {"revision":d.revision,"rows":rows}
+
+@router.post("/{id}/manual-review",dependencies=[Depends(require_origin)])
+def manual_review(id:str,body:ManualRevision,db:Session=Depends(get_db)):
+    d=row(db,id)
+    if d.kind!="intake" or d.archived or d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    return manual_review_data(db,d)
+
+@router.post("/{id}/manual-commit",dependencies=[Depends(require_origin)])
+def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.kind!="intake" or d.archived or d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    review=manual_review_data(db,d)
+    if not review["rows"]:raise HTTPException(422,"没有待入库的资源")
+    if any(r["errors"] for r in review["rows"]):raise HTTPException(422,"仍有必须处理的问题，请重新检查")
+    if any(r["warnings"] for r in review["rows"]) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
+    saved=manual_save(id,Draft.model_validate(public(d)),db,user)
+    counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0}
+    for item in review["rows"]:
+        key="updated" if item["action"]=="update" else item["kind"]+"_"+item["action"]
+        counts[key]+=1
+    return {"document":saved,"counts":counts}
