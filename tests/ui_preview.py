@@ -290,6 +290,9 @@ with sync_playwright() as p:
             assert page.get_by_role("button",name="AI协作",exact=True).count()==0
             assert page.get_by_role("button",name="原文",exact=True).count()==0
             assert page.get_by_role("link",name="AI 录入",exact=True).count()==0
+            expect(page.locator(".manual-word-paper")).to_have_count(1)
+            expect(page.locator(".manual-word-editor")).to_have_count(0)
+            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
             page.get_by_label("题目",exact=True).fill(r"测试查重 $x^2$ 与 $y^2$")
             page.get_by_label("难度",exact=True).click()
             tokens=page.get_by_label("题目",exact=True).locator(".inline-math-token")
@@ -302,6 +305,13 @@ with sync_playwright() as p:
             expect(tokens.nth(1)).to_have_attribute("data-local-render-probe","unchanged")
             page.locator(".manual-word-matches").get_by_text("相似度 80.0%",exact=False).wait_for()
             assert page.locator(".manual-word-matches .manual-match").count()==2
+            page.locator(".manual-word-paper-tail").first.click()
+            expect(page.locator(".manual-word-editor")).to_have_count(0)
+            expect(page.locator(".manual-word-paper .katex")).to_have_count(2)
+            page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
+            expect(page.get_by_label("题目",exact=True).locator(".inline-math-token").nth(0)).to_have_attribute("data-math-source","$x^3$")
+            page.get_by_role("button",name="完成编辑",exact=True).click()
+            expect(page.locator(".manual-word-editor")).to_have_count(0)
             page.get_by_role("button",name="整套预览",exact=True).click()
             page.locator(".manual-intake-preview .katex").first.wait_for()
             page.screenshot(path=str(OUT/"25-word-intake-preview.png"),full_page=False)
@@ -390,6 +400,8 @@ with sync_playwright() as p:
     assert page.get_by_role("button",name="AI 协作",exact=True).count()==0
     assert page.get_by_role("button",name="批量审核入库",exact=True).count()==0
     assert page.locator(".manual-word-item").count()==2
+    expect(page.locator(".manual-word-editor")).to_have_count(0)
+    page.get_by_role("button",name="编辑 第 1 题",exact=True).click()
     page.get_by_label("本题分值",exact=True).fill("10")
     page.get_by_role("button",name="下移",exact=True).click()
     page.get_by_role("button",name="＋ 正文",exact=True).click()
