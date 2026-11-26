@@ -40,6 +40,13 @@ def answer(route):
       "/studio/presets":{"bilibili":[1200,900,7,7,7,7],"bilibili_wide":[1920,1080,8,8,8,8],"douyin":[1080,1440,9,12,8,8],"douyin_wide":[1440,1080,8,8,8,8],"douyin_full":[1080,1920,13,21,8,12],"xiaohongshu":[1080,1440,8,10,8,8],"wechat_channels":[1080,1260,8,10,8,8],"wechat_channels_wide":[1920,1080,8,8,8,8],"wechat_top":[900,383,6,8,28.72,28.72],"wechat_sub":[500,500,8,8,8,8]},
       "/qoder/usage/refresh":{"available":True,"source":"sdk","updated_at":1795656773,"packs":[{"kind":"userQuota","label":"套餐额度","total":100,"used":25,"remaining":75,"unit":"credits","available":True}]},"/studio/qoder-checkin":{"round":"2026-11-26","timezone":"Asia/Shanghai","accounts":[]},"/qiandao/state":{"enabled":False,"configured":False,"reason":"pat_missing","round":"2026-11-26","next_round":"2026-11-27T10:00:00+08:00","current":None,"history":[]},"/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if p=="/workspaces":result=[]
+    if p=="/workspaces/agent-work-demo":
+        result={"id":"agent-work-demo","title":"持续工作预览","materials":[{"id":"agent-material","file":{"id":"agent-pdf","name":"高等数学.pdf","media_type":"application/pdf"},"total_units":100,"verified_units":5,"next_unit":6,"batches":[{"id":"agent-batch","start":1,"end":5,"units":[],"verified":True}]}]}
+    if p in ("/workspaces/agent-work-demo/agent","/workspaces/agent-work-demo/agent/advance"):
+        advancing=p.endswith("/advance")
+        if advancing:assert route.request.method=="POST" and route.request.post_data_json["plan_id"]=="agent-plan"
+        result={"id":"agent-plan","instruction":"核对五页后继续整理","model":"Auto","effort":"medium","state":"dispatched","detail":"已进入工作流程","plan":{"action":"recognize","file_id":"agent-pdf","file_name":"高等数学.pdf","start":1,"end":5,"unit":"页","goal":"review","focus":"question","explanation":"识别后核对，再整理"},"result":{"material_id":"agent-material","action":"recognize","batch_id":"agent-batch"},"workflow":{"stage":"organizing" if advancing else "organize","detail":"等待AI整理结果" if advancing else "原文已核对，可以按计划继续AI整理","material_id":"agent-material","batch_id":"agent-batch","job_id":"review-demo" if advancing else None,"goal":"review","recognized":5,"total":5,"verified":True,"references":[]}}
     if video_test_enabled:
         if p=="/video/status":result={"available":True,"detail":"隔离测试引擎","source_revision":"preview"}
         if p=="/video/projects":result=video_demo if route.request.method=="POST" else [video_demo]
@@ -732,6 +739,21 @@ with sync_playwright() as p:
                     page.set_viewport_size({"width":1440,"height":900})
 
                 capture(page,path=str(OUT/(name+".png")),full_page=False)
+        if GROUP in {'all','desktop','mobile'}:
+            print('UI case: persisted agent workflow and confirmed advance',flush=True)
+            page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
+            visit(page,"/work?workspace=agent-work-demo",".agent-workflow")
+            expect(page.get_by_label("实际工作进度")).to_contain_text("已识别 5/5")
+            expect(page.get_by_role("button",name="按计划继续 AI 整理",exact=True)).to_be_enabled()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+            capture(page,path=str(OUT/("31-agent-work-mobile.png" if GROUP=="mobile" else "31-agent-work-desktop.png")),full_page=False)
+            with page.expect_request(lambda req:req.url.endswith("/agent/advance") and req.method=="POST") as advanced:
+                page.get_by_role("button",name="按计划继续 AI 整理",exact=True).click()
+            assert advanced.value.post_data_json["plan_id"]=="agent-plan"
+            page.locator(".wg-work-result").first.wait_for()
+            assert "fromWorkspace=agent-work-demo" in page.url
+            page.get_by_role("link",name="返回资料工作").click()
+            expect(page.get_by_label("实际工作进度")).to_be_visible()
         if GROUP in {'all','editors'}:
             print('UI case: document assembly',flush=True)
             # Compose from the question bank, preserve original resources, and save layout only.

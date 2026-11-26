@@ -384,11 +384,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
             def agent_worker(method,path,body=None):
                 if path=="/status":return {"chat_available":True}
                 if path=="/chat/start":agent_calls.append(body);return {"state":"running"}
-                return {"state":"done","answer":json.dumps({"action":"recognize","file_id":fid,"start":None,"count":1,"explanation":"继续教材下一页"},ensure_ascii=False)}
+                return {"state":"done","answer":json.dumps({"action":"recognize","file_id":fid,"start":None,"count":1,"goal":"review","explanation":"继续教材下一页并整理审核"},ensure_ascii=False)}
             with monkeypatch.context() as ap:
                 ap.setattr(qoder,"request",agent_worker)
                 agent_url=wb+"/agent"
-                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页","model":"Auto","effort":"default","selected_id":mat["id"]})
+                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页，核对后整理审核","model":"Auto","effort":"default","selected_id":mat["id"]})
                 assert asked.status_code==200,asked.text
                 assert asked.json()["state"]=="running" and len(agent_calls)==1 and fid in agent_calls[0]["prompt"]
                 ready=client.get(agent_url).json()
@@ -404,16 +404,27 @@ def test_migration_and_login(tmp_path, monkeypatch):
                 assert client.get(wb).json()["materials"][0]["batches"][0]["id"]==bid
                 assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]}).json()["result"]["batch_id"]==bid
                 assert client.get(agent_url).json()["result"]["batch_id"]==bid
+                assert client.get(agent_url).json()["workflow"]["stage"]=="recognizing"
+                assert client.post(agent_url+"/advance",headers=origin,json={"plan_id":ready["id"]}).status_code==409
             for page in (1,2):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
                 assert batch.status_code==200,batch.text
                 bb=wb+"/batches/"+batch.json()["id"]
                 assert client.post(bb+"/step",headers=origin).json()["units"][0]["state"]=="done"
                 assert client.post(bb+"/verify",headers=origin,json={"text":"【原文位置 "+str(page)+"】\n独立测试题第"+str(page)+"页"}).json()["verified"]
+                if page==1:
+                    state=client.get(agent_url).json()["workflow"]
+                    assert state["stage"]=="organize" and state["verified"]
+                    advanced=client.post(agent_url+"/advance",headers=origin,json={"plan_id":ready["id"]})
+                    assert advanced.status_code==200,advanced.text
+                    jid=advanced.json()["workflow"]["job_id"]
+                    assert advanced.json()["workflow"]["stage"]=="organizing"
+                    assert client.post(agent_url+"/advance",headers=origin,json={"plan_id":ready["id"]}).json()["workflow"]["job_id"]==jid
                 started=client.post(bb+"/organize",headers=origin,json={"model":"Auto"})
                 assert started.status_code==200,started.text
                 jb="/api/intelligence/jobs/"+started.json()["id"]
                 result=client.get(jb).json()
+                if page==1:assert client.get(agent_url).json()["workflow"]["stage"]=="review"
                 uid=result["items"][0]["uid"]
                 assert result["provenance"]["suggested_pages"]=={uid:{"content":page}}
                 result["items"][0]["dedup_reason"]="独立集成测试"
