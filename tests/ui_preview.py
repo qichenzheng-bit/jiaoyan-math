@@ -109,10 +109,14 @@ with sync_playwright() as p:
         if name=="17-intake-knowledge":
             assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
         if name=="05-chat":
-            effort=page.get_by_label("推理强度",exact=True)
+            assert page.locator(".compact-composer .reasoning-effort").count()==0
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
             effort.wait_for()
             effort.select_option("high")
             assert effort.input_value()=="high"
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            assert not effort.is_visible()
             assert page.locator(".intake-chat-prompts").count()==0
             assert page.locator(".chat-home-recent").is_visible()
             page.get_by_label("输入消息").fill(r"录入题目：求 $\lim_{x\to0}\frac{\sin x}{x}$。")
@@ -128,10 +132,14 @@ with sync_playwright() as p:
             assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
             assert page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容").is_visible()
         if name=="18-intelligence":
-            effort=page.get_by_label("推理强度",exact=True)
+            assert page.locator(".compact-composer .reasoning-effort").count()==0
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
             effort.wait_for()
             effort.select_option("high")
             assert effort.input_value()=="high"
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            assert not effort.is_visible()
             page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
             page.get_by_role("button",name="发送资料").click()
             page.locator(".work-review-preview .katex").first.wait_for()
@@ -246,6 +254,13 @@ with sync_playwright() as p:
             assert page.locator(".clean-context-menu").count()==0
         if name=="13-video":
             assert page.locator(".video-stage-track > div").count()==5
+            assert page.locator(".video-detail .reasoning-effort").count()==0
+            page.get_by_role("button",name="更多选项",exact=True).click()
+            effort=page.locator("#mode-more-panel").get_by_label("推理强度",exact=True)
+            effort.wait_for()
+            effort.select_option("high")
+            assert effort.input_value()=="high"
+            page.get_by_role("button",name="更多选项",exact=True).click()
         if name=="02-bank":
             page.get_by_role("button",name="高级筛选").click()
             assert page.get_by_label("章节",exact=True).is_visible()
