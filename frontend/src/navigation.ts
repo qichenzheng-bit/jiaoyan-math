@@ -44,3 +44,16 @@ export const workspaceGroups:WorkspaceGroup[]=[
  {id:'publishing',name:'内容发布',icon:'publishing',sections:[{id:'release',name:'封面制作',entries:[entry('/covers')]}]},
  {id:'sales',name:'商品售卖',icon:'works',sections:[{id:'store',name:'商品与交易',entries:[entry('/products','商品售卖')]}]},
 ]
+
+export function workspaceParent(path:string,search:string):string{
+ const params=new URLSearchParams(search)
+ if(path.startsWith('/project/'))return '/'
+ if(path==='/intake')return params.has('doc')||params.has('mode')?'/intake':'/'
+ if(path.startsWith('/source-print/'))return '/sources'
+ if(path.startsWith('/print/'))return '/teaching-library'
+ if(path.startsWith('/resource-edit/'))return params.has('return_source')?'/source-print/'+encodeURIComponent(params.get('return_source')!):'/resources'
+ if(path==='/intake-single')return '/intake'
+ if(path==='/works')return '/project/creation'
+ const group=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path===path)))
+ return group?'/project/'+group.id:'/'
+}

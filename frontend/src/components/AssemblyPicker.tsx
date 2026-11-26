@@ -3,6 +3,7 @@ import {api} from '../auth'
 import ChatText from '../pages/ChatText'
 import {MathText} from './MathText'
 import {Icon} from './Icon'
+import {useWorkspaceBack} from './WorkspaceNavigation'
 import type {R} from '../pages/DocWork'
 import './ManualWordWork.css'
 import './AssemblyPicker.css'
@@ -31,6 +32,7 @@ export default function AssemblyPicker({kind,subjects,existing,occupied,append,b
  useEffect(()=>{const c=new AbortController();api<{chapter:string}[]>('/resources/chapters?kind='+bank+'&subject='+encodeURIComponent(subject),{signal:c.signal}).then(r=>{if(!c.signal.aborted)setChapters(Array.isArray(r)?[...new Set(r.map(x=>x.chapter).filter(Boolean))]:[])}).catch(()=>{});return()=>c.abort()},[bank,subject])
  useEffect(()=>{if(!active)return;const c=new AbortController();setSourceInfo([]);setSourceError('');api<{items:unknown[]}>('/resources/'+active.id+'/sources',{signal:c.signal}).then(r=>{if(!c.signal.aborted)setSourceInfo(Array.isArray(r.items)?r.items:[])}).catch(e=>{if(!c.signal.aborted)setSourceError(e.message)});return()=>c.abort()},[active?.id])
  useEffect(()=>{const listener=(e:KeyboardEvent)=>{if(e.key==='Escape'){setActive(undefined);setPinned(false);setShowCart(false)}};window.addEventListener('keydown',listener);return()=>{window.removeEventListener('keydown',listener);window.clearTimeout(hoverTimer.current);window.clearTimeout(closeTimer.current)}},[])
+ useWorkspaceBack(()=>{if(busy)return true;if(active){setActive(undefined);setPinned(false);return true}if(showCart){setShowCart(false);return true}if(advanced){setAdvanced(false);return true}return false})
  const toggle=(r:Item)=>setCart(prev=>prev.some(x=>x.id===r.id)?prev.filter(x=>x.id!==r.id):included.has(r.id)||prev.length>=available?prev:[...prev,r])
  function reveal(r:Item,el:HTMLElement,pin:boolean){window.clearTimeout(hoverTimer.current);window.clearTimeout(closeTimer.current);const rect=el.getBoundingClientRect();setPosition({left:Math.max(12,Math.min(rect.left+20,window.innerWidth-512)),top:Math.max(12,Math.min(rect.bottom+4,window.innerHeight-390))});setActive(r);setPinned(pin)}
  function leave(){window.clearTimeout(hoverTimer.current);if(!pinned)closeTimer.current=window.setTimeout(()=>setActive(undefined),200)}

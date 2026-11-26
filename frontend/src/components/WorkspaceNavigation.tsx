@@ -39,3 +39,10 @@ export function WorkspaceLink({onApproved,onClick,to,...props}:LinkProps&{onAppr
   void guardNavigation(path).then(ok=>{if(!ok)return;onApproved?.();navigate(to,{replace:props.replace,state:props.state,relative:props.relative,preventScrollReset:props.preventScrollReset})})
  }}/>
 }
+
+// A single visible back action first lets the current workbench close its inner step.
+export function useWorkspaceBack(handler:()=>boolean){
+ const latest=useRef(handler);latest.current=handler
+ useEffect(()=>{const listener=(event:Event)=>{if(!event.defaultPrevented&&latest.current())event.preventDefault()};window.addEventListener('wg-workspace-back',listener);return()=>window.removeEventListener('wg-workspace-back',listener)},[])
+}
+export function handleWorkspaceBack(){return !window.dispatchEvent(new Event('wg-workspace-back',{cancelable:true}))}

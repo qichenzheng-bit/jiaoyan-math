@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 const paths:Record<string,ReactNode>={
+ back:<path d="M20 12H4m6-6-6 6 6 6"/>,
  film:<><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18m10-18v18M3 8h4m-4 8h4M17 8h4m-4 8h4"/><path d="m10 9 5 3-5 3Z"/></>,
  refresh:<><path d="M20 11a8 8 0 0 0-14-5L3 9m0-5v5h5M4 13a8 8 0 0 0 14 5l3-3m0 5v-5h-5"/></>,
  'send-up':<path d="M12 19V5m-6 6 6-6 6 6" strokeWidth="2.2"/>,

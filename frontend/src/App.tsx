@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react'
-import {Route,Routes,Navigate,useLocation} from 'react-router-dom'
-import {WorkspaceLink as Link,usePopNavigationGuard} from './components/WorkspaceNavigation'
+import {Route,Routes,Navigate,useLocation,useNavigate} from 'react-router-dom'
+import {WorkspaceLink as Link,usePopNavigationGuard,guardNavigation,handleWorkspaceBack} from './components/WorkspaceNavigation'
 import {api,Login} from './auth'
 import Settings,{defaults,type Preferences} from './pages/Settings'
 import Resources,{ResourceEdit} from './pages/Resources'
@@ -21,7 +21,7 @@ import ModuleHub from './pages/ModuleHub'
 import ProjectHub from './pages/ProjectHub'
 import Sidebar from './components/Sidebar'
 import {Icon,BrandMark} from './components/Icon'
-import {modules,workspaceGroups,type Module} from './navigation'
+import {modules,workspaceGroups,workspaceParent,type Module} from './navigation'
 
 function Pending({module}:{module:Module}){
  return <><div className="page-heading"><h1>{module.name}</h1><p className="muted">{module.desc}</p></div><section className="panel planned"><span className="soft-icon"><Icon name={module.icon} size={28}/></span><h2>此模块尚未迁移</h2><p>功能将按照旧系统的业务流程逐步接入，目前不可使用。</p><Link className="button-link" to={module.path==='/chat'?'/qoder':'/'}>{module.path==='/chat'?'管理 AI 账号':'返回首页'}</Link></section></>
@@ -35,12 +35,14 @@ export default function App(){
  const [health,setHealth]=useState('检查中')
  const [user,setUser]=useState<string|null|undefined>(undefined)
  const [error,setError]=useState('')
- const location=useLocation(),mainRef=useRef<HTMLElement>(null)
+ const location=useLocation(),navigate=useNavigate(),mainRef=useRef<HTMLElement>(null)
  const current=modules.find(m=>m.path===location.pathname)
  const project=workspaceGroups.find(g=>location.pathname==='/project/'+g.id)
  const isChat=location.pathname==='/'||location.pathname==='/chat'
  const isWork=location.pathname==='/work'||location.pathname==='/intelligence', workHome=isWork&&!new URLSearchParams(location.search).has('job')&&!new URLSearchParams(location.search).has('history'), modeHome=isChat||isWork
  const isVideo=location.pathname==='/videos'
+ const showBack=!isChat
+ async function back(){if(handleWorkspaceBack())return;const parent=workspaceParent(location.pathname,location.search);if(await guardNavigation(parent))navigate(parent)}
  const lastChat=useRef('/')
  useEffect(()=>{if(isChat)lastChat.current=location.pathname+location.search},[isChat,location.pathname,location.search])
  const isDoc=(location.pathname==='/intake'&&new URLSearchParams(location.search).has('doc'))||['/papers','/handouts','/textbooks'].includes(location.pathname)
@@ -58,7 +60,7 @@ export default function App(){
   {menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
   <Sidebar user={user} displayName={preferences.display_name} open={menu} collapsed={collapsed} onClose={()=>setMenu(false)} onToggle={()=>setCollapsed(c=>!c)} onLogout={()=>void logout()}/>
   <div className="workspace">
-   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/work" aria-current={isWork?'page':undefined} >工作</Link></nav>:<div className="breadcrumb"><strong>{location.pathname==='/intake'?(isDoc?'录入工作台':new URLSearchParams(location.search).get('mode')==='document'?'新建资料':'手动录入'):project?.name??current?.name??(location.pathname.startsWith('/resource-edit/')?'编辑资源':location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{(modeHome||isVideo)&&<div className="mode-more" ref={moreRef}><button type="button" className="icon-button mode-more-trigger" aria-label="更多选项" aria-expanded={more} aria-controls="mode-more-panel" onClick={()=>setMore(v=>!v)}><Icon name="more" size={24}/></button><div id="mode-more-panel" className="mode-more-panel" hidden={!more}><div id="mode-inference-actions" className="mode-inference-actions"/><Link to="/qoder" onApproved={()=>setMore(false)}><Icon name="spark" size={19}/>AI 登录与模型</Link>{isChat?<><button type="button" onClick={()=>{setMore(false);window.dispatchEvent(new Event('wg-chat-new'))}}><Icon name="plus" size={19}/>新建对话</button><div id="chat-session-actions" className="chat-session-actions" onClick={()=>setMore(false)}/></>:isWork?<Link to="/tasks" onApproved={()=>setMore(false)}><Icon name="clock" size={19}/>任务中心</Link>:null}</div></div>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
+   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{showBack&&<button type="button" className="icon-button workspace-back" aria-label="返回上一步" title="返回上一步" onClick={()=>void back()}><Icon name="back" size={19}/><span>返回</span></button>}{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/work" aria-current={isWork?'page':undefined} >工作</Link></nav>:<div className="breadcrumb"><strong>{location.pathname==='/intake'?(isDoc?'录入工作台':new URLSearchParams(location.search).get('mode')==='document'?'新建资料':'手动录入'):project?.name??current?.name??(location.pathname.startsWith('/resource-edit/')?'编辑资源':location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{(modeHome||isVideo)&&<div className="mode-more" ref={moreRef}><button type="button" className="icon-button mode-more-trigger" aria-label="更多选项" aria-expanded={more} aria-controls="mode-more-panel" onClick={()=>setMore(v=>!v)}><Icon name="more" size={24}/></button><div id="mode-more-panel" className="mode-more-panel" hidden={!more}><div id="mode-inference-actions" className="mode-inference-actions"/><Link to="/qoder" onApproved={()=>setMore(false)}><Icon name="spark" size={19}/>AI 登录与模型</Link>{isChat?<><button type="button" onClick={()=>{setMore(false);window.dispatchEvent(new Event('wg-chat-new'))}}><Icon name="plus" size={19}/>新建对话</button><div id="chat-session-actions" className="chat-session-actions" onClick={()=>setMore(false)}/></>:isWork?<Link to="/tasks" onApproved={()=>setMore(false)}><Icon name="clock" size={19}/>任务中心</Link>:null}</div></div>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
    <main className="main-content" ref={mainRef}><div className="content-inner">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Chat key="home"/>}/>
     <Route path="/overview" element={<Navigate to="/" replace/>}/>

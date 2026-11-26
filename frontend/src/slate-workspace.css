@@ -190,3 +190,54 @@
  .composition-editing .manual-all .manual-list-row{padding:9px;gap:6px}
  .composition-editing .manual-list-excerpt{max-height:none;padding:6px;background:transparent}
 }
+
+/* Consistent parent navigation and spacious desktop work surfaces. */
+.legacy-shell.clean-workspace .topbar .workspace-back{display:inline-flex;align-items:center;justify-content:center;gap:4px;color:var(--header-ink);font-size:12px;padding:5px 8px;min-width:34px;min-height:34px;white-space:nowrap}
+.legacy-shell.clean-workspace .topbar .mode-left{display:flex;align-items:center;gap:5px;flex:none}
+.legacy-shell.clean-workspace .topbar .workspace-back:hover{background:#ffffff20}
+.legacy-shell.clean-workspace .project-hub.project-teaching,.legacy-shell.clean-workspace .project-hub.production-home{max-width:1050px;width:100%;padding:18px 0;margin:0 auto;gap:16px}
+.project-teaching .project-hub-heading{margin:0 0 16px;text-align:left;align-items:flex-start}.project-teaching .project-hub-heading h1{margin:0 0 5px}.project-teaching .project-hub-heading p{margin:0}.project-teaching .project-section h2{font-size:13px;color:var(--muted);margin:0 0 8px}.project-teaching .project-section{margin:0 0 14px}.project-teaching .project-links{gap:12px}.project-teaching .project-link{display:flex;align-items:center;min-height:88px}.project-teaching .project-link>span{flex:1;min-width:0}.project-teaching .project-link strong{font-size:16px}.project-teaching .project-link small{font-size:12px}
+@media(min-width:901px){
+ .legacy-shell.clean-workspace .content-inner:has(.composition-work){max-width:1440px;padding:18px 24px 26px}
+ .legacy-shell.clean-workspace .composition-picking{gap:14px}
+ .legacy-shell .composition-work .assembly-grid{grid-template-columns:minmax(0,1fr) minmax(250px,310px);gap:16px;align-items:start}
+ .legacy-shell .composition-work .assembly-library{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;min-height:370px;box-sizing:border-box}
+ .legacy-shell .composition-work .assembly-cart{padding:16px;min-height:280px;align-content:start;gap:12px;top:12px}
+ .legacy-shell .composition-work .assembly-filters{gap:10px}
+ .legacy-shell .composition-work .assembly-bank-tabs{max-width:260px}
+ .legacy-shell .composition-work .assembly-common-filters select{flex:1 1 100px;min-width:0}
+ .legacy-shell .composition-work .assembly-results-head{padding:6px 0;border-top:1px solid var(--line)}
+ .legacy-shell .composition-work .compact-result{min-height:43px;padding:6px 10px;box-sizing:border-box}
+ .legacy-shell .composition-work .assembly-empty{min-height:235px}
+ .legacy-shell .composition-work .assembly-cart-heading{padding-bottom:8px;border-bottom:1px solid var(--line)}
+ .legacy-shell .composition-editing .assembly-word .manual-word-toolbar{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+ .legacy-shell .composition-editing .manual-word-layout.no-matches{grid-template-columns:minmax(150px,200px) minmax(0,1fr)}
+ .legacy-shell .composition-editing .manual-word-layout.has-matches{grid-template-columns:minmax(145px,190px) minmax(0,1fr) minmax(200px,255px)}
+ .legacy-shell .composition-editing .manual-word-outline,.legacy-shell .composition-editing .manual-word-matches{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:12px;box-sizing:border-box}
+ .legacy-shell .composition-editing .manual-word-stage{border:1px solid var(--line);border-radius:9px;background:var(--subtle);padding:18px}
+ .legacy-shell .composition-editing .manual-word-paper{min-height:min(297mm,141.43cqi)}
+ .legacy-shell .video-home{max-width:1100px;width:100%;margin:0 auto;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px}
+ .video-home .video-connection{grid-column:1}
+ .video-home .video-new-card{grid-column:2;grid-row:1;width:175px}
+ .video-home .video-project-head,.video-home .video-project-search,.video-home .video-project-filters,.video-home .video-project-cards,.video-home .video-home-empty,.video-home .video-project-pages,.video-home>.notice{grid-column:1/-1}
+ .video-home .video-project-search{max-width:420px}
+ .video-home .video-home-empty{background:var(--surface);border:1px solid var(--line);border-radius:10px;min-height:300px}
+ .legacy-shell .video-redesign:not(.video-home){max-width:1440px;width:100%;margin:0 auto}
+ .video-redesign .video-pick-grid,.video-redesign .video-result-grid,.video-redesign .video-cover-grid,.video-redesign .video-progress-grid{grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:16px}
+ .legacy-shell .video-redesign .video-panel-title{display:flex;align-items:center;justify-content:space-between}
+ .legacy-shell .video-redesign .video-pick-grid>.panel,.legacy-shell .video-redesign .video-result-grid>.panel{min-width:0}
+ .legacy-shell .bank-workspace .resource-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:9px}
+ .legacy-shell .bank-workspace .resource-toolbar>input:first-child{flex:1 1 220px;min-width:0;max-width:none}
+ .legacy-shell .bank-workspace .bank-list,.legacy-shell .bank-workspace .bank-detail{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:12px}
+ .legacy-shell .bank-workspace .bank-detail{padding:16px 20px}
+}
+@media(max-width:900px){
+ .legacy-shell.clean-workspace .project-hub.project-teaching,.legacy-shell.clean-workspace .project-hub.production-home{padding:4px 0}
+ .project-teaching .project-hub-heading{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ .project-teaching .project-links{grid-template-columns:1fr}
+ .project-teaching .project-link{min-height:0;flex-wrap:nowrap;padding:10px;gap:10px}
+ .project-teaching .project-link>span{flex:1;flex-basis:auto}
+ .project-teaching .project-link>svg:last-child{display:block}
+ .project-teaching .project-link>svg:first-child{padding:8px}
+}
+@media(max-width:760px){.legacy-shell.clean-workspace .topbar .workspace-back span{display:none}.legacy-shell.clean-workspace .topbar .workspace-back{padding:4px;min-width:30px}.legacy-shell.clean-workspace .topbar .mode-left{gap:2px}}

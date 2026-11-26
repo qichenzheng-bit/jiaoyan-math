@@ -1,7 +1,7 @@
 import {MathChoice} from '../components/MathText'
 import {useEffect,useRef,useState} from 'react'
 import {Link,useSearchParams,useNavigate} from 'react-router-dom'
-import {useWorkspaceGuard} from '../components/WorkspaceNavigation'
+import {useWorkspaceGuard,useWorkspaceBack} from '../components/WorkspaceNavigation'
 import {api} from '../auth'
 import ManualIntakeCards from '../components/ManualIntakeCards'
 import {InlineImageUpload} from '../components/InlineMathEditor'
@@ -39,6 +39,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  useEffect(()=>{if(requested&&requested!==doc?.id)void open(requested,false)},[requested])
  useEffect(()=>{if(!dirty||!doc)return;try{sessionStorage.setItem(recoveryKey(doc.id),JSON.stringify(doc))}catch{setMessage('浏览器草稿缓存空间不足，请立即保存到服务器。')}},[doc,dirty])
  useWorkspaceGuard({busy,dirty,message:'当前修改尚未保存，确认离开？'})
+ useWorkspaceBack(()=>{if(busy)return true;if(review||result){setReview(undefined);setResult(undefined);choose('');return true}if(picker==='append'){setPicker(null);return true}if(doc&&!picker&&selected){choose('');return true}return false})
  function choose(uid:string){if(imageUploading.current)return;setCardPanel(!uid?'list':'card');setSelected(uid)}
  function update(p:Partial<Doc>){setDoc(d=>d&&({...d,...p}));setDirty(true)}
  function editBlock(p:Partial<Block>){if(!doc||!block||doc.archived||(busy&&!imageUploading.current))return;const changed=['content','answer','solution','title','proof','subject','chapter','unit_type','question_type'].some(k=>Object.hasOwn(p,k));setDoc(d=>d&&({...d,blocks:d.blocks.map(b=>b.uid===selected?{...b,...(changed?{dedup_reason:''}:{}),...p}:b)}));setDirty(true)}

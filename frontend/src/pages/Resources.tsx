@@ -2,7 +2,8 @@ import {confirmAction,promptAction} from '../components/WorkspaceConfirm'
 import {MathText,MathChoice} from '../components/MathText'
 import {useEffect,useState,type FormEvent} from 'react'
 import {api} from '../auth'
-import {Link,useSearchParams,useParams} from 'react-router-dom'
+import {Link,useSearchParams,useParams,useNavigate} from 'react-router-dom'
+import {useWorkspaceBack,guardNavigation} from '../components/WorkspaceNavigation'
 import ResourceRelations from './ResourceRelations'
 import {Icon} from '../components/Icon'
 import ChatText from './ChatText'
@@ -15,7 +16,7 @@ const labels={question:'题目',knowledge:'知识单元',source:'来源资料'}
 const blank=(kind:Kind='question'):Draft=>({kind,title:'',subject:'',content:'',answer:'',solution:'',tags:[],source_id:null,exam_type:'',chapter:'',question_type:'',unit_type:'',analysis:'',proof:'',exams:[],source_type:'',authority_tier:'',cohort_year:'',series_key:'',edition:''})
 export function ResourceEdit(){const {id}=useParams();return <Resources key={id} intake editResource={id}/>}
 export default function Resources({intake=false,initialKind='question',editResource}:{intake?:boolean;initialKind?:Kind;editResource?:string}){
- const [params]=useSearchParams()
+ const [params]=useSearchParams(),navigate=useNavigate()
  const [difficulty,setDifficulty]=useState(''),[sourceFilter,setSourceFilter]=useState(params.get('source_id')??''),[knowledgeFilter,setKnowledgeFilter]=useState(params.get('knowledge_id')??'')
  const [chapter,setChapter]=useState(''),[exam,setExam]=useState(''),[type,setType]=useState(''),[pageSize,setPageSize]=useState(20),[relation,setRelation]=useState(''),[similar,setSimilar]=useState<{resource:Resource;similarity:number;match_kind?:string;reason?:string}[]>([])
  const requestedKind=params.get('kind'),startKind:Kind=intake&&(requestedKind==='knowledge'||requestedKind==='source'||requestedKind==='question')?requestedKind:params.get('q')?.startsWith('K')?'knowledge':params.get('q')?.startsWith('S')?'source':initialKind
@@ -27,6 +28,7 @@ export default function Resources({intake=false,initialKind='question',editResou
  const [edit,setEdit]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('')
  const [loaded,setLoaded]=useState(!editResource),[uploading,setUploading]=useState(false),[sourceOverview,setSourceOverview]=useState<{questions:number;knowledge:number;batches:{id:string;title:string;revision:number;pending:boolean}[]}|null>(null),[chapters,setChapters]=useState<{subject:string;chapter:string;count:number}[]>([]),[directory,setDirectory]=useState(true)
  const returnTo=params.get('return_source')?'/source-print/'+encodeURIComponent(params.get('return_source')!):kind==='knowledge'?'/knowledge-library':kind==='source'?'/sources':'/resources'
+ useWorkspaceBack(()=>{if(busy||uploading)return true;if(!intake&&phoneDetail&&window.matchMedia('(max-width:760px)').matches){setPhoneDetail(false);return true}if(editResource){void guardNavigation(returnTo).then(ok=>{if(ok)navigate(returnTo)});return true}return false})
  useEffect(()=>{if(intake||kind!=='knowledge')return;const c=new AbortController();api<typeof chapters>('/resources/chapters?kind=knowledge',{signal:c.signal}).then(r=>{if(!c.signal.aborted&&Array.isArray(r))setChapters(r)}).catch(()=>{});return()=>c.abort()},[kind,intake,version])
  useEffect(()=>{setSourceOverview(null);if(intake||current?.kind!=='source')return;const c=new AbortController();api<NonNullable<typeof sourceOverview>>('/resources/'+encodeURIComponent(current.id)+'/source-overview',{signal:c.signal}).then(r=>{if(!c.signal.aborted&&Array.isArray(r.batches))setSourceOverview(r)}).catch(()=>{});return()=>c.abort()},[current?.id,intake,version])
  function uploadInline(file:File,complete:(id:string)=>void,failed:()=>void){if(uploading||busy){failed();return}setUploading(true);void (async()=>{try{const ext=({'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif'} as Record<string,string>)[file.type];if(!ext)throw Error('请使用 PNG、JPEG、WebP 或 GIF 图片');const res=await fetch('/api/files?name='+encodeURIComponent(file.name||'粘贴图片.'+ext),{method:'POST',credentials:'same-origin',body:file});if(!res.ok)throw Error('图片上传失败');const item=await res.json() as {id:string;previewable:boolean};if(!item.id||!item.previewable)throw Error('图片无法预览');complete(item.id)}catch(e){failed();setMessage(e instanceof Error?e.message:'图片上传失败')}finally{setUploading(false)}})()}

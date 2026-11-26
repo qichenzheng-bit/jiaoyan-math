@@ -1,3 +1,4 @@
+import {useWorkspaceBack} from '../components/WorkspaceNavigation'
 import {confirmAction} from '../components/WorkspaceConfirm'
 import {useEffect,useRef,useState} from 'react'
 import {Link,useSearchParams} from 'react-router-dom'
@@ -39,6 +40,7 @@ export default function VideoWork(){
  useEffect(()=>{if(mode!=='home'||!status?.available)return;const c=new AbortController();let fetching=false;const load=async()=>{if(fetching)return;fetching=true;try{const subset=projects.slice(listPage*8,listPage*8+8).filter(p=>!p.work_id&&p.engine_id);for(let i=0;i<subset.length&&!c.signal.aborted;i+=2)await Promise.all(subset.slice(i,i+2).map(async p=>{try{const v=await api<Project>('/video/projects/'+p.id,{signal:c.signal});if(!c.signal.aborted)setListDetails(old=>({...old,[p.id]:v}))}catch{}}))}finally{fetching=false}};void load();const t=window.setInterval(()=>void load(),10000);return()=>{c.abort();window.clearInterval(t)}},[mode,status?.available,projects,listPage])
  useEffect(()=>()=>{if(capturedUrl.current)URL.revokeObjectURL(capturedUrl.current)},[])
  function clearCapture(){if(capturedUrl.current)URL.revokeObjectURL(capturedUrl.current);capturedUrl.current='';setCapture(undefined)}
+ useWorkspaceBack(()=>{if(busy)return true;if(mode==='cover'){clearCapture();setMode('work');return true}if(mode==='pick'||mode==='work'){home();return true}return false})
  function home(){setMode('home');setFilter('全部');setListPage(0);setParams({});setDetail(undefined);setWaiting(false);setInstruction('');setHistory([]);clearCapture();setRefresh(v=>v+1)}
  function open(id:string){setDetail(undefined);setWaiting(false);setHistory([]);setInstruction('');clearCapture();setParams({project:id});setMode('work');setRefresh(v=>v+1)}
  async function act(fn:()=>Promise<void>){if(inFlight.current)return;inFlight.current=true;setBusy(true);setMessage('');try{await fn();setRefresh(v=>v+1)}catch(e){setMessage(e instanceof Error?e.message:'操作失败')}finally{inFlight.current=false;setBusy(false)}}
