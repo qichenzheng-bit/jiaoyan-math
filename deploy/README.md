@@ -19,3 +19,15 @@ Actions > Server preflight 可读取 Runner、磁盘、数据库连通性、syst
 主分支使用既有非 root 自托管 Runner 串行验证。临时 PostgreSQL 在 /tmp 私有 Unix socket 运行，与正式数据库分离；不读取 app.env、不调用真实 Qoder。仅使用服务器现有 Python 版本，Hosted CI 保留 3.10/3.12 矩阵。Playwright 使用本地缓存，若提示系统依赖不足，由管理员安装所提示的 Chromium 依赖（不得给 Runner sudo 权限）。任何测试失败均不进入 release.sh。截图上传失败不影响已验证的部署结果。自托管 Runner 仅用于可信 main，禁止不可信 PR 执行。
 
 公开仓库请严格审核外部 PR，禁止不可信工作流使用生产自托管 Runner；建议将生产部署 Runner 放在仅维护者可访问的私有部署仓库，避免公开仓库 PR 工作流攻击。不要在公开仓库或日志中存放生产密钥。
+
+
+## Qoder CN 实时积分执行服务升级
+普通 Web 自动部署不会也不应覆盖独立服务的 root 持有代码。因此页面出现旧版本提示时，管理员应从已审阅的可信仓库版本执行（先确保没有正在运行的 AI 或视频任务）：
+
+```sh
+sudo bash deploy/upgrade-qoder-usage.sh
+```
+
+脚本验证官方 SDK 提供 get_usage_info、检查旧服务状态、更新 worker 并重启，检查 V12+ 与 usage_discovery；失败恢复旧 worker。不会删除 CLI 登录数据，也不需要重新输入 PAT。若 SDK 不兼容，先由管理员审阅并在独立 SDK 环境中升级官方 qodercn-agent-sdk（该环境不属于 Web 服务）；若 CLI 不支持 get_usage_info，还需按官方方法升级 CLI。升级后在 AI 账号或签到页面点击刷新积分，以实际返回的额度包为准。
+
+签到助手保留 Qoder CN 官方领取渠道和手工历史记录。原 V5 使用 PAT 及未公开桌面活动接口自动领取；现行官方活动说明限定桌面端、移动端与 IDE，未公开支持服务器自动领取的接口，故不移植伪装客户端或推断签到成功的逻辑。
