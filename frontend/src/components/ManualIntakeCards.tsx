@@ -78,20 +78,34 @@ export function QuestionFields({value,subject,subjects,locked,onChange,knowledge
 
 type MatchResource={id:string;code:string;revision:number;subject:string;chapter:string;question_type:string;difficulty?:string;title:string;content:string;answer:string;solution:string;tags:string[];knowledge_tags?:string[]}
 type Match={resource:MatchResource;match_kind:'exact'|'same_stem'|'similar';similarity:number}
-type Point={id:string;name:string;chapter:string}
+type Point={id:string;name:string;chapter:string;child_count:number}
+type Chapter={chapter:string;count:number}
+type Browse={mode:'chapters';items:Chapter[];total:number}|{mode:'points';items:Point[];total:number}
 function KnowledgeTags({value,subject,locked,onChange}:{value:string[];subject:string;locked:boolean;onChange:(tags:string[])=>void}){
- const [text,setText]=useState(''),[points,setPoints]=useState<Point[]>([]),[open,setOpen]=useState(false),[page,setPage]=useState(0),[total,setTotal]=useState(0),[loading,setLoading]=useState(false),[error,setError]=useState('')
+ const [text,setText]=useState(''),[query,setQuery]=useState(''),[open,setOpen]=useState(false),[chapter,setChapter]=useState<string|null>(null),[parents,setParents]=useState<Point[]>([]),[page,setPage]=useState(0),[data,setData]=useState<Browse>(),[loading,setLoading]=useState(false),[error,setError]=useState('')
  const size=20,disabled=locked||!subject||value.length>=20
- useEffect(()=>{setPage(0)},[subject])
+ const parent=parents[parents.length-1]
+ useEffect(()=>{setChapter(null);setParents([]);setQuery('');setText('');setPage(0);setData(undefined);setOpen(false)},[subject])
  useEffect(()=>{
   const c=new AbortController()
-  if(!subject||(!open&&!text.trim())){setPoints([]);setTotal(0);setLoading(false);return}
-  setLoading(true);setPoints([]);setError('')
-  const t=window.setTimeout(()=>api<{items:Point[];total:number}>('/knowledge/points?'+new URLSearchParams({subject,q:text.trim(),limit:String(size),offset:String(page*size)}),{signal:c.signal}).then(r=>{if(!c.signal.aborted){setPoints(r.items);setTotal(r.total)}}).catch(e=>{if(!c.signal.aborted)setError(e.message||'知识点读取失败')}).finally(()=>{if(!c.signal.aborted)setLoading(false)}),200)
+  if(!subject||!open){setData(undefined);setLoading(false);return}
+  setLoading(true);setData(undefined);setError('')
+  const params=new URLSearchParams({subject,limit:String(size),offset:String(page*size)})
+  if(query.trim())params.set('q',query.trim())
+  else if(parent)params.set('parent_id',parent.id)
+  else if(chapter!==null)params.set('chapter',chapter)
+  const t=window.setTimeout(()=>api<Browse>('/knowledge/browse?'+params,{signal:c.signal}).then(r=>{if(!c.signal.aborted){if(!Array.isArray(r.items)||!['chapters','points'].includes(r.mode))throw Error('知识点分类数据格式无效');setData(r)}}).catch(e=>{if(!c.signal.aborted)setError(e.message||'知识点读取失败')}).finally(()=>{if(!c.signal.aborted)setLoading(false)}),query?250:0)
   return()=>{clearTimeout(t);c.abort()}
- },[subject,text,open,page])
- function add(name:string){const n=name.trim();if(disabled||!n||n.length>60)return;if(!value.includes(n))onChange([...value,n]);setText('');setPage(0)}
- return <section className="manual-knowledge-tags"><strong>知识标签</strong><div className="manual-tag-list">{value.map(tag=><button key={tag} type="button" disabled={locked} aria-label={'移除知识标签 '+tag} onClick={()=>onChange(value.filter(v=>v!==tag))}>{tag} ×</button>)}</div><button type="button" aria-expanded={open} disabled={disabled} onClick={()=>{setOpen(v=>!v);setPage(0)}}>{open?'收起已有知识点':'选择已有知识点'}</button><div className="manual-tag-entry"><input aria-label="知识标签" value={text} disabled={disabled} maxLength={60} placeholder="搜索或输入新知识点" onChange={e=>{setText(e.target.value);setPage(0)}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();add(text)}}}/><button type="button" disabled={disabled||!text.trim()} onClick={()=>add(text)}>新增标签</button></div>{(open||text.trim())&&<div className="manual-tag-catalog">{loading?<small role="status">正在读取知识点…</small>:error?<small role="alert">{error}</small>:<><small className="muted">已有知识点 · 共 {total} 个</small>{points.map(p=><button className="manual-tag-suggestion" type="button" key={p.id} disabled={disabled||value.includes(p.name)} onClick={()=>add(p.name)}>{p.name}{p.chapter?' · '+p.chapter:''}{value.includes(p.name)?'（已选择）':''}</button>)}{!points.length&&<small className="muted">暂无匹配知识点，可新增标签。</small>}{total>size&&<div className="button-row"><button type="button" disabled={page===0||loading} onClick={()=>setPage(v=>v-1)}>上一页</button><small>{page+1}/{Math.ceil(total/size)}</small><button type="button" disabled={(page+1)*size>=total||loading} onClick={()=>setPage(v=>v+1)}>下一页</button></div>}</>}</div>}<small className="muted">同学科已有知识点自动复用，新标签随整套资料保存入库。</small></section>
+ },[subject,open,chapter,parent?.id,query,page])
+ function add(name:string){const n=name.trim();if(disabled||!n||n.length>60)return;if(!value.includes(n))onChange([...value,n]);setText('')}
+ function root(){setChapter(null);setParents([]);setQuery('');setPage(0)}
+ function drill(p:Point){setParents(v=>[...v,p]);setQuery('');setPage(0)}
+ const total=data?.total??0
+ return <section className="manual-knowledge-tags"><strong>知识标签</strong><div className="manual-tag-list">{value.map(tag=><button key={tag} type="button" disabled={locked} aria-label={'移除知识标签 '+tag} onClick={()=>onChange(value.filter(v=>v!==tag))}>{tag} ×</button>)}</div><button type="button" aria-expanded={open} disabled={disabled} onClick={()=>{setOpen(v=>!v);root()}}>{open?'收起已有知识点':'选择已有知识点'}</button>
+ {open&&<div className="manual-tag-browser"><input aria-label="搜索已有知识点" value={query} placeholder="搜索当前科目知识点" onChange={e=>{setQuery(e.target.value);setPage(0)}}/><nav className="manual-tag-path" aria-label="知识点分类路径"><button type="button" onClick={root}>{subject}</button>{!query.trim()&&chapter!==null&&<><span>›</span><button type="button" onClick={()=>{setParents([]);setPage(0)}}>{chapter||'未分类'}</button></>}{!query.trim()&&parents.map((p,i)=><span key={p.id}>› <button type="button" onClick={()=>{setParents(v=>v.slice(0,i+1));setPage(0)}}>{p.name}</button></span>)}{query.trim()&&<span>› 搜索结果</span>}</nav>
+ <div className="manual-tag-catalog">{loading?<small role="status">正在读取分类…</small>:error?<small role="alert">{error}</small>:data?.mode==='chapters'?<>{data.items.map(c=><button key={c.chapter} type="button" className="manual-tag-category" onClick={()=>{setChapter(c.chapter);setParents([]);setPage(0)}}><span>{c.chapter||'未分类'}</span><small>{c.count} 个上级知识点 ›</small></button>)}{!data.items.length&&<small className="muted">当前科目暂无知识点。</small>}</>:data?.mode==='points'?<>{data.items.map(p=><div className="manual-tag-node" key={p.id}><button className="manual-tag-suggestion" type="button" disabled={disabled||value.includes(p.name)} onClick={()=>add(p.name)}><span>{p.name}</span>{query.trim()&&p.chapter&&<small>{p.chapter}</small>}{value.includes(p.name)&&<small>已选择</small>}</button>{p.child_count>0&&<button type="button" aria-label={'展开 '+p.name} onClick={()=>{if(query.trim()){setChapter(p.chapter);setParents([p]);setQuery('');setPage(0)}else drill(p)}}>{p.child_count} ›</button>}</div>)}{!data.items.length&&<small className="muted">本级暂无匹配知识点。</small>}</>:null}</div>
+ {total>size&&<div className="button-row"><button type="button" disabled={page===0||loading} onClick={()=>setPage(v=>v-1)}>上一页</button><small>{page+1}/{Math.ceil(total/size)}</small><button type="button" disabled={(page+1)*size>=total||loading} onClick={()=>setPage(v=>v+1)}>下一页</button></div>}</div>}
+ <div className="manual-tag-entry"><input aria-label="知识标签" value={text} disabled={disabled} maxLength={60} placeholder="输入新知识点名称" onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();add(text)}}}/><button type="button" disabled={disabled||!text.trim()} onClick={()=>add(text)}>新增标签</button></div><small className="muted">按当前科目、章节和知识图谱父子关系逐级选择；新标签随整套资料入库。</small></section>
 }
 function DuplicateMatches({block,locked,onChoose}:{block:Block;locked:boolean;onChoose:(resource:MatchResource,reuse:boolean)=>void}){
  const [matches,setMatches]=useState<Match[]>([]),[status,setStatus]=useState(''),[scanned,setScanned]=useState<number>(),[attempt,setAttempt]=useState(0)

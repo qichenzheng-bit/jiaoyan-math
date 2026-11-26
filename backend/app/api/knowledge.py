@@ -60,6 +60,37 @@ def list_points(q:str=Query("",max_length=180),subject:str="",include_disabled:b
         stmt=stmt.where(or_(Point.name.contains(term,autoescape=True),Point.code.contains(term.upper(),autoescape=True),Point.id.in_(select(Alias.knowledge_id).where(Alias.normalized.contains(norm(term),autoescape=True)))))
     total=db.scalar(select(func.count()).select_from(stmt.subquery()))
     return {"items":[public(db,p) for p in db.scalars(stmt.order_by(Point.subject,Point.chapter,Point.name,Point.id).offset(offset).limit(limit))],"total":total}
+@router.get("/browse")
+def browse(subject:str=Query(...,min_length=1,max_length=40),chapter:str|None=Query(None,max_length=120),
+           parent_id:str|None=Query(None,max_length=36),q:str=Query("",max_length=180),
+           limit:int=Query(20,ge=1,le=50),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+    """Lazy, subject-scoped hierarchy. Only explicit contains edges form folders."""
+    subject=normalize_subject(subject)
+    active=select(Point.id).where(Point.subject==subject,Point.status=="active")
+    child_ids=select(Edge.target_id).where(Edge.relation_type=="contains",Edge.source_id.in_(active))
+    roots=select(Point).where(Point.subject==subject,Point.status=="active",Point.id.not_in(child_ids))
+    stmt=select(Point).where(Point.subject==subject,Point.status=="active")
+    term=q.strip()
+    if term:
+        stmt=stmt.where(or_(Point.name.contains(term,autoescape=True),Point.code.contains(term.upper(),autoescape=True),
+            Point.id.in_(select(Alias.knowledge_id).where(Alias.normalized.contains(norm(term),autoescape=True)))))
+    elif parent_id:
+        parent=point(db,parent_id)
+        if parent.subject!=subject or parent.status!="active":raise HTTPException(422,"上级知识点不属于当前有效学科")
+        stmt=stmt.where(Point.id.in_(select(Edge.target_id).where(Edge.source_id==parent_id,Edge.relation_type=="contains")))
+    elif chapter is not None:
+        stmt=roots.where(Point.chapter==chapter)
+    else:
+        grouped=roots.with_only_columns(Point.chapter.label("chapter"),func.count().label("count")).group_by(Point.chapter).subquery()
+        total=db.scalar(select(func.count()).select_from(grouped))
+        rows=db.execute(select(grouped).order_by(grouped.c.chapter).offset(offset).limit(limit)).all()
+        return {"mode":"chapters","items":[{"chapter":r.chapter,"count":r.count} for r in rows],"total":total}
+    total=db.scalar(select(func.count()).select_from(stmt.subquery()))
+    rows=list(db.scalars(stmt.order_by(Point.name,Point.id).offset(offset).limit(limit)))
+    counts=dict(db.execute(select(Edge.source_id,func.count()).where(Edge.relation_type=="contains",
+        Edge.source_id.in_([p.id for p in rows]),Edge.target_id.in_(active)).group_by(Edge.source_id)).all()) if rows else {}
+    return {"mode":"points","items":[{"id":p.id,"name":p.name,"chapter":p.chapter,"child_count":counts.get(p.id,0)} for p in rows],"total":total}
+
 def save(db,p,body):
     name=body.name.strip();subject=normalize_subject(body.subject);key=norm(name)
     if not name or not subject or len(key)>200:raise HTTPException(422,"知识点名称和学科不能为空")
