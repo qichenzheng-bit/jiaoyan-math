@@ -67,17 +67,26 @@ def login_cancel():
 def login_disconnect():
     return request("POST", "/login/disconnect", {})
 
+def _usage_error(exc):
+    if exc.status_code == 404:
+        return {"available":False,"reason":"worker_upgrade_required"}
+    if exc.status_code == 503:
+        return {"available":False,"reason":"worker_unavailable"}
+    if exc.status_code == 504:
+        return {"available":False,"reason":"sdk_timeout"}
+    raise exc
+
 @router.get("/usage")
 def usage():
     try:return request("GET","/usage")
-    except HTTPException:return {"available":False,"reason":"额度执行服务尚未就绪或需要升级至 V12"}
+    except HTTPException as exc:
+        return _usage_error(exc)
 
 @router.post("/usage/refresh",dependencies=[Depends(require_origin)])
 def usage_refresh():
     try:return request("POST","/usage/refresh",{})
     except HTTPException as exc:
-        if exc.status_code==404:return {"available":False,"reason":"需要升级执行服务至 V12"}
-        raise
+        return _usage_error(exc)
 
 MODEL_KEY = "ai.qoder.model"
 VIDEO_MODEL_KEY = "ai.qoder.video_model"
