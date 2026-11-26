@@ -143,6 +143,12 @@ def resolve(db,i):
         if i.action=="review" and not j:raise HTTPException(409,"该批尚未整理")
         if j:result["job_id"]=j.id
     return result
+@router.get("/{ident}/agent/history")
+def history(ident:str,db:Session=Depends(get_db)):
+    from app.api import workspaces as w
+    s=w.workspace(db,ident)
+    return [public(r) for r in (s.agent_history or [])]
+
 @router.get("/{ident}/agent")
 def status(ident:str,db:Session=Depends(get_db)):
     from app.api import workspaces as w

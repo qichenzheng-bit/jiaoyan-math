@@ -54,6 +54,8 @@ def answer(route):
     if p=="/workspaces":result=[]
     if p=="/workspaces/agent-work-demo":
         result={"id":"agent-work-demo","title":"持续工作预览","materials":[{"id":"agent-material","file":{"id":"agent-pdf","name":"高等数学.pdf","media_type":"application/pdf"},"total_units":100,"verified_units":5,"next_unit":6,"batches":[{"id":"agent-batch","start":1,"end":5,"units":[],"verified":True}]}]}
+    if p=="/workspaces/agent-work-demo/agent/history":
+        result=[{"id":"old-agent-plan","instruction":"先识别旧教材","model":"Auto","effort":"default","state":"cancelled","detail":"已取消","plan":{"action":"recognize","file_name":"旧教材.pdf","explanation":"历史计划"}}]
     if p in ("/workspaces/agent-work-demo/agent","/workspaces/agent-work-demo/agent/advance"):
         advancing=p.endswith("/advance")
         if advancing:assert route.request.method=="POST" and route.request.post_data_json["plan_id"]=="agent-plan"
@@ -755,6 +757,16 @@ with sync_playwright() as p:
             page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
             visit(page,"/work?workspace=agent-work-demo",".agent-workflow")
             expect(page.get_by_label("实际工作进度")).to_contain_text("已识别 5/5")
+            expect(page.get_by_text("先识别旧教材",exact=True)).to_be_visible()
+            expect(page.get_by_label("继续识别指令")).to_be_visible()
+            expect(page.locator(".agent-manual")).to_have_count(0)
+            page.get_by_role("button",name="资料与识别").first.click()
+            expect(page.locator(".agent-manual")).to_be_visible()
+            page.locator(".agent-manual").get_by_role("button",name="收起",exact=True).click()
+            page.get_by_role("button",name="添加资料",exact=True).click()
+            expect(page.get_by_role("group",name="资料工具")).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(page.get_by_role("group",name="资料工具")).to_have_count(0)
             expect(page.get_by_role("button",name="按计划继续 AI 整理",exact=True)).to_be_enabled()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             capture(page,path=str(OUT/("31-agent-work-mobile.png" if GROUP=="mobile" else "31-agent-work-desktop.png")),full_page=False)

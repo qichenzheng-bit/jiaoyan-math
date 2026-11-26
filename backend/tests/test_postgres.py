@@ -405,6 +405,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
                 assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]}).json()["result"]["batch_id"]==bid
                 assert client.get(agent_url).json()["result"]["batch_id"]==bid
                 assert client.get(agent_url).json()["workflow"]["stage"]=="recognizing"
+                hist=client.get(agent_url+"/history").json()
+                assert hist[-1]["id"]==ready["id"] and hist[-1]["state"]=="dispatched" and "allowed_files" not in hist[-1]
                 assert client.post(agent_url+"/advance",headers=origin,json={"plan_id":ready["id"]}).status_code==409
             for page in (1,2):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})

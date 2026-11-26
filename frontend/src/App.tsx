@@ -47,7 +47,7 @@ export default function App(){
  const isChat=location.pathname==='/'||location.pathname==='/chat'
  const isWork=location.pathname==='/work'||location.pathname==='/intelligence', workHome=isWork&&!new URLSearchParams(location.search).has('job')&&!new URLSearchParams(location.search).has('history')&&!new URLSearchParams(location.search).has('workspace'), modeHome=isChat||isWork
  const isVideo=location.pathname==='/videos'
- useComposerViewport(phone&&(isChat||workHome))
+ useComposerViewport(phone&&(isChat||workHome||isWork&&new URLSearchParams(location.search).has('workspace')))
  const showBack=!isChat
  async function back(){if(phone&&menu){setMenu(false);return}if(handleWorkspaceBack())return;const parent=workspaceParent(location.pathname,location.search);if(await guardNavigation(parent))navigate(parent)}
  const lastChat=useRef('/'),lastWork=useRef('/work')

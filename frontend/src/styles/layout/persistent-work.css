@@ -13,3 +13,27 @@
 .agent-workflow{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px;min-width:0;background:var(--surface)}.agent-workflow p{margin:0;overflow-wrap:anywhere}.agent-workflow ol{list-style:none;margin:0;padding:0;display:grid;gap:6px}.agent-workflow li{display:flex;align-items:center;gap:8px}.agent-workflow li span{flex:1}.agent-workflow li[data-complete=true]{color:var(--accent)}.agent-workflow li small{color:var(--muted)}.agent-progress{display:flex;align-items:center;gap:8px}.agent-progress progress{flex:1;min-width:60px;accent-color:var(--accent)}@media(max-width:760px){.agent-workflow{padding:9px}.agent-workflow li{font-size:13px}}
 
 .agent-reference-match{display:grid;gap:8px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.agent-reference-match label{display:grid;gap:5px}.agent-reference-match select{width:100%;min-width:0}.agent-reference-match p{margin:0;overflow-wrap:anywhere}.agent-reference-match small{color:var(--muted)}
+
+/* Conversation is the primary workspace. Manual extraction is an expandable panel. */
+.shell.legacy-shell.clean-workspace .main-content:has(.agent-conversation){overflow:hidden}
+.shell.legacy-shell.clean-workspace .content-inner:has(>.agent-conversation){height:100%;min-height:0;display:flex;flex-direction:column;padding:10px 20px 12px;box-sizing:border-box}
+.persistent-work.agent-conversation{display:flex;flex-direction:column;flex:1;min-height:0;max-width:1100px;gap:8px;position:relative}
+.agent-conversation-head{display:flex;gap:8px;align-items:center;width:100%;flex:none;padding:2px 0 6px;border-bottom:1px solid var(--line)}
+.agent-conversation-head h1{font-size:16px;font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}.agent-conversation-head>button{display:flex;align-items:center;gap:5px;flex:none;font-size:12px}
+.agent-conversation-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:12px 5px}
+.agent-conversation-thread{width:min(100%,740px);margin:0 auto;display:grid;gap:20px;min-width:0}.agent-conversation-thread:has(.agent-manual){width:100%}
+.agent-turn{display:grid;gap:14px;min-width:0;width:min(100%,740px);margin:0 auto}
+.agent-user-message{justify-self:end;max-width:85%;min-width:0;padding:11px 15px;background:var(--selected);border-radius:20px 20px 5px 20px;overflow-wrap:anywhere}
+.agent-assistant-message{display:grid;gap:10px;min-width:0;padding:0 4px;overflow-wrap:anywhere}.agent-assistant-message p{margin:0}.agent-assistant-message .katex-display,.agent-user-message .katex-display{overflow-x:auto;max-width:100%}
+.agent-plan-actions{display:grid;gap:8px}.agent-plan-actions>button{justify-self:start}.agent-historical{border-top:1px solid var(--line);padding:7px 0}.agent-historical summary{cursor:pointer}.agent-historical small,.agent-historical a{display:block;margin-top:5px}
+.agent-empty{padding:clamp(24px,10dvh,100px) 0;text-align:center}.agent-empty h2{font-size:24px}.agent-empty .button-row{justify-content:center}
+.agent-manual{display:grid;gap:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:12px;min-width:0}
+.agent-composer{width:min(100%,740px);margin:0 auto;flex:none;display:grid;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:10px 12px;position:relative;min-width:0}
+.agent-composer textarea{width:100%;box-sizing:border-box;border:0;background:transparent;box-shadow:none;outline:none;resize:vertical;min-height:42px;max-height:140px;font-size:16px;padding:4px}
+.agent-composer-tools{position:relative;display:flex;align-items:center;gap:6px}.agent-composer-tools .composer-inference{margin-left:auto;min-width:0}.agent-composer-tools .composer-send{flex:none;border-radius:50%;width:34px;height:34px;display:grid;place-items:center;padding:0}.agent-composer-tools .composer-plus{border-radius:50%;width:34px;height:34px;padding:0;display:grid;place-items:center}
+.agent-tools-menu{position:absolute;bottom:calc(100% + 6px);top:auto;left:0;z-index:20;display:grid;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px;min-width:180px;box-shadow:0 4px 14px #0002}
+.agent-tools-menu>button,.agent-tools-menu>a{text-align:left;font-size:13px}.agent-attachments{display:flex;gap:5px;overflow:auto;max-width:100%;scrollbar-width:thin}.agent-attachments button{display:flex;align-items:center;gap:4px;flex:none;max-width:175px;border-radius:9px;font-size:11px;padding:5px}.agent-attachments span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.agent-attachments button[aria-pressed=true]{background:var(--selected)}
+.agent-jump{align-self:center;font-size:12px;border-radius:16px;flex:none}
+@media(max-width:760px){.shell.legacy-shell.clean-workspace .content-inner:has(>.agent-conversation){padding:7px 10px calc(7px + env(safe-area-inset-bottom))}.agent-conversation-head h1{font-size:15px}.agent-conversation-scroll{padding:8px 1px}.agent-user-message{max-width:91%;padding:9px 12px}.agent-conversation-thread{gap:16px}.agent-composer{padding:8px 10px}.agent-empty h2{font-size:21px}.agent-manual{padding:7px}}
+
+@media(max-width:760px){html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace:has(.agent-conversation){height:var(--composer-visible-height,100dvh)}}
