@@ -151,7 +151,7 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
     rid=remote(row)
     with production_model_lock:
         prepare_model(db,body.effort,body.model)
-        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction, "images":[]})
+        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})
 
 @router.get("/projects/{ident}/edits/history")
 def history(ident: str, db: Session = Depends(get_db)):
