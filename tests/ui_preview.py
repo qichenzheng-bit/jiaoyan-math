@@ -581,6 +581,13 @@ with sync_playwright() as p:
                     page.set_viewport_size({"width":390,"height":844})
                     tools=page.get_by_role("navigation",name="手机封面工具")
                     expect(tools).to_be_visible()
+                    # At fit zoom the entire canvas stays above the bottom controls.
+                    page.get_by_role("button",name="适应画布",exact=True).click()
+                    assert page.locator(".fc-art").evaluate("(el)=>{const b=el.getBoundingClientRect(),v=document.querySelector('.fc-viewport').getBoundingClientRect();return b.top>=v.top-1&&b.bottom<=v.bottom+1&&b.left>=v.left-1&&b.right<=v.right+1}")
+                    assert page.locator(".fc-toolbar").evaluate("(el)=>el.getBoundingClientRect().height<=48")
+                    page.get_by_role("button",name="更多封面操作",exact=True).click()
+                    expect(page.get_by_role("button",name="存为模板",exact=True)).to_be_visible()
+                    page.get_by_role("button",name="更多封面操作",exact=True).click()
                     tools.get_by_role("button",name="图层",exact=True).click()
                     expect(page.locator(".fc-add")).to_be_visible()
                     page.locator(".fc-add").get_by_role("button",name="完成",exact=True).click()
