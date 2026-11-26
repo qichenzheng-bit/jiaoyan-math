@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react'
-import {Link,Route,Routes,Navigate,useLocation} from 'react-router-dom'
+import {Route,Routes,Navigate,useLocation} from 'react-router-dom'
+import {WorkspaceLink as Link,usePopNavigationGuard} from './components/WorkspaceNavigation'
 import {api,Login} from './auth'
 import Settings,{defaults,type Preferences} from './pages/Settings'
 import Resources from './pages/Resources'
@@ -26,6 +27,7 @@ function Pending({module}:{module:Module}){
 }
 function initialCollapsed(){try{return localStorage.getItem('wg-sidebar-collapsed')==='true'}catch{return false}}
 export default function App(){
+ usePopNavigationGuard()
  const [preferences,setPreferences]=useState<Preferences>(defaults)
  const [menu,setMenu]=useState(false),[collapsed,setCollapsed]=useState(initialCollapsed),[more,setMore]=useState(false)
  const moreRef=useRef<HTMLDivElement>(null)
@@ -40,7 +42,6 @@ export default function App(){
  const isVideo=location.pathname==='/videos'
  const lastChat=useRef('/')
  useEffect(()=>{if(isChat)lastChat.current=location.pathname+location.search},[isChat,location.pathname,location.search])
- function allowMode(path:string){return window.dispatchEvent(new CustomEvent('wg-chat-navigation',{cancelable:true,detail:{path}}))}
  const isDoc=(location.pathname==='/intake'&&new URLSearchParams(location.search).has('doc'))||['/papers','/handouts','/textbooks'].includes(location.pathname)
  useEffect(()=>{const history=location.pathname==='/chat'&&new URLSearchParams(location.search).has('history');setMenu(history&&window.matchMedia('(max-width: 760px)').matches);if(history)setCollapsed(false);mainRef.current?.scrollTo(0,0)},[location.pathname,location.search])
  useEffect(()=>{setMore(false)},[location.pathname,location.search])
@@ -56,7 +57,7 @@ export default function App(){
   {menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
   <Sidebar user={user} displayName={preferences.display_name} open={menu} collapsed={collapsed} onClose={()=>setMenu(false)} onToggle={()=>setCollapsed(c=>!c)} onLogout={()=>void logout()}/>
   <div className="workspace">
-   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/work" aria-current={isWork?'page':undefined} onClick={e=>{if(isChat&&!allowMode('/work'))e.preventDefault()}}>工作</Link></nav>:<div className="breadcrumb"><strong>{project?.name??current?.name??(location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{(modeHome||isVideo)&&<div className="mode-more" ref={moreRef}><button type="button" className="icon-button mode-more-trigger" aria-label="更多选项" aria-expanded={more} aria-controls="mode-more-panel" onClick={()=>setMore(v=>!v)}><Icon name="more" size={24}/></button><div id="mode-more-panel" className="mode-more-panel" hidden={!more}><div id="mode-inference-actions" className="mode-inference-actions"/><Link to="/qoder" onClick={e=>{if(!allowMode('/qoder'))e.preventDefault();else setMore(false)}}><Icon name="spark" size={19}/>AI 登录与模型</Link>{isChat?<><button type="button" onClick={()=>{setMore(false);window.dispatchEvent(new Event('wg-chat-new'))}}><Icon name="plus" size={19}/>新建对话</button><div id="chat-session-actions" className="chat-session-actions" onClick={()=>setMore(false)}/></>:isWork?<Link to="/tasks" onClick={e=>{if(!allowMode('/tasks'))e.preventDefault();else setMore(false)}}><Icon name="clock" size={19}/>任务中心</Link>:null}</div></div>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
+   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/work" aria-current={isWork?'page':undefined} >工作</Link></nav>:<div className="breadcrumb"><strong>{project?.name??current?.name??(location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{(modeHome||isVideo)&&<div className="mode-more" ref={moreRef}><button type="button" className="icon-button mode-more-trigger" aria-label="更多选项" aria-expanded={more} aria-controls="mode-more-panel" onClick={()=>setMore(v=>!v)}><Icon name="more" size={24}/></button><div id="mode-more-panel" className="mode-more-panel" hidden={!more}><div id="mode-inference-actions" className="mode-inference-actions"/><Link to="/qoder" onApproved={()=>setMore(false)}><Icon name="spark" size={19}/>AI 登录与模型</Link>{isChat?<><button type="button" onClick={()=>{setMore(false);window.dispatchEvent(new Event('wg-chat-new'))}}><Icon name="plus" size={19}/>新建对话</button><div id="chat-session-actions" className="chat-session-actions" onClick={()=>setMore(false)}/></>:isWork?<Link to="/tasks" onApproved={()=>setMore(false)}><Icon name="clock" size={19}/>任务中心</Link>:null}</div></div>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
    <main className="main-content" ref={mainRef}><div className="content-inner">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Chat key="home"/>}/>
     <Route path="/overview" element={<Navigate to="/" replace/>}/>
