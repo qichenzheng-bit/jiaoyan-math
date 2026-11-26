@@ -97,3 +97,11 @@
 .manual-word-paper-tail{flex:1;min-height:42px;cursor:default}
 .manual-word-paper .manual-word-editor{font-family:system-ui,sans-serif}
 @media(max-width:900px){.manual-word-stage{padding:6px;gap:8px}.manual-word-paper{padding:clamp(12px,5cqi,36px);font-size:13px}.manual-word-paper-header h1{font-size:18px}.manual-word-paper .manual-word-item.active{padding:5px}.manual-word-paper .manual-word-read .chat-rich{font-size:13px}}
+
+.manual-word-layout.no-matches{grid-template-columns:minmax(120px,165px) minmax(0,1fr)}
+.manual-word-work .manual-paper-add,.manual-all .manual-paper-add{width:100%;min-height:36px;border:1px dashed var(--line);background:transparent;color:var(--muted);margin-top:10px}
+.manual-all .manual-list-excerpt{max-height:none!important;overflow:visible!important}
+.manual-all .manual-list-row>div{display:grid;gap:5px;min-width:0}
+.doc-selector[hidden]{display:none!important}
+.manual-word-outline nav:empty:after{content:"暂未添加内容";color:var(--muted);padding:6px}
+@media(max-width:900px){.manual-word-layout.no-matches{grid-template-columns:minmax(0,1fr)}.mobile-doc-title{flex-wrap:wrap}.mobile-doc-header .mobile-doc-title>div{flex:1 1 100%}.mobile-doc-header .mobile-doc-title>button{flex:1}}

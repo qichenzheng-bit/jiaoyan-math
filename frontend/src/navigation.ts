@@ -31,7 +31,7 @@ function entry(path:string,name?:string):WorkspaceEntry{
 // Global sidebar is organized by work purpose, not implementation module.
 export const workspaceGroups:WorkspaceGroup[]=[
  {id:'intake',name:'资料录入',icon:'intake',sections:[
-  {id:'intake',name:'录入方式',entries:[{path:'/work',name:'AI 录入',icon:'spark'},{path:'/intake?mode=document',name:'整套资料录入',icon:'files'}]},
+  {id:'intake',name:'录入方式',entries:[{path:'/intake',name:'手动录入',icon:'files'}]},
  ]},
  {id:'teaching',name:'教学教研',icon:'book',sections:[
   {id:'resources',name:'教学资源',entries:[entry('/resources'),entry('/knowledge-library'),entry('/graph'),entry('/sources')]},
