@@ -44,6 +44,10 @@ def read_pat():
 
 def call(path, *, body=None, token=None):
     headers = {"Accept":"application/json","User-Agent":"JiaoyanMath-QoderCheckin/1"}
+    if path == "/sash/api/v1/me/campaigns" or path.startswith("/sash/api/v1/me/campaigns/"):
+        # Campaign routing parameter used by the legacy CN integration.
+        # Keep our actual User-Agent; never fabricate machine identifiers or tokens.
+        headers["Cosy-ClientType"] = "10"
     if token:
         headers["Authorization"] = "Bearer " + token
     raw = None if body is None else json.dumps(body).encode()
@@ -96,6 +100,8 @@ def select_campaign(payload, now=None):
     rows=payload.get("campaigns") if isinstance(payload,dict) else payload
     if not isinstance(rows,list):
         raise CampaignError("unexpected_response")
+    if not rows:
+        raise CampaignError("campaigns_not_returned", True)
     candidates=[]
     for row in rows:
         if not isinstance(row,dict) or str(row.get("actionType","")).upper()!="CLAIM_BENEFIT":
@@ -106,9 +112,17 @@ def select_campaign(payload, now=None):
         begin,finish=stamp(row.get("startAt")),stamp(row.get("endAt"))
         if begin is None or finish is None:
             continue
-        if abs(begin-start.timestamp())>1 or abs(finish-end.timestamp())>1:
-            continue
+        # Allow modest server-side window offsets without claiming another round.
+        # Explicit daily campaign keys may use a shorter active window.
         if not begin<=now.timestamp()<finish:
+            continue
+        if not start.timestamp()-300<=begin<end.timestamp():
+            continue
+        key=str(row.get("campaignKey") or "").lower()
+        if key=="cn_daily_check_in_legacy":
+            if finish>end.timestamp()+300:
+                continue
+        elif abs(begin-start.timestamp())>300 or abs(finish-end.timestamp())>300:
             continue
         ident=row.get("campaignId")
         if not isinstance(ident,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}",ident):
