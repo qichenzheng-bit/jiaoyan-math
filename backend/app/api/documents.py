@@ -189,7 +189,7 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
     if block["kind"]=="reference":return public(d)
     if block["kind"] not in ("question","knowledge") or not block["title"].strip() or not block["content"].strip():raise HTTPException(422,"只能将完整题目或知识单元入库")
     source=bank.active_source(db,d.source_id) if body.bind_source and d.source_id else None
-    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject,exam_type=source.exam_type if source else "",content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
+    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject if block.get("subject") is None else block["subject"],exam_type=source.exam_type if source else "",content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
     values=bank.clean(draft,db);bank.guard_duplicate(db,values)
     primary=values.pop("source_id")
     r=Resource(id=str(uuid4()),code=bank.new_code(db,draft.kind),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
@@ -232,12 +232,12 @@ def setup(body:SetupRequest,db:Session=Depends(get_db),user:User=Depends(current
     if body.existing_source_id:
         s=bank.active_source(db,body.existing_source_id,True)
     else:
-        data=bank.clean(bank.Draft(kind="source",title=body.title,subject=body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.edition),db)
+        data=bank.clean(bank.Draft(kind="source",title=body.title,subject='' if body.source_type=='exam' else body.subject,content=text,source_type=body.source_type,exam_type=body.exam_type,cohort_year=body.year,edition=body.edition),db)
         bank.guard_source_identity(db,data)
         s=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
         db.add(s);db.flush();bank.snapshot(db,s)
     blocks=[Block(uid=str(uuid4()),kind="text",content=body.intro).model_dump()] if body.intro.strip() else []
-    d=Doc(id=str(uuid4()),title=body.title.strip(),kind="intake",subject=normalize_subject(body.subject),source_id=s.id,blocks=blocks,revision=1,archived=False,created_at=now(),updated_at=now())
+    d=Doc(id=str(uuid4()),title=body.title.strip(),kind="intake",subject="" if s.source_type=="exam" else normalize_subject(body.subject),source_id=s.id,blocks=blocks,revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();references(db,d);audit(db,"document.setup",user.id);db.commit();return public(d)
 
 
@@ -413,7 +413,7 @@ class CommitBatch(BaseModel):
 
 def registration_values(db,d,b,bind=False,reason="",chapter=None):
     source=bank.active_source(db,d.source_id) if bind and d.source_id else None
-    return bank.clean(bank.Draft(kind=b["kind"],title=b["title"],subject=d.subject,exam_type=source.exam_type if source else "",
+    return bank.clean(bank.Draft(kind=b["kind"],title=b["title"],subject=d.subject if b.get("subject") is None else b["subject"],exam_type=source.exam_type if source else "",
         content=b["content"],answer=b.get("answer",""),solution=b.get("solution",""),analysis=b.get("analysis",""),proof=b.get("proof",""),
         chapter=b.get("chapter","") if chapter is None else chapter,question_type=b.get("question_type",""),unit_type=b.get("unit_type",""),
         source_id=source.id if source else None,dedup_override=bool(reason.strip()),dedup_reason=reason),db)
@@ -484,7 +484,7 @@ def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
             score=matcher.ratio()
             if score>=.75:similar.append((score,r))
         candidates=[candidate(r,v,b) for r in strict]+[candidate(r,v,b,round(s,3)) for s,r in sorted(similar,key=lambda x:-x[0])[:5]]
-        points,chapter=catalog_suggestions(db,d.subject,b)
+        points,chapter=catalog_suggestions(db,v["subject"],b)
         peers=[blocks[j]["uid"] for j,w in enumerate(data) if j!=i and w["kind"]==v["kind"] and (w["fingerprint"]==v["fingerprint"] or v["kind"]=="question" and w["stem_key"]==v["stem_key"])]
         results.append({"uid":b["uid"],"candidates":candidates,"knowledge":points,"chapter_suggestion":chapter,"peer_ids":peers,
                         "missing":[k for k in ("answer","solution") if b["kind"]=="question" and not b.get(k,"").strip()]})
@@ -660,7 +660,10 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             letters={c for c in b["answer"] if c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
             if letters and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ ,，、\t\n" for c in b["answer"]):
                 question_type="多选题" if len(letters)>1 else "单选题"
-        data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=body.subject if b.get("subject") is None else b["subject"],
+        item_subject=normalize_subject(body.subject if b.get("subject") is None else b["subject"])
+        if not item_subject and not b.get("reuse_resource_id"):
+            raise HTTPException(422,f"第 {i+1} 个条目请选择科目")
+        data=bank.clean(bank.Draft(kind=b["kind"],title=title,subject=item_subject,
             content=b["content"],answer=b["answer"],solution=b["solution"],analysis=b.get("analysis",""),proof=b.get("proof",""),
             chapter=b["chapter"],question_type=question_type,difficulty=b["difficulty"],unit_type=b["unit_type"],
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
