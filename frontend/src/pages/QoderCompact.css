@@ -1,0 +1,36 @@
+/* Compact AI settings, scoped to this page. */
+.clean-workspace .model-center.qoder-compact,.model-center.qoder-compact{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:0;padding:0 0 16px;font-size:13px;line-height:1.5;min-width:0}
+.qoder-compact .model-tabs{gap:4px;padding:0 0 7px;margin:0}
+.legacy-shell .qoder-compact button,.qoder-compact button{min-height:30px;padding:4px 9px;font-size:12px;border-radius:5px;line-height:1.4}
+.qoder-compact .model-tabs button{min-height:28px}
+.clean-workspace .qoder-compact .model-account-grid,.qoder-compact .model-account-grid{display:block;max-width:none;min-width:0}
+.qoder-account,.qoder-summary,.qoder-config,.qoder-usage-fold{padding:10px 0;border:0;border-bottom:1px solid var(--line);margin:0;min-width:0;background:transparent}
+.qoder-account .provider-head{gap:6px}
+.qoder-account .provider-head strong{font-size:14px}
+.qoder-account .provider-state{margin-left:0;border:0;padding:0;font-size:12px;background:transparent}
+.qoder-facts{display:flex;gap:6px 15px;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.qoder-compact .provider-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-start;margin-top:9px}
+.qoder-compact .provider-actions>*{flex:0 1 auto;min-width:0;width:auto}
+.qoder-compact p{margin:5px 0;font-size:12px;line-height:1.5}
+.qoder-compact .model-feedback{margin:6px 0 0;padding:6px 8px;font-size:12px}
+.qoder-summary-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qoder-summary dl{display:grid;gap:4px;margin:6px 0}
+.qoder-summary dl>div{display:grid;grid-template-columns:112px minmax(0,1fr);gap:6px;align-items:baseline}
+.qoder-summary dt{color:var(--muted)}
+.qoder-summary dd{margin:0;overflow-wrap:anywhere}
+.qoder-usage-fold summary{font-size:12px;cursor:pointer}
+.clean-workspace .qoder-compact .model-quota{padding:8px 0;border-bottom:0;margin:0;gap:4px}
+.qoder-compact .model-quota .provider-card{min-height:0;gap:4px;padding:6px 0}
+.qoder-compact .model-quota .provider-card dl{gap:4px;padding-top:4px}
+.qoder-compact h2{font-size:14px;margin:0;line-height:1.4}
+.qoder-compact .panel-heading{margin:0 0 6px;gap:8px}
+.qoder-compact .model-config-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 10px;margin:8px 0;align-items:end}
+.qoder-compact .model-config-form label{display:grid;gap:3px;min-width:0;font-size:12px}
+.legacy-shell .qoder-compact .model-config-form select{width:100%;min-width:0;padding:5px 7px;min-height:32px;font-size:13px}
+.qoder-compact .model-config-form .button-row{margin:0;grid-column:1/-1}
+.qoder-compact .auth-inline-area{margin:8px 0}
+.qoder-compact .auth-inline-row{display:flex;gap:6px;align-items:center;min-width:0}
+.qoder-compact .auth-inline-field{min-width:0;flex:1;width:0}
+.qoder-compact .auth-copy-button{flex:none}
+.qoder-compact .auth-cancel-link{margin-top:5px}
+@media(max-width:480px){.qoder-compact .provider-actions{gap:5px}.qoder-compact .provider-actions>*{flex:0 1 auto}.qoder-compact .model-config-form{grid-template-columns:minmax(0,1fr)}.qoder-summary dl>div{grid-template-columns:100px minmax(0,1fr)}.qoder-compact .auth-inline-field{font-size:16px}}
