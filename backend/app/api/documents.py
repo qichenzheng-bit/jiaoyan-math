@@ -219,10 +219,13 @@ def read(id:str,db:Session=Depends(get_db)):return public(row(db,id))
 def origin(id:str,db:Session=Depends(get_db)):
     d=db.get(Doc,id)
     if not d:raise HTTPException(404,"文档不存在")
-    job=db.scalar(select(IntakeJob).where(IntakeJob.document_id==d.id).order_by(IntakeJob.created_at.desc()).limit(1))
-    if not job:return None
-    supplements=db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==job.id,IntakeSupplement.state=="accepted").order_by(IntakeSupplement.created_at.desc()).limit(100))
-    return {"job_id":job.id,"input_text":job.input_text,"provenance":job.provenance or {},"supplements":[{"item_uid":s.item_uid,"fields":s.accepted,"state":s.state,"model":s.model} for s in supplements]}
+    jobs=list(db.scalars(select(IntakeJob).where(IntakeJob.document_id==d.id).order_by(IntakeJob.created_at.desc(),IntakeJob.id)))
+    if not jobs:return None
+    def record(job):
+        supplements=db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==job.id,IntakeSupplement.state=="accepted").order_by(IntakeSupplement.created_at.desc()).limit(100))
+        return {"job_id":job.id,"input_text":job.input_text,"provenance":job.provenance or {},"item_uids":[b["uid"] for b in job.items],"supplements":[{"item_uid":s.item_uid,"fields":s.accepted,"state":s.state,"model":s.model} for s in supplements]}
+    records=[record(j) for j in jobs]
+    return {**records[0],"batches":records}
 @router.put("/{id}",dependencies=[Depends(require_origin)])
 def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)

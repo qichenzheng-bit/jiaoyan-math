@@ -56,3 +56,14 @@ def test_duplicate_decision_uses_manual_matcher(monkeypatch):
     intelligence.verify_duplicate_choice(None,reused,"")
     with pytest.raises(HTTPException):intelligence.verify_duplicate_choice(None,{**reused,"reuse_revision":1},"")
     with pytest.raises(HTTPException):intelligence.verify_duplicate_choice(None,{**reused,"content":"修改后的题干"},"")
+
+
+def test_pdf_location_hints_are_bounded_and_untrusted():
+    from app.api.intelligence import pdf_range,valid_pages
+    hints={}
+    rows=parse_answer('[{"kind":"question","title":"题目","content":"求极限","source_pages":{"content":4,"answer":9,"solution":"4","proof":true,"unknown":3}}]',hints,(3,5))
+    assert hints=={rows[0]["uid"]:{"content":4}}
+    assert "source_pages" not in rows[0]
+    assert pdf_range({"file_media_type":"application/pdf","work_batch_id":"b","start":1,"end":10})==(1,10)
+    assert pdf_range({"file_media_type":"application/pdf","work_batch_id":"b","start":1,"end":11}) is None
+    with pytest.raises(HTTPException):valid_pages({"answer":8},(3,5),True)

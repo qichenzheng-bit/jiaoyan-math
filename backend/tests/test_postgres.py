@@ -348,6 +348,69 @@ def test_migration_and_login(tmp_path, monkeypatch):
         origin_record=client.get("/api/documents/"+converted_doc["id"]+"/origin").json()
         assert origin_record["job_id"]==j["id"] and origin_record["input_text"]=="求极限"
         assert origin_record["supplements"][0]["fields"]==["answer"]
+        assert origin_record["batches"][0]["job_id"]==j["id"]
+        assert client.get("/api/intelligence/jobs/"+j["id"]+"/append-targets").json()==[]
+        # Work PDF lifecycle with deterministic extraction and worker stubs (no external OCR/model).
+        from app.api import workspaces as ws
+        from app.services import material_import
+        pdf_upload=client.post("/api/files?name=work-pages.pdf",headers=origin,content=b"%PDF-1.7\nCI preview fixture")
+        assert pdf_upload.status_code==200,pdf_upload.text
+        fid=pdf_upload.json()["id"]
+        monkeypatch.setattr(ws,"pdf_pages",lambda f:2)
+        real_extract=material_import.extract
+        def fake_page(f,mode,start,end):
+            if f.id!=fid:return real_extract(f,mode,start,end)
+            return {"text":"独立测试题第"+str(start)+"页","method":"pdf_text","warnings":[]}
+        def page_worker(method,path,body=None):
+            if path=="/status":return {"chat_available":True}
+            if path=="/chat/start":
+                worker_calls.append(body)
+                return {"state":"running"}
+            page=2 if "【原文位置 2】" in worker_calls[-1]["prompt"] else 1
+            return {"state":"done","answer":json.dumps([{"kind":"question","title":"独立测试题"+str(page),"content":"测试页"+str(page)+"的独立数学题","source_pages":{"content":page}}],ensure_ascii=False)}
+        with monkeypatch.context() as patch:
+            patch.setattr(material_import,"extract",fake_page)
+            patch.setattr(qoder,"request",page_worker)
+            w=client.post("/api/workspaces",headers=origin,json={"title":"分批追加测试"}).json()
+            wb="/api/workspaces/"+w["id"]
+            mat=client.post(wb+"/materials",headers=origin,json={"file_ids":[fid]}).json()["materials"][0]
+            existing_doc=None
+            for page in (1,2):
+                batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
+                assert batch.status_code==200,batch.text
+                bb=wb+"/batches/"+batch.json()["id"]
+                assert client.post(bb+"/step",headers=origin).json()["units"][0]["state"]=="done"
+                assert client.post(bb+"/verify",headers=origin,json={"text":"【原文位置 "+str(page)+"】\n独立测试题第"+str(page)+"页"}).json()["verified"]
+                started=client.post(bb+"/organize",headers=origin,json={"model":"Auto"})
+                assert started.status_code==200,started.text
+                jb="/api/intelligence/jobs/"+started.json()["id"]
+                result=client.get(jb).json()
+                uid=result["items"][0]["uid"]
+                assert result["provenance"]["suggested_pages"]=={uid:{"content":page}}
+                result["items"][0]["dedup_reason"]="独立集成测试"
+                payload={"revision":result["revision"],"items":result["items"],"reviewed_uids":[uid],"confirmed_pages":{uid:{"content":page}}}
+                assert client.put(jb,headers=origin,json={**payload,"confirmed_pages":{uid:{"content":99}}}).status_code==422
+                reviewed=client.put(jb,headers=origin,json=payload)
+                assert reviewed.status_code==200,reviewed.text
+                assert reviewed.json()["provenance"]["confirmed_pages"]=={uid:{"content":page}}
+                targets=client.get(jb+"/append-targets").json()
+                conversion={"revision":reviewed.json()["revision"]}
+                if existing_doc:
+                    assert [t["id"] for t in targets]==[existing_doc["id"]]
+                    target=targets[0]
+                    assert client.post(jb+"/document",headers=origin,json={**conversion,"append_document_id":target["id"],"append_revision":target["revision"]+1}).status_code==409
+                    conversion.update(append_document_id=target["id"],append_revision=target["revision"])
+                else:assert targets==[]
+                converted_batch=client.post(jb+"/document",headers=origin,json=conversion)
+                assert converted_batch.status_code==200,converted_batch.text
+                appended=client.get("/api/documents/"+converted_batch.json()["document_id"]).json()
+                if existing_doc:
+                    assert appended["id"]==existing_doc["id"] and appended["blocks"][0]==existing_doc["blocks"][0]
+                    assert len(appended["blocks"])==2
+                    assert len(client.get("/api/documents/"+appended["id"]+"/origin").json()["batches"])==2
+                    assert client.post(jb+"/document",headers=origin,json=conversion).json()["document_id"]==appended["id"]
+                existing_doc=appended
+
         from app.api import qoder
         def fake_document_edit(method,path,body=None):
             if path=="/status":return {"chat_available":True}

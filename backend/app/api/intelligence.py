@@ -2,7 +2,7 @@ import json
 from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.db import get_db
@@ -31,9 +31,29 @@ class Review(BaseModel):
     revision:int=Field(ge=1)
     items:list[docs.Block]=Field(max_length=100)
     reviewed_uids:list[str]|None=Field(default=None,max_length=100)
+    confirmed_pages:dict[str,dict[str,StrictInt]]|None=Field(default=None,max_length=100)
 class Confirm(BaseModel):
     revision:int=Field(ge=1)
-def parse_answer(text):
+class Convert(Confirm):
+    append_document_id:str|None=Field(default=None,max_length=36)
+    append_revision:int|None=Field(default=None,ge=1)
+PAGE_FIELDS={"content","answer","solution","proof"}
+def pdf_range(provenance):
+    if provenance.get('file_media_type')!='application/pdf' or not provenance.get('work_batch_id'):return None
+    first,last=provenance.get('start'),provenance.get('end')
+    if type(first) is int and type(last) is int and 1<=first<=last<=10000 and last-first<10:return first,last
+    return None
+
+def valid_pages(values,bounds,strict=False):
+    if not isinstance(values,dict) or bounds is None:
+        if strict and values:raise HTTPException(422,'原页位置无效')
+        return {}
+    first,last=bounds
+    valid={k:v for k,v in values.items() if k in PAGE_FIELDS and type(v) is int and first<=v<=last}
+    if strict and len(valid)!=len(values):raise HTTPException(422,'原页位置必须属于本批PDF范围')
+    return valid
+
+def parse_answer(text,page_hints=None,bounds=None):
     text=text.strip()
     fence=chr(96)*3
     if text.startswith(fence+"json") and text.endswith(fence):text=text[7:-3].strip()
@@ -45,6 +65,9 @@ def parse_answer(text):
         b=docs.Block.model_validate({**item,"uid":str(uuid4()),"resource_id":None,"file_id":None})
         if b.kind not in ("question","knowledge") or not b.title.strip() or not b.content.strip():raise ValueError("invalid block")
         result.append(b.model_dump())
+        if page_hints is not None:
+            hints=valid_pages(item.get('source_pages'),bounds)
+            if hints:page_hints[b.uid]=hints
     return result
 def view(j,full=False):
     r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at","source_id")}
@@ -65,7 +88,10 @@ def sync(db,j):
         s=r.get("state")
         if s=="running":return
         if s=="done":
-            try:j.items=parse_answer(r.get("answer",""));j.state="review";j.detail="提取结果待人工核对，未入库"
+            try:
+                hints={};j.items=parse_answer(r.get("answer",""),hints,pdf_range(j.provenance or {}))
+                if hints:j.provenance={**(j.provenance or {}),"suggested_pages":hints}
+                j.state="review";j.detail="提取结果待人工核对，未入库"
             except (ValueError,TypeError):j.state="failed";j.detail="结构化结果无效，请缩小批次后重试"
         else:j.state="stopped" if s=="stopped" else "failed";j.detail=str(r.get("detail","执行失败"))[:400]
     j.provenance={**(j.provenance or {}),"execution_finished_at":now()}
@@ -115,6 +141,8 @@ def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     intent=provenance.get("intent","mixed")
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
     prompt+="\n【本次整理目标】"+focus
+    if pdf_range(provenance):
+        prompt+="\n原文中的【原文位置 N】表示PDF物理页。每条可附加source_pages对象，分别给出content、answer、solution、proof所在的物理页整数。只填写能依据页标确定的位置，跨页时填起始页；不确定则省略。不得将推测当成已确认来源。"
     if provenance.get("kind")=="chat_assistant":prompt+="\n来源是AI生成回复，不是原始文献；只能整理为待核对草稿。"
     if provenance.get("kind")=="file_import" and provenance.get("warnings"):
         prompt+="\n文件提取可能失真。保留不确定标记，不自行还原缺失公式、图形或答案。所有结果待人工对照原件。"
@@ -146,7 +174,8 @@ def retry(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(curre
     if existing:return view(existing,True)
     if j.state not in ("failed","stopped") or j.revision!=body.revision:
         raise HTTPException(409,"仅失败或已停止任务可重试，请刷新任务状态")
-    provenance=j.provenance or {"kind":"manual","intent":"mixed"}
+    provenance={k:v for k,v in (j.provenance or {"kind":"manual","intent":"mixed"}).items() if k not in ("suggested_pages","confirmed_pages","execution_finished_at")}
+    if "reviewed_uids" in provenance:provenance["reviewed_uids"]=[]
     draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model,effort=provenance.get("effort"),source_id=j.source_id)
     return launch(db,user,draft,provenance,retry_of=j.id)
 
@@ -192,10 +221,28 @@ def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(curre
     elif "reviewed_uids" in provenance:
         old={b["uid"]:b for b in j.items}
         provenance["reviewed_uids"]=[b["uid"] for b in items if b["uid"] in provenance["reviewed_uids"] and old.get(b["uid"])==b]
+    if body.confirmed_pages is not None:
+        if not set(body.confirmed_pages)<=valid:raise HTTPException(422,"原页位置对应条目不存在")
+        pages={uid:valid_pages(loc,pdf_range(provenance),True) for uid,loc in body.confirmed_pages.items()}
+        provenance["confirmed_pages"]={uid:loc for uid,loc in pages.items() if loc}
+    for key in ("suggested_pages","confirmed_pages"):
+        if key in provenance:provenance[key]={uid:loc for uid,loc in provenance[key].items() if uid in valid}
     j.provenance=provenance
     j.items=items;j.revision+=1;j.updated_at=now();audit(db,"intelligence.review",user.id);db.commit();return view(j,True)
+def append_candidates(db,j):
+    p=j.provenance or {}
+    if not p.get("work_batch_id") or not p.get("file_id"):return []
+    same=select(Job.document_id).where(Job.state=="converted",Job.document_id.is_not(None),Job.provenance["file_id"].as_string()==p["file_id"],Job.provenance["work_batch_id"].as_string().is_not(None))
+    stmt=select(TeachingDocument).where(TeachingDocument.id.in_(same),TeachingDocument.kind=="intake",TeachingDocument.archived==False)
+    if j.source_id:stmt=stmt.where(TeachingDocument.source_id==j.source_id)
+    return list(db.scalars(stmt.order_by(TeachingDocument.updated_at.desc()).limit(100)))
+@router.get("/jobs/{id}/append-targets")
+def append_targets(id:str,db:Session=Depends(get_db)):
+    j=db.get(Job,id)
+    if not j:raise HTTPException(404,"任务不存在")
+    return [{"id":d.id,"title":d.title,"revision":d.revision,"block_count":len(d.blocks),"available":len(d.blocks)+len(j.items)<=200} for d in append_candidates(db,j)]
 @router.post("/jobs/{id}/document",dependencies=[Depends(require_origin)])
-def convert(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
+def convert(id:str,body:Convert,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);j=get_job(db,id)
     if j.document_id:return {"document_id":j.document_id}
     if j.state!="review" or j.revision!=body.revision or not j.items:raise HTTPException(409,"请先审核草稿")
@@ -205,9 +252,22 @@ def convert(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(cur
         raise HTTPException(409,"请先处理或舍弃待审核的AI补充建议")
     if "reviewed_uids" in (j.provenance or {}):
         for item in j.items:verify_duplicate_choice(db,item,j.subject)
-    draft=docs.Draft(title=j.title,subject=j.subject,source_id=j.source_id,blocks=j.items)
-    d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=j.source_id,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
-    db.add(d);db.flush();docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.convert",user.id);db.commit();return {"document_id":d.id}
+    if body.append_document_id:
+        if body.append_document_id not in {d.id for d in append_candidates(db,j)}:raise HTTPException(409,"仅可追加到同一原始资料的录入文档")
+        d=docs.row(db,body.append_document_id)
+        if d.archived or d.kind!="intake" or d.revision!=body.append_revision:raise HTTPException(409,"目标文档版本已变化，请刷新后重试")
+        if len(d.blocks)+len(j.items)>200:raise HTTPException(422,"文档超过200个块，请新建下一册")
+        if {x["uid"] for x in d.blocks}&{x["uid"] for x in j.items}:raise HTTPException(409,"条目已存在，不能重复追加")
+        draft=docs.Draft(title=d.title,subject=d.subject,source_id=d.source_id,blocks=[*d.blocks,*j.items])
+        validated=docs.validate(db,draft,d.blocks)
+        # Keep earlier blocks (including reference snapshots) byte-for-byte unchanged.
+        d.blocks=[*d.blocks,*validated[len(d.blocks):]];d.revision+=1;d.updated_at=now()
+    else:
+        if body.append_revision is not None:raise HTTPException(422,"请选择追加文档")
+        draft=docs.Draft(title=j.title,subject=j.subject,source_id=j.source_id,blocks=j.items)
+        d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=j.source_id,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
+        db.add(d);db.flush()
+    docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.append" if body.append_document_id else "intelligence.convert",user.id);db.commit();return {"document_id":d.id}
 
 class PDFRequest(BaseModel):
     file_id:str=Field(min_length=1,max_length=36)
