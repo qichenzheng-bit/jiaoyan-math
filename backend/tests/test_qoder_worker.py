@@ -73,3 +73,19 @@ def test_official_model_info_thinking_config():
     result=worker.parse_catalog(json.dumps({"models":rows}))
     assert set(result["Qwen3.8-Max"])=={"disabled","high","max"}
     assert result["Auto"]==[] and "Disabled" not in result
+
+
+def test_sdk_catalog_is_preferred(monkeypatch):
+    monkeypatch.setattr(worker,"executable",lambda:"/usr/bin/qoderclicn")
+    monkeypatch.setattr(worker,"sdk_catalog",lambda exe:({"Auto":[],"Qwen4-Max":["high","max"]},"sdk"))
+    for key in ("catalog","catalog_at","catalog_efforts","catalog_capability_source"):
+        monkeypatch.setattr(worker,key,getattr(worker,key))
+    status,result=worker.refresh_models()
+    assert status==200 and result["source"]=="cli"
+    assert result["capability_source"]=="sdk"
+    assert result["models"][1]["efforts"]==["high","max"]
+
+
+def test_missing_sdk_is_safe(monkeypatch,tmp_path):
+    monkeypatch.setattr(worker,"SDK_PYTHON",tmp_path/"missing")
+    assert worker.sdk_catalog("/usr/bin/qoderclicn")== (None,"sdk_missing")
