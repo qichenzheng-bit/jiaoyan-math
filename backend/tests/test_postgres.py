@@ -167,6 +167,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert saved.json()["blocks"][1]["snapshot"]["question_type"]=="多选题"
         assert saved.json()["blocks"][1]["snapshot"]["difficulty"]=="中等"
         assert saved.json()["blocks"][2]["snapshot"]["content"].endswith("(1) 求导数")
+        assert saved.json()["blocks"][2]["snapshot"]["question_type"]=="综合题"
+        assert any(x["id"]==saved.json()["blocks"][2]["snapshot"]["id"] for x in client.get("/api/resources",params={"kind":"question","question_type":"综合题"}).json()["items"])
         assert client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":draft_blocks}).status_code==409
         assert client.get(manual_path+"/export").status_code==409
         exported=client.get("/api/documents/source-export/"+manual["source_id"])

@@ -136,7 +136,9 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
     if kind: filters.append(TeachingResource.kind==kind)
     if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
     for key,value in (("chapter",chapter),("question_type",question_type),("unit_type",unit_type),("exam_type",exam_type),("source_type",source_type),("authority_tier",authority_tier)):
-        if value: filters.append(getattr(TeachingResource,key)==value)
+        if key=="question_type" and value=="综合题":
+            filters.append(TeachingResource.question_type.in_(("综合题","解答题","计算题","证明题")))
+        elif value: filters.append(getattr(TeachingResource,key)==value)
     if q.strip():
         term=q.strip()
         filters.append(or_(TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))

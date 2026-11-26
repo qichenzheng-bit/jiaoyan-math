@@ -9,8 +9,9 @@ import {Icon} from './Icon'
 import InlineMathEditor from './InlineMathEditor'
 import {PrintableDocument} from '../pages/DocumentPrint'
 
-export const questionTypes=['选择题','填空题','解答题']
-export const resourceQuestionTypes=['选择题','单选题','多选题','填空题','解答题','计算题','证明题','其他']
+export const questionTypes=['选择题','填空题','综合题']
+export const resourceQuestionTypes=['选择题','单选题','多选题','填空题','综合题']
+export const displayQuestionType=(type:string)=>['解答题','计算题','证明题'].includes(type)?'综合题':type
 type QuestionValue={subject?:string|null;chapter:string;question_type:string;difficulty?:string;content:string;answer:string;solution:string}
 type Props={value:QuestionValue;subject:string;subjects:string[];locked:boolean;onChange:(p:Partial<QuestionValue>)=>void;knowledge?:ReactNode}
 function marked(text:string,pattern:RegExp){
@@ -33,7 +34,7 @@ function Field(props:{label:string;value:string;onChange:(v:string)=>void;locked
  return <InlineMathEditor {...props}/>
 }
 export function QuestionFields({value,subject,subjects,locked,onChange,knowledge}:Props){
- const type=['单选题','多选题','选择题'].includes(value.question_type)?'选择题':value.question_type==='填空题'?'填空题':'解答题',choice=type==='选择题',fill=type==='填空题',big=!choice&&!fill
+ const type=['单选题','多选题','选择题'].includes(value.question_type)?'选择题':value.question_type==='填空题'?'填空题':'综合题',choice=type==='选择题',fill=type==='填空题',big=!choice&&!fill
  const options=marked(value.content,choicesPattern),sub=marked(value.content,subPattern),answers=marked(value.answer,subPattern),solutions=marked(value.solution,subPattern)
  const [optionCount,setOptionCount]=useState(Math.max(4,...options.order.map(k=>k.charCodeAt(0)-64))),[subCount,setSubCount]=useState(Math.max(0,...[...sub.order,...answers.order,...solutions.order].map(Number)))
  const optKeys=Array.from({length:Math.min(26,optionCount)},(_,i)=>String.fromCharCode(65+i))
@@ -118,7 +119,7 @@ function DuplicateMatches({block,locked,onChoose}:{block:Block;locked:boolean;on
   return()=>{clearTimeout(t);c.abort()}
  },[content,answer,solution,block.reuse_resource_id,locked,attempt])
  if(block.reuse_resource_id)return null
- return <section className="manual-matches"><div className="mobile-doc-title"><strong>题库查重</strong><button type="button" disabled={locked||!content.trim()} onClick={()=>setAttempt(n=>n+1)}>重新查重</button></div>{status&&<p className="muted" role="status">{status}</p>}{scanned!==undefined&&<small className="muted">已查询 {scanned} 道正式题目 · 找到 {matches.length} 道相似度 ≥ 80% 的题目</small>}{matches.map(({resource:r,match_kind,similarity})=><article className="manual-match" key={r.id}><div><strong>{r.code}</strong><small> · {match_kind==='exact'?'内容相同 · 100%':match_kind==='same_stem'?'题干相同 · 100%':'相似度 '+(similarity*100).toFixed(1)+'%'}</small></div><ChatText content={r.content}/><details><summary>查看答案、解析及属性</summary><p className="muted">{r.subject||'未分类'} · {r.chapter||'无章节'} · {r.question_type||'未分类'}</p><strong>答案</strong><ChatText content={r.answer||'（未填写）'}/><strong>解析</strong><ChatText content={r.solution||'（未填写）'}/></details><div className="button-row"><button type="button" className="primary" disabled={locked} onClick={()=>onChoose(r,true)}>使用原题 · 编号不变</button><button type="button" disabled={locked} onClick={()=>onChoose(r,false)}>编辑为新题</button></div></article>)}</section>
+ return <section className="manual-matches"><div className="mobile-doc-title"><strong>题库查重</strong><button type="button" disabled={locked||!content.trim()} onClick={()=>setAttempt(n=>n+1)}>重新查重</button></div>{status&&<p className="muted" role="status">{status}</p>}{scanned!==undefined&&<small className="muted">已查询 {scanned} 道正式题目 · 找到 {matches.length} 道相似度 ≥ 80% 的题目</small>}{matches.map(({resource:r,match_kind,similarity})=><article className="manual-match" key={r.id}><div><strong>{r.code}</strong><small> · {match_kind==='exact'?'内容相同 · 100%':match_kind==='same_stem'?'题干相同 · 100%':'相似度 '+(similarity*100).toFixed(1)+'%'}</small></div><ChatText content={r.content}/><details><summary>查看答案、解析及属性</summary><p className="muted">{r.subject||'未分类'} · {r.chapter||'无章节'} · {displayQuestionType(r.question_type)||'未分类'}</p><strong>答案</strong><ChatText content={r.answer||'（未填写）'}/><strong>解析</strong><ChatText content={r.solution||'（未填写）'}/></details><div className="button-row"><button type="button" className="primary" disabled={locked} onClick={()=>onChoose(r,true)}>使用原题 · 编号不变</button><button type="button" disabled={locked} onClick={()=>onChoose(r,false)}>编辑为新题</button></div></article>)}</section>
 }
 function SourcePreview({doc,stem}:{doc:Doc;stem:boolean}){
  const ref=useRef<HTMLDivElement>(null),[zoom,setZoom]=useState(1)

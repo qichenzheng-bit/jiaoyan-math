@@ -653,6 +653,8 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
         title=b["title"].strip() or ("题目" if b["kind"]=="question" else "知识单元")+f" {i+1}"
         source=bank.active_source(db,d.source_id) if d.source_id else None
         question_type=b["question_type"]
+        if not b.get("reuse_resource_id") and question_type in ("解答题","计算题","证明题"):
+            question_type="综合题"
         if not b.get("reuse_resource_id") and question_type in ("选择题","单选题","多选题"):
             letters={c for c in b["answer"] if c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
             if letters and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ ,，、\t\n" for c in b["answer"]):

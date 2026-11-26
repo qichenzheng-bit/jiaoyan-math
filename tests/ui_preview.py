@@ -333,7 +333,7 @@ with sync_playwright() as p:
     page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
     assert "underline" in page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 解答题",exact=True).click()
+    page.get_by_role("button",name="＋ 综合题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("已知函数")
     assert page.get_by_label("第 1 小问题目",exact=True).count()==0
     page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
@@ -357,7 +357,7 @@ with sync_playwright() as p:
     assert page.get_by_role("button",name="移除知识标签 新知识点",exact=True).is_visible()
     assert page.get_by_role("button",name="移除知识标签 导数",exact=True).is_visible()
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
-    page.get_by_role("button",name="＋ 解答题",exact=True).click()
+    page.get_by_role("button",name="＋ 综合题",exact=True).click()
     page.get_by_label("题目",exact=True).fill("测试查重")
     page.get_by_role("button",name="使用原题 · 编号不变",exact=True).first.wait_for()
     assert page.locator(".manual-match").count()==2
