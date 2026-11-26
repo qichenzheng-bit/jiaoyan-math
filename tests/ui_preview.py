@@ -37,6 +37,9 @@ def answer(route):
         result=ai_doc
         if route.request.method=="PUT":
             result={**json.loads(route.request.post_data),"revision":2}
+    if p=="/documents/manual-matches" and route.request.method=="POST":
+        body=json.loads(route.request.post_data)
+        result={"items":[{"resource":items[1],"match_kind":"similar","similarity":.87}] if "测试查重" in body["content"] else [],"scanned":len(items),"scope":"full_active_question_bank"}
     if p=="/documents/ai-demo/manual-save" and route.request.method=="POST":
         body=json.loads(route.request.post_data)
         result={**body,"revision":body["revision"]+1,"blocks":[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"code":"QNEW","kind":b["kind"],"id":"saved-"+b["uid"]}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]}
@@ -305,8 +308,22 @@ with sync_playwright() as p:
     page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
     page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
     page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
+    assert page.get_by_role("button",name="＋ 引用题库",exact=True).count()==0
+    page.get_by_label("知识标签",exact=True).fill("导数")
+    page.get_by_label("知识标签",exact=True).press("Enter")
+    assert page.get_by_role("button",name="移除知识标签 导数",exact=True).is_visible()
+    page.get_by_role("button",name="＋ 解答题",exact=True).click()
+    page.get_by_label("题目",exact=True).fill("测试查重")
+    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).wait_for()
+    page.once("dialog",lambda dialog:dialog.accept())
+    page.get_by_role("button",name="使用原题 · 编号不变",exact=True).click()
+    assert page.get_by_label("题目",exact=True).is_disabled()
+    assert page.get_by_text("已选择原题 QDEMO0002",exact=False).is_visible()
+    page.get_by_role("button",name="编辑相关信息 · 另存为新题",exact=True).click()
+    assert page.get_by_label("题目",exact=True).is_enabled()
+    page.get_by_label("题目",exact=True).fill("修改为新题")
     page.get_by_role("button",name="整套预览",exact=True).click()
-    assert page.locator(".manual-list-row").count()==4
+    assert page.locator(".manual-list-row").count()==5
     page.get_by_role("button",name="保存并入库",exact=True).first.click()
     page.get_by_text("已保存并直接入库",exact=True).wait_for()
     assert page.get_by_role("button",name="批量审核",exact=True).count()==0

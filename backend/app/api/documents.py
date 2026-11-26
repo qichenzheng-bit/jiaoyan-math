@@ -30,6 +30,7 @@ class Block(BaseModel):
     knowledge_tags:list[str]=Field(default_factory=list,max_length=20)
     reuse_resource_id:str|None=Field(default=None,max_length=36)
     reuse_revision:int|None=Field(default=None,ge=1)
+    reuse_code:str|None=Field(default=None,max_length=16)
     fork_from_id:str|None=Field(default=None,max_length=36)
     question_type:str=Field(default="",max_length=20)
     unit_type:str=Field(default="",max_length=24)
@@ -640,6 +641,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
         raise HTTPException(422,"不能在卡片录入中更换资料来源")
     blocks=validate(db,body,d.blocks)
     history=[]
+    original_revisions={}
     count=0
     for i,b in enumerate(blocks):
         if b["kind"] not in ("question","knowledge"):continue
@@ -657,7 +659,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
         before=None
         if b.get("reuse_resource_id"):
             r=bank.existing(db,b["reuse_resource_id"],True)
-            if r.archived or r.kind!="question" or r.revision!=b.get("reuse_revision"):
+            if r.archived or r.kind!="question" or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
             # Prevent an edited draft from silently reusing a different question.
             if any(data[k]!=getattr(r,k) for k in ("kind","content","answer","solution","subject","chapter","question_type")):

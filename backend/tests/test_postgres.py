@@ -138,7 +138,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         manual_path="/api/documents/"+manual["id"]
         draft_blocks=[
             {"uid":"manual-heading","kind":"heading","title":"一、选择题"},
-            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"多选题","chapter":"矩阵","content":"选择正确项\\nA. 1\\nB. 2","answer":"AB","solution":"已知解析"},
+            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"多选题","chapter":"矩阵","knowledge_tags":["矩阵运算","矩阵运算"],"content":"选择正确项\\nA. 1\\nB. 2","answer":"AB","solution":"已知解析"},
             {"uid":"manual-b","kind":"question","question_type":"解答题","content":"已知函数\\n(1) 求导数","answer":"(1) 2x","solution":"(1) 直接计算"},
         ]
         before_count=client.get("/api/resources?kind=question").json()["total"]
@@ -157,6 +157,34 @@ def test_migration_and_login(tmp_path, monkeypatch):
         exported=client.get("/api/documents/source-export/"+manual["source_id"])
         assert exported.status_code==200,exported.text
         assert any(b.get("snapshot",{}).get("content","").startswith("选择正确项") for b in exported.json()["blocks"])
+        original=saved.json()["blocks"][1]["snapshot"]
+        assert original["tags"]==["矩阵运算"]
+        linked=client.get("/api/knowledge/resources/"+original["id"]).json()["items"]
+        assert len(linked)==1 and linked[0]["name"]=="矩阵运算"
+        found=client.post("/api/documents/manual-matches",headers=origin,json={k:original[k] for k in ("content","answer","solution")})
+        assert found.status_code==200,found.text
+        assert found.json()["scope"]=="full_active_question_bank"
+        assert any(x["resource"]["id"]==original["id"] and x["match_kind"]=="exact" for x in found.json()["items"])
+        new_source=client.post("/api/documents/setup",headers=origin,json={"title":"复用试卷","subject":"线性代数","source_type":"exam"}).json()
+        reuse_path="/api/documents/"+new_source["id"]+"/manual-save"
+        reused_block={**draft_blocks[1],"uid":"reuse-question","reuse_resource_id":original["id"],"reuse_revision":original["revision"],"knowledge_tags":["矩阵运算","矩阵乘法"]}
+        changed=client.post(reuse_path,headers=origin,json={**new_source,"blocks":[{**reused_block,"content":"篡改原题"}]})
+        assert changed.status_code==409
+        assert client.get("/api/documents/"+new_source["id"]).json()["revision"]==new_source["revision"]
+        reused_saved=client.post(reuse_path,headers=origin,json={**new_source,"blocks":[reused_block]})
+        assert reused_saved.status_code==200,reused_saved.text
+        same=reused_saved.json()["blocks"][0]["snapshot"]
+        assert same["id"]==original["id"] and same["code"]==original["code"]
+        assert same["content"]==original["content"]
+        assert {"矩阵运算","矩阵乘法"}==set(same["tags"])
+        assert new_source["source_id"] in {x["source_id"] for x in client.get("/api/resources/"+same["id"]+"/sources").json()["items"]}
+        fork={**reused_block,"uid":"fork-question","content":"另一个矩阵选择题","reuse_resource_id":None,"reuse_revision":None,"fork_from_id":same["id"]}
+        reused_doc=reused_saved.json()
+        fork_saved=client.post(reuse_path,headers=origin,json={**reused_doc,"blocks":[*reused_doc["blocks"],fork]})
+        assert fork_saved.status_code==200,fork_saved.text
+        new=fork_saved.json()["blocks"][1]["snapshot"]
+        assert new["code"]!=same["code"] and new["id"]!=same["id"]
+        assert client.get("/api/resources/"+same["id"]).json()["content"]==same["content"]
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"models":[{"id":"Auto"},{"id":"Qwen4-Max"}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto","video_model":"Auto","effort":"default","video_effort":"default"}
