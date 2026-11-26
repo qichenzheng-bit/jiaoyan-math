@@ -2,7 +2,7 @@
 from uuid import uuid4
 from typing import Literal
 from urllib.parse import urlsplit
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from pydantic import BaseModel,Field,ValidationError
 from fastapi import APIRouter,Depends,HTTPException,Query
 from sqlalchemy import select,func,or_
@@ -113,6 +113,55 @@ def save_version(db,r):
     db.add(Version(item_id=r.id,revision=r.revision,snapshot=public(r),created_at=now()))
     # Keep file references for all historical revisions, even when the current file changes.
     if r.data.get("file_id"):storage.link_file(db,r.data["file_id"],"studio_item",r.id)
+def qoder_round(at=None):
+    current=(at or datetime.now(timezone.utc)).astimezone(timezone(timedelta(hours=8)))
+    return (current-timedelta(hours=10)).date().isoformat()
+
+@router.get("/qoder-checkin")
+def qoder_checkin_state(db:Session=Depends(get_db)):
+    accounts=list(db.scalars(select(Item).where(Item.kind=="account",Item.archived==False,Item.data["platform"].as_string()=="qoder_cn").order_by(Item.created_at,Item.id)))
+    day=qoder_round()
+    ids={a.id for a in accounts}
+    records=[r for r in db.scalars(select(Item).where(Item.kind=="checkin",Item.archived==False).order_by(Item.created_at.desc(),Item.id)) if r.data.get("account_id") in ids]
+    results=[]
+    for a in accounts:
+        own=[r for r in records if r.data.get("account_id")==a.id]
+        current=next((r for r in own if r.data.get("day")==day),None)
+        days={r.data.get("day") for r in own if r.data.get("state")=="success"}
+        cursor=date.fromisoformat(day)
+        if day not in days:cursor-=timedelta(days=1)
+        streak=0
+        while cursor.isoformat() in days:
+            streak+=1;cursor-=timedelta(days=1)
+        balance=next((r for r in sorted(own,key=lambda r:(r.data.get("day",""),r.updated_at),reverse=True) if r.data.get("balance") is not None),None)
+        results.append({"id":a.id,"name":a.title,"current":public(current) if current else None,
+            "total_days":len(days),"streak_days":streak,"balance":balance.data["balance"] if balance else None,
+            "balance_day":balance.data["day"] if balance else None,"recent":[public(r) for r in own[:20]]})
+    return {"round":day,"timezone":"Asia/Shanghai","accounts":results}
+
+class QoderConfirmation(BaseModel):
+    account_id:str=Field(max_length=36)
+    round:str=Field(min_length=10,max_length=10)
+    earned:float|None=Field(default=None,ge=0,le=100000000)
+    balance:float|None=Field(default=None,ge=0,le=100000000)
+
+@router.post("/qoder-checkin/confirm",dependencies=[Depends(require_origin)])
+def qoder_confirm(body:QoderConfirmation,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    account=existing(db,body.account_id,"account")
+    if account.archived or account.data.get("platform")!="qoder_cn":raise HTTPException(422,"仅支持 Qoder CN 账号")
+    if body.round!=qoder_round():raise HTTPException(409,"领取轮次已更新，请刷新后核对")
+    current=next((r for r in db.scalars(select(Item).where(Item.kind=="checkin",Item.archived==False)) if r.data.get("account_id")==account.id and r.data.get("day")==body.round),None)
+    data={"account_id":account.id,"day":body.round,"state":"success","earned":body.earned,"balance":body.balance,"note":"用户确认已在官方客户端领取"}
+    draft=Draft(kind="checkin",title=account.title+" · "+body.round,data=data)
+    if current:
+        if current.data.get("state")=="success":return public(current)
+        current.data=validate(db,draft,current.id);current.revision+=1;current.updated_at=now()
+    else:
+        current=Item(id=str(uuid4()),kind="checkin",title=draft.title,data=validate(db,draft),revision=1,archived=False,created_at=now(),updated_at=now())
+        db.add(current);db.flush()
+    save_version(db,current);audit(db,"studio.qoder.confirm",user.id);db.commit();return public(current)
+
 @router.get("/presets")
 def presets():return PRESETS
 @router.get("")
