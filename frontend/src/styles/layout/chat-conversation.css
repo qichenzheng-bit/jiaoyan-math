@@ -1,0 +1,16 @@
+/* Conversation layout only: the empty homepage uses ai-home.css. */
+.shell.legacy-shell.clean-workspace .chat-conversation[data-chat-layout="v3"]{gap:8px;--chat-column:740px}
+.shell.legacy-shell.clean-workspace .chat-conversation>.chat-scroll{overscroll-behavior-y:contain;scroll-behavior:auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:16px 8px 10px;scroll-padding-bottom:16px}
+.shell.legacy-shell.clean-workspace .chat-conversation .chat-message{width:100%;max-width:var(--chat-column);margin-bottom:24px;min-width:0}
+.shell.legacy-shell.clean-workspace .chat-conversation .chat-message.user .chat-message-body{max-width:min(85%,600px);padding:11px 15px;border-radius:20px 20px 5px 20px;min-width:0}
+.shell.legacy-shell.clean-workspace .chat-conversation .chat-message.assistant .chat-message-body{border:none;background:transparent;padding:0}
+.chat-conversation .rich-reply{font-size:16px;line-height:1.8;overflow-wrap:anywhere;min-width:0}
+.chat-conversation .rich-reply h1,.chat-conversation .rich-reply h2,.chat-conversation .rich-reply h3{margin:1.2em 0 .5em}
+.chat-conversation .rich-reply .formula-block,.chat-conversation .rich-reply .rich-table,.chat-conversation .rich-reply pre,.chat-conversation .chat-message-body .katex-display{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.chat-conversation .chat-message-actions{min-height:34px}
+@media(hover:hover) and (pointer:fine){.chat-conversation .chat-message-actions{opacity:0;transition:opacity .12s}.chat-conversation .chat-message:hover .chat-message-actions,.chat-conversation .chat-message:focus-within .chat-message-actions{opacity:1}}
+.chat-turn-failure{display:grid;gap:4px;border-left:2px solid var(--danger);margin:10px 0;padding:5px 10px;overflow-wrap:anywhere;color:var(--muted);font-size:13px}.chat-turn-failure strong{color:var(--danger);font-size:13px}
+.chat-resource-detail{margin-top:10px;min-width:0}.chat-resource-detail details{border-top:1px solid var(--line);padding:8px 0}.chat-resource-detail details>summary{font-size:13px;color:var(--ink)}
+.shell.legacy-shell.clean-workspace .chat-conversation>.compact-composer{margin:0 auto;flex:none}
+@media(max-width:760px){.shell.legacy-shell.clean-workspace .chat-conversation>.chat-scroll{padding:8px 4px 10px}.shell.legacy-shell.clean-workspace .chat-conversation .chat-message{margin-bottom:18px}.shell.legacy-shell.clean-workspace .chat-conversation .chat-message.user .chat-message-body{max-width:91%;padding:9px 12px}.chat-conversation .rich-reply{font-size:15px;line-height:1.75}.chat-conversation .chat-message-actions{opacity:1}}
+@media(prefers-reduced-motion:reduce){.chat-conversation .chat-message-actions{transition:none}}

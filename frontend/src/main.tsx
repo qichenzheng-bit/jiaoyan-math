@@ -43,6 +43,7 @@ import './styles/resource-components.css'
 import './styles/interaction-components.css'
 import './styles/layout/sidebar-navigation.css'
 import './styles/layout/ai-home.css'
+import './styles/layout/chat-conversation.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(

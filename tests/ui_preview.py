@@ -225,6 +225,45 @@ with sync_playwright() as p:
             nav.locator(".nav-combined-history").get_by_role("button",name="收起",exact=True).click()
             page.unroute("**/api/intelligence/jobs",nav_job_fixture)
             visit(page,"/",".chat-home-recent")
+        if GROUP in {'all','desktop'}:
+            print('UI case: actual branch request and session read retry',flush=True)
+            branch_requests=[]
+            def branch_turn(route):
+                payload=json.loads(route.request.post_data)
+                branch_requests.append(payload)
+                route.fulfill(json={**demo_chat,"id":"chat-branch-demo","title":"分支测试"})
+            def branch_read(route):
+                route.fulfill(json={**demo_chat,"id":"chat-branch-demo","title":"分支测试"})
+            page.route("**/api/chat/sessions/chat-demo/turn",branch_turn)
+            page.route("**/api/chat/sessions/chat-branch-demo",branch_read)
+            visit(page,"/chat?session=chat-demo",".chat-intake-suggestion")
+            retry=page.get_by_role("button",name="重新生成回答",exact=True)
+            expect(retry).to_be_enabled()
+            retry.click()
+            page.get_by_role("dialog",name="重新生成回答").get_by_role("button",name="创建分支",exact=True).click()
+            page.wait_for_url("**/chat?session=chat-branch-demo")
+            assert len(branch_requests)==1
+            assert branch_requests[0]["rewind_id"]=="msg-user"
+            assert branch_requests[0]["content"]==demo_chat["messages"][0]["content"]
+            page.unroute("**/api/chat/sessions/chat-demo/turn",branch_turn)
+            page.unroute("**/api/chat/sessions/chat-branch-demo",branch_read)
+            failures=[]
+            recovered=[False]
+            def read_retry(route):
+                failures.append(1)
+                if not recovered[0]:
+                    route.fulfill(status=503,json={"detail":"测试会话暂不可用"})
+                else:
+                    route.fulfill(json=demo_chat)
+            page.route("**/api/chat/sessions/chat-demo",read_retry)
+            visit(page,"/chat?session=chat-demo",".workspace-feedback.error")
+            expect(page.get_by_role("button",name="发送消息")).to_be_disabled()
+            recovered[0]=True
+            page.get_by_role("button",name="重新加载",exact=True).click()
+            expect(page.locator(".chat-intake-suggestion")).to_be_visible()
+            assert len(failures)>=2
+            page.unroute("**/api/chat/sessions/chat-demo",read_retry)
+            visit(page,"/",".chat-home-recent")
         if GROUP in {'all','desktop','editors'}:
             for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
                 if GROUP!="all" and ((name in EDITOR_PAGES) != (GROUP=="editors")):
@@ -322,6 +361,13 @@ with sync_playwright() as p:
                     expect(page.locator(".rich-card").get_by_text("定义法",exact=True)).to_be_visible()
                     assert page.locator(".chat-message.user .chat-message-body").evaluate("(el)=>getComputedStyle(el).width !== getComputedStyle(el.parentElement).width")
                     expect(page.locator(".chat-message-actions").get_by_role("button",name="复制",exact=True).first).to_be_visible()
+                    expect(page.get_by_role("button",name="重新生成回答",exact=True)).to_be_visible()
+                    page.locator(".chat-message.assistant").first.hover()
+                    page.get_by_role("button",name="重新生成回答",exact=True).click()
+                    dialog=page.get_by_role("dialog",name="重新生成回答")
+                    expect(dialog).to_contain_text("保留原对话")
+                    dialog.get_by_role("button",name="取消",exact=True).click()
+                    expect(page.locator(".chat-message.user")).to_have_count(1)
                     assert page.locator(".clean-chat header,.clean-chat .chat-top").count()==0
                     page.get_by_role("button",name="更多选项",exact=True).click()
                     page.locator("#chat-session-actions").get_by_role("button",name="管理",exact=True).wait_for()
