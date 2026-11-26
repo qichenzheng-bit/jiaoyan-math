@@ -100,6 +100,8 @@ with sync_playwright() as p:
             assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
             assert page.locator(".intake-flow-steps > div").count()==4
         if name=="16-intake-document":
+            assert page.get_by_text("试卷不限单一科目，逐题填写科目。",exact=True).is_visible()
+            assert page.get_by_label("默认科目",exact=True).count()==0
             page.get_by_role("button",name="复用已有来源").click()
             page.get_by_label("选择来源资料",exact=True).first.click()
             page.locator(".math-choice-options").get_by_role("button").filter(has_text="SDEMO0001").click()
@@ -346,6 +348,8 @@ with sync_playwright() as p:
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     assert page.get_by_label("题目",exact=True).count()==0
     page.get_by_role("button",name="＋ 选择题",exact=True).click()
+    assert page.get_by_label("科目",exact=True).input_value()==""
+    page.get_by_label("科目",exact=True).select_option("线性代数")
     page.get_by_label("题目",exact=True).fill("选择正确答案")
     page.get_by_label("A 选项",exact=True).fill("$1$")
     page.get_by_label("B 选项",exact=True).fill("$2$")
@@ -355,11 +359,14 @@ with sync_playwright() as p:
     assert page.get_by_text("正确选项 · 多选题",exact=True).is_visible()
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 填空题",exact=True).click()
+    assert page.get_by_label("科目",exact=True).input_value()==""
+    page.get_by_label("科目",exact=True).select_option("概率论与数理统计")
     page.get_by_label("题目",exact=True).fill("计算")
     page.get_by_role("button",name="＋ 插入填空空位",exact=True).click()
     assert "underline" in page.get_by_label("题目",exact=True).locator(".inline-math-token").get_attribute("data-math-source")
     page.get_by_role("button",name="下一条 · 新增",exact=True).click()
     page.get_by_role("button",name="＋ 综合题",exact=True).click()
+    page.get_by_label("科目",exact=True).select_option("高等数学")
     page.get_by_label("题目",exact=True).fill("已知函数")
     assert page.get_by_label("第 1 小问题目",exact=True).count()==0
     page.get_by_role("button",name="＋ 添加小问（可选）",exact=True).click()
@@ -418,6 +425,9 @@ with sync_playwright() as p:
     assert [b["heading_level"] for b in submitted["blocks"] if b["kind"]=="heading"]==[1,2]
     assert submitted["blocks"][0]["difficulty"]=="中等"
     assert submitted["blocks"][1]["question_type"]=="多选题"
+    assert submitted["blocks"][1]["subject"]=="线性代数"
+    assert submitted["blocks"][2]["subject"]=="概率论与数理统计"
+    assert submitted["blocks"][3]["subject"]=="高等数学"
     page.get_by_text("已保存并直接入库",exact=True).wait_for()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path=str(OUT/"28-mobile-review.png"),full_page=False)
