@@ -30,4 +30,16 @@ sudo bash deploy/upgrade-qoder-usage.sh
 
 脚本验证官方 SDK 提供 get_usage_info、检查旧服务状态、更新 worker 并重启，检查 V12+ 与 usage_discovery；失败恢复旧 worker。不会删除 CLI 登录数据，也不需要重新输入 PAT。若 SDK 不兼容，先由管理员审阅并在独立 SDK 环境中升级官方 qodercn-agent-sdk（该环境不属于 Web 服务）；若 CLI 不支持 get_usage_info，还需按官方方法升级 CLI。升级后在 AI 账号或签到页面点击刷新积分，以实际返回的额度包为准。
 
-签到助手保留 Qoder CN 官方领取渠道和手工历史记录。原 V5 使用 PAT 及未公开桌面活动接口自动领取；现行官方活动说明限定桌面端、移动端与 IDE，未公开支持服务器自动领取的接口，故不移植伪装客户端或推断签到成功的逻辑。
+签到助手保留 Qoder CN 官方领取渠道和手工历史记录。原 V5 使用 PAT 及未公开桌面活动接口自动领取；现行官方活动说明限定桌面端、移动端与 IDE，未公开支持服务器自动领取的接口。实验适配器仅尝试用户明确授权的 PAT，不提取桌面凭据、不伪造客户端或设备身份、不绕过平台拒绝。
+
+
+## Qoder CN 签到助手（实验性 PAT 适配）
+参考原 V5 qiandao 模块及公开项目 G57651/dsh-dual-checkin、dingminhua/dsh-connect-qoder 的状态优先和轮次逻辑。仅支持一个本人 CN 账号，不与 AI CLI 登录或旧手工别名历史自动绑定。自动领取默认关闭，平台若拒绝或未提供明确活动，不视为成功。官方规则：https://docs.qoder.cn/events/100credits 。建议优先使用官方领取渠道。
+
+从本人 Qoder CN 账号设置创建 PAT。不要发到聊天、GitHub 或命令行参数。服务器执行：
+
+```bash
+sudo -u jiaoyan -H bash -c 'umask 077; read -rsp "Qoder CN PAT: " pat; echo; if [[ "$pat" == pt-* ]]; then tmp=$(mktemp "$HOME/jiaoyan-app/config/.qoder-checkin.XXXXXX") && printf "%s\n" "$pat" > "$tmp" && mv -f "$tmp" "$HOME/jiaoyan-app/config/qoder-checkin.pat"; else echo "Invalid PAT"; exit 1; fi; unset pat'
+```
+
+先确认网页部署完成，再进入签到助手：点击立即领取，查看实际平台结果；如符合条件且平台允许，再自行开启定时领取。后台北京时间 10:05 起检查本轮，网络异常间隔 15 分钟最多尝试三次。关闭页面不影响后台任务。关闭自动领取不撤销已经提交的请求。更换账号前关闭自动领取；历史按单账号维护，不支持自动切换。仅记录明确活动回包；额度变化不作为签到证明。PAT 保存在现有配置目录下的 0600 文件中，不写数据库、日志、GitHub 或浏览器。撤销 PAT 时通过官方账号管理撤销，并删除服务器对应文件。无须更新已验证的独立积分 worker。
