@@ -59,6 +59,8 @@ FALLBACK_MODELS = ("Auto", "Fast")
 catalog = None
 catalog_at = None
 catalog_efforts = {}
+catalog_capability_source = "unavailable"
+SDK_PYTHON = Path("/opt/jiaoyan-qoder/sdk-venv/bin/python")
 SUPPORTED_EFFORTS = ('none','off','disabled','low','medium','high','xhigh','max')
 
 def parse_models(output):
@@ -119,15 +121,54 @@ def parse_catalog(output):
                 result[ident]=[e for e in SUPPORTED_EFFORTS if e in re.split(r"[, /|]+",values.lower())]
     return dict(list(result.items())[:200])
 
+SDK_CATALOG_SCRIPT = r"""
+import asyncio, json, sys
+from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth
+
+async def main():
+    options = QoderAgentOptions(auth=qodercli_auth(), cli_path=sys.argv[1],
+        cwd=sys.argv[2], tools=[], allowed_tools=[], skills=[], mcp_servers={},
+        strict_mcp_config=True, extra_args={"no-session-persistence": None})
+    client = QoderSDKClient(options=options)
+    await client.connect()
+    try:
+        models = await client.get_available_models()
+        print(json.dumps({"models": models}, ensure_ascii=False))
+    finally:
+        await client.disconnect()
+
+asyncio.run(main())
+"""
+
+def sdk_catalog(exe):
+    if not SDK_PYTHON.is_file():return None,"sdk_missing"
+    try:
+        with tempfile.TemporaryDirectory(prefix="qoder-sdk-models-") as work:
+            proc=subprocess.Popen([str(SDK_PYTHON),"-c",SDK_CATALOG_SCRIPT,exe,work],
+                cwd=work,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+            try:
+                out,_=proc.communicate(timeout=25)
+            except subprocess.TimeoutExpired:
+                stop_process(proc);proc.communicate()
+                return None,"sdk_timeout"
+        if proc.returncode!=0:return None,"sdk_failed"
+        payload=json.loads(out.decode("utf-8"))
+        if not isinstance(payload,dict) or not isinstance(payload.get("models"),list):return None,"sdk_invalid"
+        metadata=parse_catalog(json.dumps(payload))
+        if not metadata:return None,"sdk_empty"
+        return metadata,"sdk"
+    except (OSError,ValueError):
+        return None,"sdk_failed"
+
 def model_catalog():
     with lock:
         names = list(FALLBACK_MODELS if catalog is None else catalog)
         return {"models": [{"id": n, "label": n, "efforts": list(catalog_efforts.get(n, [])) if catalog is not None else []} for n in names],
                 "source": "fallback" if catalog is None else "cli",
-                "updated_at": catalog_at}
+                "updated_at": catalog_at,"capability_source":catalog_capability_source}
 
 def refresh_models():
-    global catalog, catalog_at, catalog_efforts
+    global catalog, catalog_at, catalog_efforts, catalog_capability_source
     with lock:
         if login_process is not None or chat_active:
             return 409, {"detail": "请先完成当前授权或对话"}
@@ -135,11 +176,17 @@ def refresh_models():
     if not exe:
         return 503, {"detail": "未安装 Qoder CN CLI"}
     try:
+        metadata,capability_source=sdk_catalog(exe)
+        if metadata is not None:
+            with lock:
+                catalog, catalog_at, catalog_efforts = list(metadata),int(time.time()),metadata
+                catalog_capability_source=capability_source
+            return 200,model_catalog()
         with tempfile.TemporaryDirectory(prefix="qoder-models-") as work:
             proc = subprocess.Popen([exe, "--list-models"], cwd=work, stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
             try:
-                out, err = proc.communicate(timeout=35)
+                out, err = proc.communicate(timeout=35 if capability_source=="sdk_missing" else 15)
             except subprocess.TimeoutExpired:
                 stop_process(proc)
                 proc.communicate()
@@ -154,6 +201,7 @@ def refresh_models():
             return 503, {"detail": "无法解析 CLI 模型清单，保留此前清单"}
         with lock:
             catalog, catalog_at, catalog_efforts = names, int(time.time()), metadata
+            catalog_capability_source="cli_metadata" if any(metadata.values()) else capability_source
         return 200, model_catalog()
     except OSError:
         return 503, {"detail": "无法启动模型探测"}
@@ -217,7 +265,7 @@ def login_worker(proc):
                 login_process = None
 
 def start_login():
-    global login_process, verified_at, catalog, catalog_at, catalog_efforts
+    global login_process, verified_at, catalog, catalog_at, catalog_efforts, catalog_capability_source
     with lock:
         if chat_active:
             return 409, {"detail": "请先完成当前对话"}
@@ -238,6 +286,7 @@ def start_login():
         login_process = proc
         verified_at = None
         catalog, catalog_at, catalog_efforts = None, None, {}
+        catalog_capability_source = "unavailable"
         login.update(state="starting", url="", detail="正在获取官方授权链接")
         threading.Thread(target=login_worker, args=(proc,), daemon=True).start()
         return 200, dict(login)
@@ -253,7 +302,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 8, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 9, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at
