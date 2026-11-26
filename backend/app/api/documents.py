@@ -13,6 +13,7 @@ from app.core.content_normalization import canonical_text, question_fingerprint
 from difflib import SequenceMatcher
 from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink
 from app.services import storage
+from app.services.inline_images import image_ids,validate_images,protect_resource_images
 from app.api import resources as bank, qoder
 
 router=APIRouter(prefix="/documents",tags=["documents"],dependencies=[Depends(current_user)])
@@ -93,6 +94,8 @@ def validate(db,body,previous,*,allow_reference_edits=False):
             f=db.get(StoredFile,b.file_id) if b.file_id else None
             if not f or f.archived or f.media_type not in storage.IMAGE_TYPES:raise HTTPException(422,"图片无效")
         elif b.file_id:raise HTTPException(422,"仅图片块允许文件引用")
+        validate_images(db,data)
+        if data.get('snapshot'):validate_images(db,data['snapshot'])
         result.append(data)
     if sum(len(str(b.get("snapshot",""))) for b in result)>1_000_000:raise HTTPException(422,"引用内容过多，请拆分文档")
     return result
@@ -103,6 +106,8 @@ def references(db,d):
     for id in old-wanted:db.delete(db.get(Ref,(d.id,id)))
     for id in wanted-old:db.add(Ref(document_id=d.id,resource_id=id))
     files={b["file_id"] for b in d.blocks if b["kind"]=="image"}
+    for b in d.blocks:
+        files.update(image_ids(b));files.update(image_ids(b.get("snapshot") or {}))
     existing=set(db.scalars(select(FileReference.file_id).where(FileReference.owner_type=="teaching_document",FileReference.owner_id==d.id)))
     for id in existing-files:db.delete(db.get(FileReference,(id,"teaching_document",d.id)))
     for id in files-existing:storage.link_file(db,id,"teaching_document",d.id)
@@ -205,7 +210,7 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
     values=bank.clean(draft,db);bank.guard_duplicate(db,values)
     primary=values.pop("source_id")
     r=Resource(id=str(uuid4()),code=bank.new_code(db,draft.kind),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
-    db.add(r);db.flush()
+    db.add(r);db.flush();protect_resource_images(db,r)
     if primary:bank.change_primary(db,r,primary)
     replacement=Block(uid=uid,kind="reference",resource_id=r.id,score=block.get("score",0)).model_dump()
     replacement["snapshot"]=bank.view(r)
@@ -580,7 +585,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
             changed=attach_review_source(db,r,source) or changed
             changed=attach_review_knowledge(db,r,decision.knowledge_ids) or changed
             if changed:r.revision+=1;r.updated_at=now()
-        db.flush()
+        db.flush();protect_resource_images(db,r)
         replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
         replacement["snapshot"]=bank.view(r);replacements[b["uid"]]=replacement
         history.append({"uid":b["uid"],"action":decision.action,"reason":decision.reason,"input":b,"before":before,"after":bank.view(r),"knowledge_ids":decision.knowledge_ids,"source_id":source})
@@ -765,7 +770,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             attach_review_knowledge(db,r,knowledge_ids)
             audit(db,"resource.create",user.id)
             action="create"
-        db.flush()
+        db.flush();protect_resource_images(db,r)
         replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
         replacement["snapshot"]=bank.view(r)
         blocks[i]=replacement

@@ -4,6 +4,7 @@ import {Link,useSearchParams,useNavigate} from 'react-router-dom'
 import {useWorkspaceGuard} from '../components/WorkspaceNavigation'
 import {api} from '../auth'
 import ManualIntakeCards from '../components/ManualIntakeCards'
+import {InlineImageUpload} from '../components/InlineMathEditor'
 import {ManualReview,ManualSuccess,type ReviewData,type ResultCounts} from '../components/ManualReview'
 import AssemblyPicker from '../components/AssemblyPicker'
 import {confirmAction} from '../components/WorkspaceConfirm'
@@ -27,7 +28,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  const [docs,setDocs]=useState<Summary[]>([]),[total,setTotal]=useState(0),[page,setPage]=useState(0),[doc,setDoc]=useState<Doc>(),[selected,setSelected]=useState(''),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[subjects,setSubjects]=useState<string[]>([])
  const [picker,setPicker]=useState<'new'|'append'|null>(!intake&&!requested?'new':null)
  const [review,setReview]=useState<ReviewData>(),[result,setResult]=useState<ResultCounts>()
- const running=useRef(false)
+ const running=useRef(false),imageUploading=useRef(false)
  const block=doc?.blocks.find(b=>b.uid===selected),locked=busy||Boolean(doc?.archived)
  const pending=!!doc?.blocks.some(b=>b.kind==='question'||b.kind==='knowledge'||b.edit_reference_revision)
  useEffect(()=>{const media=window.matchMedia('(max-width: 900px)');const change=()=>setNarrow(media.matches);change();media.addEventListener('change',change);return()=>media.removeEventListener('change',change)},[])
@@ -38,9 +39,9 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  useEffect(()=>{if(requested&&requested!==doc?.id)void open(requested,false)},[requested])
  useEffect(()=>{if(!dirty||!doc)return;try{sessionStorage.setItem(recoveryKey(doc.id),JSON.stringify(doc))}catch{setMessage('浏览器草稿缓存空间不足，请立即保存到服务器。')}},[doc,dirty])
  useWorkspaceGuard({busy,dirty,message:'当前修改尚未保存，确认离开？'})
- function choose(uid:string){setCardPanel(intake&&!uid?'list':'card');setSelected(uid)}
+ function choose(uid:string){if(imageUploading.current)return;setCardPanel(intake&&!uid?'list':'card');setSelected(uid)}
  function update(p:Partial<Doc>){setDoc(d=>d&&({...d,...p}));setDirty(true)}
- function editBlock(p:Partial<Block>){if(!doc||!block||locked)return;const changed=['content','answer','solution','title','proof','subject','chapter','unit_type','question_type'].some(k=>Object.hasOwn(p,k));setDoc(d=>d&&({...d,blocks:d.blocks.map(b=>b.uid===selected?{...b,...(changed?{dedup_reason:''}:{}),...p}:b)}));setDirty(true)}
+ function editBlock(p:Partial<Block>){if(!doc||!block||doc.archived||(busy&&!imageUploading.current))return;const changed=['content','answer','solution','title','proof','subject','chapter','unit_type','question_type'].some(k=>Object.hasOwn(p,k));setDoc(d=>d&&({...d,blocks:d.blocks.map(b=>b.uid===selected?{...b,...(changed?{dedup_reason:''}:{}),...p}:b)}));setDirty(true)}
  function insert(b:Block){if(!doc||doc.archived)return;if(doc.blocks.length>=200){setMessage('文档已达到 200 个条目，请拆分。');return}const i=doc.blocks.findIndex(x=>x.uid===selected);const bs=[...doc.blocks];bs.splice(i<0?bs.length:i+1,0,b);update({blocks:bs});choose(b.uid)}
  function move(delta:number){if(!doc||!block||locked)return;const i=doc.blocks.indexOf(block),j=i+delta;if(j<0||j>=doc.blocks.length)return;const bs=[...doc.blocks];[bs[i],bs[j]]=[bs[j],bs[i]];update({blocks:bs})}
  function reorder(uid:string,target:string){if(!doc||locked||uid===target)return;const from=doc.blocks.findIndex(b=>b.uid===uid),to=doc.blocks.findIndex(b=>b.uid===target);if(from<0||to<0)return;const bs=[...doc.blocks];const [item]=bs.splice(from,1);bs.splice(to,0,item);update({blocks:bs});choose(uid)}
@@ -74,7 +75,14 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
  async function commit(accept:boolean){await act(async()=>{if(!doc||!review||dirty||doc.revision!==review.revision)throw Error('草稿已变化，请重新检查');const saved=await api<{document:Doc;counts:ResultCounts}>('/documents/'+doc.id+'/manual-commit',{method:'POST',body:JSON.stringify({revision:review.revision,accept_warnings:accept})});setDoc(saved.document);setDirty(false);removeRecovery(doc.id);setReview(undefined);setResult(saved.counts);window.dispatchEvent(new Event('wg-recent-changed'));void refresh().catch(()=>{})})}
  function resume(uid=''){setReview(undefined);setResult(undefined);choose(uid);if(!uid)setCardPanel('list')}
  useEffect(()=>{const handle=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&doc){e.preventDefault();if(!picker&&!busy&&!doc.archived&&dirty&&!review&&!result)void save()}};window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle)},[doc,dirty,busy,picker,pending,review,result])
- async function image(file:File){if(!doc||locked)return;await act(async()=>{const r=await fetch('/api/files?name='+encodeURIComponent(file.name),{method:'POST',credentials:'same-origin',body:file});if(!r.ok)throw Error('图片上传失败');const f=await r.json() as {id:string;previewable:boolean};if(!f.previewable)throw Error('请选择支持的图片');insert({...make('image'),file_id:f.id,title:file.name})})}
+ async function uploadPicture(file:File){
+  if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw Error('请使用 PNG、JPEG、WebP 或 GIF 图片')
+  const extension=({'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif'} as Record<string,string>)[file.type]
+  const name=file.name||'粘贴图片.'+extension
+  const r=await fetch('/api/files?name='+encodeURIComponent(name),{method:'POST',credentials:'same-origin',body:file});if(!r.ok)throw Error('图片上传失败（'+r.status+'）');const f=await r.json() as {id:string;previewable:boolean};if(!f.previewable||!f.id)throw Error('请选择支持的图片');return f.id
+ }
+ function uploadInline(file:File,complete:(id:string)=>void,failed:()=>void){if(!doc||locked||running.current){failed();return}imageUploading.current=true;void act(async()=>{try{complete(await uploadPicture(file))}catch(e){failed();throw e}finally{imageUploading.current=false}})}
+ async function image(file:File){if(!doc||locked)return;await act(async()=>{const id=await uploadPicture(file);insert({...make('image'),file_id:id,title:file.name||'配图',width:50})})}
  async function leave(path:string){if(!dirty||await confirmAction('当前修改尚未保存，确认离开？','离开工作台','离开'))navigate(path)}
  if(intake&&doc&&result)return <ManualSuccess doc={doc} counts={result} onContinue={()=>resume()}/>
  if(intake&&doc&&review)return <ManualReview doc={doc} data={review} busy={busy} error={message} onBack={()=>resume()} onEdit={uid=>resume(uid)} onConfirm={accept=>void commit(accept)}/>
@@ -83,6 +91,6 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
   <header className="doc-work-heading"><div>{intake&&<Link className="text-link" to="/intake" onClick={e=>{if(dirty){e.preventDefault();void leave('/intake')}}}>← 录入工作台</Link>}<h1>{title}</h1><p className="muted">{intake?'顺序整理 · 局部公式编辑 · 题库查重':picker?'题库选题 → Word 编排 → 预览保存':'Word 编排 · 顺序整理 · 预览保存'}</p></div>{intake&&<button className="doc-mode-switch" disabled={busy} onClick={()=>{setLayout(cardMode?'word':'cards');setCardPanel(selected?'card':'list')}}>{cardMode?'切换 Word 版':'切换卡片版'}</button>}</header>
   <div className="doc-selector" hidden={intake&&Boolean(doc)}>{intake?<Link className="button-link primary" to="/intake?mode=document" onClick={e=>{if(dirty){e.preventDefault();void leave('/intake?mode=document')}}}>新建来源资料</Link>:<button className="primary" disabled={busy} onClick={newComposition}>新建{kind==='paper'?'试卷':kind==='handout'?'讲义':'教材'}</button>}<MathChoice label="打开文档" value={doc?.id??''} disabled={busy} onChange={v=>{if(v)void open(v)}} options={[...(doc&&!docs.some(d=>d.id===doc.id)?[{value:doc.id,label:doc.title}]:[]),...docs.map(d=>({value:d.id,label:d.title}))]} placeholder="打开已有文档"/><button disabled={page===0||busy} onClick={()=>setPage(p=>p-1)}>上一批</button><button disabled={(page+1)*30>=total||busy} onClick={()=>setPage(p=>p+1)}>下一批</button></div>
   {message&&<p role="status" className="notice">{message}</p>}
-  {!intake&&picker?<AssemblyPicker key={picker+'-'+(doc?.id??'')} kind={kind} subjects={subjects} existing={picker==='append'?(doc?.blocks??[]).flatMap(b=>b.resource_id?[b.resource_id]:[]):[]} occupied={picker==='append'?doc?.blocks.length??0:0} append={picker==='append'} busy={busy} onConfirm={(items,name)=>void confirmSelection(items,name)} onCancel={doc?()=>setPicker(null):undefined}/>:doc?<ManualIntakeCards key={doc.id} desktop={!cardMode} onPick={!intake?()=>setPicker('append'):undefined} onReorder={reorder} onTitle={name=>update({title:name})} onImage={file=>void image(file)} doc={doc} selected={selected} panel={cardPanel} subjects={subjects} dirty={dirty} busy={busy} onPanel={setCardPanel} onSelect={choose} onEdit={editBlock} onAdd={(k,type,level)=>{if(!intake&&(k==='question'||k==='knowledge'))return;insert({...make(k),...(k==='heading'?{heading_level:level??1}:{}),subject:'',chapter:'',question_type:type??''})}} onRemove={removeBlock} onMove={move} onSave={()=>void save()} onReview={intake?()=>void check():undefined}/>:<p className="muted">{busy?'正在打开文档…':'请选择已有文档或新建资料。'}</p>}
+  {!intake&&picker?<AssemblyPicker key={picker+'-'+(doc?.id??'')} kind={kind} subjects={subjects} existing={picker==='append'?(doc?.blocks??[]).flatMap(b=>b.resource_id?[b.resource_id]:[]):[]} occupied={picker==='append'?doc?.blocks.length??0:0} append={picker==='append'} busy={busy} onConfirm={(items,name)=>void confirmSelection(items,name)} onCancel={doc?()=>setPicker(null):undefined}/>:doc?<InlineImageUpload.Provider value={intake?uploadInline:null}><ManualIntakeCards key={doc.id} desktop={!cardMode} onPick={!intake?()=>setPicker('append'):undefined} onReorder={reorder} onTitle={name=>update({title:name})} onImage={file=>void image(file)} doc={doc} selected={selected} panel={cardPanel} subjects={subjects} dirty={dirty} busy={busy} onPanel={setCardPanel} onSelect={choose} onEdit={editBlock} onAdd={(k,type,level)=>{if(!intake&&(k==='question'||k==='knowledge'))return;insert({...make(k),...(k==='heading'?{heading_level:level??1}:{}),subject:'',chapter:'',question_type:type??''})}} onRemove={removeBlock} onMove={move} onSave={()=>void save()} onReview={intake?()=>void check():undefined}/></InlineImageUpload.Provider>:<p className="muted">{busy?'正在打开文档…':'请选择已有文档或新建资料。'}</p>}
  </div>
 }

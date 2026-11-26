@@ -48,3 +48,16 @@ def test_separate_generated_storage(db):
     a = storage.save_staged(db, stage(b"test"), "a.txt", 1)
     b = storage.save_staged(db, stage(b"test"), "a.txt", 1, generated=True)
     assert a["id"] != b["id"] and b["generated"]
+
+def test_inline_image_tokens_are_validated_and_size_is_not_identity(db):
+    import base64
+    from app.services.inline_images import validate_images,image_ids
+    from app.core.content_normalization import question_fingerprint
+    png=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII=")
+    stored=storage.save_staged(db,stage(png),"diagram.png",1)
+    marker=lambda size:"[[img:"+stored["id"]+":"+str(size)+"]]"
+    assert validate_images(db,{"content":"图 "+marker(50)})=={stored["id"]}
+    assert image_ids({"content":marker(25),"snapshot":{"content":marker(75)}})=={stored["id"]}
+    assert question_fingerprint("图 "+marker(25),"","")==question_fingerprint("图 "+marker(75),"","")
+    with pytest.raises(HTTPException):
+        validate_images(db,{"content":"[[img:00000000-0000-0000-0000-000000000000:50]]"})

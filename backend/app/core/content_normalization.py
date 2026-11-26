@@ -147,6 +147,8 @@ def strip_title_question_number(value) -> str:
 def normalize_text(value) -> str:
     """安全规范化：用于展示与相似度比较（保留空白语义）。"""
     text = unicodedata.normalize("NFKC", str(value or ""))
+    # Resizing an existing image does not change the question's mathematical identity.
+    text = re.sub(r"\[\[img:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(?:20|25|30|35|40|45|50|55|60|65|70|75|80|85|90|95|100)\]\]",r"[[img:\1]]",text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = _BRACKET_BLOCK.sub(lambda m: "$" + m.group(1) + "$", text)
     text = _PAREN_INLINE.sub(lambda m: "$" + m.group(1) + "$", text)

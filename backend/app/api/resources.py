@@ -11,6 +11,7 @@ from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_me
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
 from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob
 from app.services import storage
+from app.services.inline_images import validate_images,protect_resource_images
 
 router=APIRouter(prefix="/resources",tags=["resources"],dependencies=[Depends(current_user)])
 Kind=Literal["question","knowledge","source"]
@@ -65,6 +66,7 @@ def clean(body,db):
     if body.source_id:
         src=db.get(TeachingResource,body.source_id)
         if not src or src.kind!="source" or src.archived: raise HTTPException(422,"来源资料不存在或已归档")
+    validate_images(db,d)
     d["fingerprint"]=question_fingerprint(d["content"],d["solution"],d["answer"]) if body.kind=="question" else unit_fingerprint(d["title"],d["content"])
     d["stem_key"]=question_stem_key(d["content"]) if body.kind=="question" else ""
     d["dedup_reason"]=d["dedup_reason"].strip() if d["dedup_override"] else ""
@@ -124,6 +126,7 @@ def change_primary(db,row,source_id):
     row.source_id=source_id
     if old or source_id: row.sources_revision+=1
 def snapshot(db,row):
+    protect_resource_images(db,row)
     if row.kind=="source":
         db.add(SourceVersion(source_id=row.id,version=row.revision,snapshot=view(row),created_at=now()))
 

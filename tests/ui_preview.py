@@ -83,7 +83,12 @@ def answer(route):
     if p=="/intelligence/jobs/review-demo":result=review_job
     if p=="/intelligence/jobs/review-demo/supplements":result=[review_suggestion]
     if p=="/files" and route.request.method=="POST":
-        result={"id":"file-demo","name":q.get("name",["demo.tex"])[0],"media_type":"text/plain","previewable":False}
+        name=q.get("name",["demo.tex"])[0]
+        result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}
+    if p=="/files/12345678-1234-4321-8765-123456789abc/preview":
+        import base64
+        route.fulfill(status=200,content_type="image/png",body=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII="))
+        return
     if p=="/intelligence/import" and route.request.method=="POST":
         result={"import_id":"import-demo","file_id":"file-demo","file_name":"demo.tex","text":r"求 $\frac{1}{x}$ 的导数。","method":"text","start":1,"end":1,"total_units":None,"warnings":[]}
     if p=="/resources":
@@ -412,8 +417,17 @@ with sync_playwright() as p:
                     expect(page.get_by_role("dialog",name="移除条目")).to_be_visible()
                     page.get_by_role("dialog",name="移除条目").get_by_role("button",name="取消",exact=True).click()
                     expect(page.locator(".manual-word-editor")).to_have_count(1)
+                    # Clipboard image is stored as a safe attachment token, with editable width.
+                    stem=page.get_by_label("题目",exact=True)
+                    stem.evaluate("""el=>{el.focus();const range=document.createRange();range.selectNodeContents(el);range.collapse(false);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);const data=new DataTransfer();data.items.add(new File([new Uint8Array([137,80,78,71])],"paste.png",{type:"image/png"}));el.dispatchEvent(new ClipboardEvent("paste",{clipboardData:data,bubbles:true,cancelable:true}));}""")
+                    image=stem.locator(".inline-image-token")
+                    expect(image).to_have_count(1)
+                    expect(image).to_have_attribute("data-image-source","[[img:12345678-1234-4321-8765-123456789abc:50]]")
+                    image.get_by_role("button",name="图片宽度 75%",exact=True).click()
+                    expect(image).to_have_attribute("data-image-source","[[img:12345678-1234-4321-8765-123456789abc:75]]")
                     page.get_by_role("button",name="完成编辑",exact=True).click()
                     expect(page.locator(".manual-word-editor")).to_have_count(0)
+                    expect(page.locator(".manual-word-read .stored-inline-image img")).to_have_count(1)
                     page.get_by_role("button",name="整套预览",exact=True).click()
                     page.locator(".manual-intake-preview .katex").first.wait_for()
                     capture(page,path=str(OUT/"25-word-intake-preview.png"),full_page=False)

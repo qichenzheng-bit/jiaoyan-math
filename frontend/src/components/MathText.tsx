@@ -1,15 +1,18 @@
 import {MathFormula} from './MathFormula'
+import {inlineImage,inlineImagePattern} from './inlineImages'
 import type {ReactNode} from 'react'
-type Token={kind:'text'|'math'|'bold'|'code'|'pre';value:string;display?:boolean}
+type Token={kind:'text'|'math'|'bold'|'code'|'pre'|'image';value:string;display?:boolean}
 // Explicit math delimiters, including bare AMS environments. Never guess at ordinary prose.
 const pattern=/(\x60{3}[\s\S]*?(?:\x60{3}|$)|(?<!\\)\$\$[\s\S]+?(?<!\\)\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<![\\$])\$(?!\$)[^\n]+?(?<!\\)\$(?!\$)|\\begin\{(aligned|align\*?|gathered|gather\*?|cases|[pbBvV]?matrix|split|equation\*?)\}[\s\S]+?\\end\{\2\}|\*\*[^*\n]+\*\*|\x60[^\x60\n]+\x60)/g
+const richPattern=new RegExp(pattern.source+'|'+inlineImagePattern.source,'g')
 export function mathTokens(content:string):Token[]{
  const result:Token[]=[];let pos=0
- for(const m of content.matchAll(pattern)){
+ for(const m of content.matchAll(richPattern)){
   const t=m[0],start=m.index??0
   if(start>pos)result.push({kind:'text',value:content.slice(pos,start)})
   let token:Token
-  if(t.startsWith(String.fromCharCode(96).repeat(3))){
+  if(inlineImage(t))token={kind:'image',value:t}
+  else if(t.startsWith(String.fromCharCode(96).repeat(3))){
    const match=t.match(/^\x60{3}(?:latex|tex|math)\s*\n([\s\S]*?)\x60{3}$/i)
    token=match?{kind:'math',value:match[1].trim(),display:true}:{kind:'pre',value:t.replace(/^\x60{3}[^\n]*\n?/,'').replace(/\x60{3}$/,'')}
   }else if(t.startsWith('$$')||t.startsWith('\\['))token={kind:'math',value:t.slice(2,-2),display:true}
@@ -39,6 +42,7 @@ function nodes(content:string,compact:boolean):ReactNode[]{return mathTokens(con
   const latex=t.value.replace(/^\\begin\{(?:align\*?|split)\}([\s\S]*)\\end\{(?:align\*?|split)\}$/,'\\begin{aligned}$1\\end{aligned}').replace(/^\\begin\{gather\*?\}([\s\S]*)\\end\{gather\*?\}$/,'\\begin{gathered}$1\\end{gathered}').replace(/^\\begin\{equation\*?\}([\s\S]*)\\end\{equation\*?\}$/,'$1')
   return <MathFormula key={i} latex={latex} display={!compact&&Boolean(t.display)} />
  }
+ if(t.kind==='image'){const image=inlineImage(t.value);return image?<span key={i} className={'stored-inline-image'+(compact?' compact':'')} style={{width:compact?undefined:image.width+'%'}}><img src={image.url} alt="配图" loading="lazy"/></span>:<span key={i}>{t.value}</span>}
  if(t.kind==='bold')return <strong key={i}>{nodes(t.value,compact)}</strong>
  if(t.kind==='code')return <code key={i}>{t.value}</code>
  if(t.kind==='pre')return compact?<code key={i}>{t.value}</code>:<pre key={i}><code>{t.value}</code></pre>
