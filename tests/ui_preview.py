@@ -185,6 +185,26 @@ with sync_playwright() as p:
     context.route("**/api/**",answer)
     page=context.new_page()
     try:
+        if GROUP in {'all','desktop'}:
+            print('UI case: app shell responsive geometry and drawer state',flush=True)
+            visit(page,"/",".chat-home-recent")
+            for width,sidebar_width in ((1600,210),(1024,210),(900,186),(761,186)):
+                page.set_viewport_size({"width":width,"height":900})
+                page.wait_for_function("(w)=>Math.abs(document.querySelector('.shell > .nav').getBoundingClientRect().width-w)<1",arg=sidebar_width)
+                assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+            page.get_by_role("button",name="收起侧边栏",exact=True).click()
+            page.wait_for_function("Math.abs(document.querySelector('.shell > .nav').getBoundingClientRect().width-58)<1")
+            for width in (760,430,390,360):
+                page.set_viewport_size({"width":width,"height":873})
+                page.wait_for_function("!document.querySelector('.shell').classList.contains('is-collapsed')")
+                assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+            page.get_by_role("button",name="打开导航",exact=True).click()
+            page.wait_for_function("document.querySelector('.shell > .nav').classList.contains('open')")
+            page.wait_for_function("Math.abs(document.querySelector('.shell > .nav').getBoundingClientRect().width-300)<1")
+            page.set_viewport_size({"width":1600,"height":900})
+            page.wait_for_function("document.querySelector('.shell').classList.contains('is-collapsed') && !document.querySelector('.shell > .nav').classList.contains('open')")
+            page.get_by_role("button",name="展开侧边栏",exact=True).click()
+            page.wait_for_function("Math.abs(document.querySelector('.shell > .nav').getBoundingClientRect().width-210)<1")
         if GROUP in {'all','desktop','editors'}:
             for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
                 if GROUP!="all" and ((name in EDITOR_PAGES) != (GROUP=="editors")):

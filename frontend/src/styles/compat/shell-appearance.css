@@ -10,7 +10,6 @@
 .mode-more-panel{color:var(--ink);background:var(--surface)}
 .legacy-shell.clean-workspace .nav{border-right:1px solid var(--line)}
 .clean-workspace .nav .nav-scroll a.active,.clean-workspace .clean-group-toggle.current,.clean-workspace .clean-group-toggle[aria-current=page]{background:var(--selected);color:var(--accent)}
-.legacy-shell.clean-workspace .content-inner{max-width:1600px}
 .legacy-shell.clean-workspace .panel,.legacy-shell.clean-workspace .bank-detail,.legacy-shell.clean-workspace .studio-item,.legacy-shell.clean-workspace .home-stat,.legacy-shell.clean-workspace .quick-link{box-shadow:var(--shadow)}
 .legacy-shell.clean-workspace .chat-message.user .chat-message-body{background:var(--selected);color:var(--ink)}
 .legacy-shell.clean-workspace .chat-composer{background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-floating)}

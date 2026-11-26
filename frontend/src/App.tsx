@@ -19,6 +19,7 @@ import VideoWork from './pages/VideoWork'
 import ModuleHub from './pages/ModuleHub'
 import ProjectHub from './pages/ProjectHub'
 import Sidebar from './components/Sidebar'
+import {usePhoneLayout} from './hooks/usePhoneLayout'
 import {Icon,BrandMark} from './components/Icon'
 import {modules,workspaceGroups,workspaceParent,type Module} from './navigation'
 
@@ -30,6 +31,8 @@ export default function App(){
  usePopNavigationGuard()
  const [preferences,setPreferences]=useState<Preferences>(defaults)
  const [menu,setMenu]=useState(false),[collapsed,setCollapsed]=useState(initialCollapsed),[more,setMore]=useState(false)
+ const phone=usePhoneLayout()
+ const sidebarCollapsed=collapsed&&!phone
  const moreRef=useRef<HTMLDivElement>(null)
  const [health,setHealth]=useState('检查中')
  const [user,setUser]=useState<string|null|undefined>(undefined)
@@ -45,7 +48,8 @@ export default function App(){
  const lastChat=useRef('/')
  useEffect(()=>{if(isChat)lastChat.current=location.pathname+location.search},[isChat,location.pathname,location.search])
  const isDoc=(location.pathname==='/intake'&&new URLSearchParams(location.search).has('doc'))||['/papers','/handouts','/textbooks'].includes(location.pathname)
- useEffect(()=>{const history=location.pathname==='/chat'&&new URLSearchParams(location.search).has('history');setMenu(history&&window.matchMedia('(max-width: 760px)').matches);if(history)setCollapsed(false);mainRef.current?.scrollTo(0,0)},[location.pathname,location.search])
+ useEffect(()=>{const history=location.pathname==='/chat'&&new URLSearchParams(location.search).has('history');setMenu(history&&phone);if(history&&!phone)setCollapsed(false);mainRef.current?.scrollTo(0,0)},[location.pathname,location.search])
+ useEffect(()=>{if(!phone)setMenu(false)},[phone])
  useEffect(()=>{setMore(false)},[location.pathname,location.search])
  useEffect(()=>{const close=(e:KeyboardEvent)=>{if(e.key==='Escape'){setMenu(false);setMore(false)}};const outside=(e:PointerEvent)=>{if(!moreRef.current?.contains(e.target as Node))setMore(false)};window.addEventListener('keydown',close);document.addEventListener('pointerdown',outside);return()=>{window.removeEventListener('keydown',close);document.removeEventListener('pointerdown',outside)}},[])
  useEffect(()=>{try{localStorage.setItem('wg-sidebar-collapsed',String(collapsed))}catch{}},[collapsed])
@@ -55,11 +59,11 @@ export default function App(){
  async function logout(){try{await api('/auth/logout',{method:'POST'});setUser(null);try{for(const k of Object.keys(sessionStorage))if(k.startsWith('wg-doc-recovery:'))sessionStorage.removeItem(k)}catch{}setPreferences(defaults);setMenu(false);setError('')}catch(e){setError(e instanceof Error?e.message:'退出失败')}}
  if(user===undefined)return <div className="login-page"><div className="loading-brand"><BrandMark/><p>正在连接教研工作台…</p></div></div>
  if(user===null)return <><Login onLogin={name=>{setUser(name);setError('')}}/>{error&&<p className="auth-error" role="alert">{error}</p>}</>
- return <div className={'shell legacy-shell'+(collapsed?' is-collapsed':'')+' clean-workspace'+(isChat||workHome?' chat-route':'')+(modeHome?' mode-home':'')+(isDoc?' doc-route':'')}>
-  {menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
-  <Sidebar user={user} displayName={preferences.display_name} open={menu} collapsed={collapsed} onClose={()=>setMenu(false)} onToggle={()=>setCollapsed(c=>!c)} onLogout={()=>void logout()}/>
+ return <div className={'shell legacy-shell'+(sidebarCollapsed?' is-collapsed':'')+' clean-workspace'+(isChat||workHome?' chat-route':'')+(modeHome?' mode-home':'')+(isDoc?' doc-route':'')}>
+  {phone&&menu&&<button className="nav-backdrop" aria-label="关闭导航" onClick={()=>setMenu(false)}/>}
+  <Sidebar user={user} displayName={preferences.display_name} open={phone&&menu} collapsed={sidebarCollapsed} onClose={()=>setMenu(false)} onToggle={()=>setCollapsed(c=>!c)} onLogout={()=>void logout()}/>
   <div className="workspace">
-   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{showBack&&<button type="button" className="icon-button workspace-back" aria-label="返回上一步" title="返回上一步" onClick={()=>void back()}><Icon name="back" size={19}/><span>返回</span></button>}{collapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/work" aria-current={isWork?'page':undefined} >工作</Link></nav>:<div className="breadcrumb"><strong>{location.pathname==='/intake'?(isDoc?'录入工作台':new URLSearchParams(location.search).get('mode')==='document'?'新建资料':'手动录入'):project?.name??current?.name??(location.pathname.startsWith('/resource-edit/')?'编辑资源':location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{(modeHome||isVideo)&&<div className="mode-more" ref={moreRef}><button type="button" className="icon-button mode-more-trigger" aria-label="更多选项" aria-expanded={more} aria-controls="mode-more-panel" onClick={()=>setMore(v=>!v)}><Icon name="more" size={24}/></button><div id="mode-more-panel" className="mode-more-panel" hidden={!more}><div id="mode-inference-actions" className="mode-inference-actions"/><Link to="/qoder" onApproved={()=>setMore(false)}><Icon name="spark" size={19}/>AI 登录与模型</Link>{isChat?<><button type="button" onClick={()=>{setMore(false);window.dispatchEvent(new Event('wg-chat-new'))}}><Icon name="plus" size={19}/>新建对话</button><div id="chat-session-actions" className="chat-session-actions" onClick={()=>setMore(false)}/></>:null}</div></div>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
+   <header className={'topbar clean-topbar'+(modeHome?' mode-topbar':'')}><div className="mode-left"><button className="icon-button menu" aria-label="打开导航" aria-expanded={phone&&menu} aria-controls="workspace-navigation" onClick={()=>setMenu(!menu)}><Icon name="menu"/></button>{showBack&&<button type="button" className="icon-button workspace-back" aria-label="返回上一步" title="返回上一步" onClick={()=>void back()}><Icon name="back" size={19}/><span>返回</span></button>}{sidebarCollapsed&&<button className="icon-button desktop-expand" aria-label="展开主导航" onClick={()=>setCollapsed(false)}><Icon name="sidebar"/></button>}</div>{modeHome?<nav className="mode-switch" aria-label="工作模式"><Link to={isChat?location.pathname+location.search:lastChat.current} aria-current={isChat?'page':undefined}>聊天</Link><Link to="/work" aria-current={isWork?'page':undefined} >工作</Link></nav>:<div className="breadcrumb"><strong>{location.pathname==='/intake'?(isDoc?'录入工作台':new URLSearchParams(location.search).get('mode')==='document'?'新建资料':'手动录入'):project?.name??current?.name??(location.pathname.startsWith('/resource-edit/')?'编辑资源':location.pathname==='/intake-single'?'单条录入':'工作空间')}</strong></div>}<div className="topbar-actions">{(modeHome||isVideo)&&<div className="mode-more" ref={moreRef}><button type="button" className="icon-button mode-more-trigger" aria-label="更多选项" aria-expanded={more} aria-controls="mode-more-panel" onClick={()=>setMore(v=>!v)}><Icon name="more" size={24}/></button><div id="mode-more-panel" className="mode-more-panel" hidden={!more}><div id="mode-inference-actions" className="mode-inference-actions"/><Link to="/qoder" onApproved={()=>setMore(false)}><Icon name="spark" size={19}/>AI 登录与模型</Link>{isChat?<><button type="button" onClick={()=>{setMore(false);window.dispatchEvent(new Event('wg-chat-new'))}}><Icon name="plus" size={19}/>新建对话</button><div id="chat-session-actions" className="chat-session-actions" onClick={()=>setMore(false)}/></>:null}</div></div>}{health!=='服务已连接'&&<span className="health" role="status" title={health}><span className="status-dot offline"/><span>{health}</span></span>}</div></header>
    <main className="main-content" ref={mainRef}><div className="content-inner">{error&&<p className="inline-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Chat key="home"/>}/>
     <Route path="/overview" element={<Navigate to="/" replace/>}/>

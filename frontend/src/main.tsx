@@ -10,6 +10,7 @@ import './styles.css'
 /* Existing feature styles: keep cascade order */
 import './auth.css'
 import './workspace.css'
+import './styles/layout/app-shell.css'
 import './model-center.css'
 import './chat.css'
 import './knowledge.css'

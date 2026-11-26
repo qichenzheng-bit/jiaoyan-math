@@ -9,7 +9,7 @@
 .legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-nav button{border:0;min-height:38px;padding:7px 5px;border-radius:5px}
 .legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-nav button[aria-pressed=false]{background:transparent;color:var(--ink)}
 @media(max-width:760px){
- .legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar){min-height:46px;flex-basis:46px;padding:0 12px;justify-content:flex-start;gap:8px}
+ .legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar){justify-content:flex-start;gap:8px}
  .legacy-shell.clean-workspace .topbar.clean-topbar .breadcrumb strong{font-size:15px}
  .legacy-shell.clean-workspace .doc-work.manual-intake-open .doc-work-heading{flex-wrap:nowrap;margin-bottom:0}
  .legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-header{padding:10px;gap:8px}

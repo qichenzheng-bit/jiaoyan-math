@@ -8,6 +8,7 @@
  --danger:#B65353;--success:#316746;--success-soft:#EAF3ED;--warning:#805B25;--warning-soft:#F8F2E8;--info:#345D87;--info-soft:#EFF4F9;
  --radius-control:8px;--radius-panel:10px;--space-page:26px;--space-panel:16px;
  --dialog-width:300px;--radius-dialog:8px;--radius-dialog-action:5px;--dialog-backdrop:rgba(0,0,0,.28);--dialog-shadow:0 12px 40px #0002;--dialog-focus:#52765F;
+ --header-height:52px;--header-mobile-height:46px;--workspace-max-width:1600px;
  --sidebar-width:210px;--sidebar-compact-width:186px;--sidebar-collapsed-width:58px;--sidebar-mobile-width:300px;
 }
 :root[data-theme="dark"]{
