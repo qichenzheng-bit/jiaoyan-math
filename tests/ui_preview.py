@@ -550,6 +550,8 @@ with sync_playwright() as p:
             # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
             page.set_viewport_size({"width":393,"height":873})
             visit(page,"/intake?doc=ai-demo",".manual-list-row")
+            assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(255, 255, 255)"
+            assert len(page.locator(".mobile-doc-nav").evaluate("el=>getComputedStyle(el).gridTemplateColumns.split(' ')")) == 2
             page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             page.locator(".mobile-doc-card").wait_for()
             page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")

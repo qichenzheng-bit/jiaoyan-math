@@ -30,3 +30,13 @@
 .manual-success{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;max-width:600px;margin-top:22px}
 .manual-success>svg{color:var(--success)}
 @media(max-width:760px){.manual-setup,.manual-success{padding:12px;margin-top:0}.manual-flow:not(.manual-setup):not(.manual-success){padding:4px}}
+
+/* Compact, consistently aligned source action popover; keep touch targets. */
+.legacy-shell .manual-source-row .manual-source-trigger{display:grid;place-items:center;flex:none;min-width:38px;width:38px;height:38px;min-height:38px;padding:0;border:0;background:transparent;color:var(--muted);border-radius:6px}
+.legacy-shell .manual-source-row .manual-source-trigger[aria-expanded=true],.legacy-shell .manual-source-row .manual-source-trigger:hover{background:var(--selected);color:var(--accent)}
+.legacy-shell .manual-source-menu{min-width:148px;width:max-content;max-width:calc(100vw - 40px);right:6px;top:calc(100% - 4px);padding:4px;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px #23344726}
+.legacy-shell .manual-source-menu>button,.legacy-shell .manual-source-menu>a{display:flex;align-items:center;justify-content:flex-start;gap:9px;min-height:38px;padding:6px 10px;text-align:left;font-size:13px;line-height:1.4;border:0;background:transparent;border-radius:5px;color:var(--ink);white-space:nowrap}
+.legacy-shell .manual-source-menu>button:hover,.legacy-shell .manual-source-menu>a:hover{background:var(--hover)}
+.legacy-shell .manual-source-menu>button:last-child{color:var(--danger);border-top:1px solid var(--line)}
+.legacy-shell .manual-source-row:focus-within{border-color:var(--line)}
+@media(max-width:760px){.legacy-shell .manual-source-row{padding:10px;gap:8px}.legacy-shell .manual-source-menu>button,.legacy-shell .manual-source-menu>a{min-height:42px}.manual-flow .manual-new{padding:13px}.manual-flow .manual-list-heading{gap:7px}.manual-flow .manual-filter{gap:3px}.manual-flow .manual-filter button{flex:1;padding:6px 5px;min-width:0}}
