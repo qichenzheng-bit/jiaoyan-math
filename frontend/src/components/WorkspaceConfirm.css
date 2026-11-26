@@ -11,3 +11,6 @@
 .workspace-confirm-input:focus-visible{outline:2px solid var(--dialog-focus,#888);outline-offset:2px}
 .workspace-confirm-actions button:disabled{opacity:.48;cursor:not-allowed}
 @media(max-width:760px){.workspace-confirm-input{font-size:16px}}
+
+.workspace-confirm{width:min(340px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;padding:14px 16px;border-radius:12px}.workspace-confirm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px}.workspace-confirm-head h2{margin:0;line-height:1.5}.workspace-confirm-close{border:0;background:transparent;color:var(--muted);font-size:20px;line-height:20px;padding:0 3px;cursor:pointer}.workspace-confirm-actions button{min-height:32px}.workspace-confirm-actions .workspace-confirm-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.workspace-confirm-danger .workspace-confirm-primary{background:var(--danger);color:white;border-color:var(--danger)}
+@media(max-width:760px){.workspace-confirm{width:min(320px,calc(100vw - 28px));padding:13px 14px}.workspace-confirm-actions button{min-height:36px}}
