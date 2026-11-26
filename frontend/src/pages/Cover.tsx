@@ -21,10 +21,10 @@ export default function Cover(){
  const current=groups.find(g=>g.id===group)??groups[2]
  const w=p?.[0]??1080,h=p?.[1]??1440,short=Math.min(w,h),wide=w/h>=1.5
  const compact=format==='wechat_top'
- const base=short*(compact?.085:wide?.095:.075)*size/100
+ const base=short*(compact ? .085 : wide ? .095 : .075)*size/100
  useEffect(()=>{const c=new AbortController();api<Presets>('/studio/presets',{signal:c.signal}).then(setPresets).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>c.abort()},[])
  useEffect(()=>{setSaved(false)},[format,title,subtitle,palette,size,align,vertical])
- useLayoutEffect(()=>{const el=viewport.current;if(!el)return;const resize=()=>setScale(Math.min(1,Math.max(.01,el.clientWidth/w),480/h));const ro=new ResizeObserver(resize);ro.observe(el);resize();return()=>ro.disconnect()},[w,h])
+ useLayoutEffect(()=>{const el=viewport.current;if(!el)return;const resize=()=>{const s=getComputedStyle(el);const available=el.clientWidth-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);setScale(Math.min(1,Math.max(.01,available/w),480/h))};const ro=new ResizeObserver(resize);ro.observe(el);resize();return()=>ro.disconnect()},[w,h])
  function fit(){
   const el=copy.current,area=textArea.current;if(!el||!area)return false
   let font=base
@@ -69,8 +69,8 @@ export default function Cover(){
    <section className="cover-work-preview"><div className="cover-preview-top"><strong>实时预览</strong><label><input type="checkbox" checked={safe} onChange={e=>setSafe(e.target.checked)}/> 安全区</label></div>
     <div ref={viewport} className="cover-viewport">{p&&<div className="cover-canvas cover-scaled" style={{width:w*scale,height:h*scale,aspectRatio:w+'/'+h}}><div className="cover-native-frame" style={{width:w,height:h,transform:'scale('+scale+')'}}>
      <div ref={canvas} className="math-cover-art cover-native-art" style={{width:w,height:h,background:'linear-gradient(135deg,'+palettes[palette][0]+','+palettes[palette][1]+')',color:palettes[palette][2]}}>
-      <div className="cover-content-area" style={{top:p[2]+'%',bottom:p[3]+'%',left:p[4]+'%',right:p[5]+'%',gap:short*(compact?.02:.045)}}>
-       <div className="cover-brand-row" style={{justifyContent:wide&&!compact?'flex-start':'center'}}><img ref={logoRef} onLoad={()=>setLogoReady(true)} onError={()=>setError('原系统 Logo 加载失败')} src={logo} alt="微光数学" style={{width:Math.min(short*(compact?.55:.38),w*(1-(p[4]+p[5])/100)*.75),maxHeight:short*(compact?.13:.12),objectFit:'contain',background:palette>=2?'#fff':'transparent',borderRadius:short*.006}}/></div>
+      <div className="cover-content-area" style={{top:p[2]+'%',bottom:p[3]+'%',left:p[4]+'%',right:p[5]+'%',gap:short*(compact ? .02 : .045)}}>
+       <div className="cover-brand-row" style={{justifyContent:wide&&!compact?'flex-start':'center'}}><img ref={logoRef} onLoad={()=>setLogoReady(true)} onError={()=>setError('原系统 Logo 加载失败')} src={logo} alt="微光数学" style={{width:Math.min(short*(compact ? .55 : .38),w*(1-(p[4]+p[5])/100)*.75),maxHeight:short*(compact ? .13 : .12),objectFit:'contain',background:palette>=2?'#fff':'transparent',borderRadius:short*.006}}/></div>
        <div ref={textArea} className="cover-copy-area" style={{justifyContent:vertical==='start'?'flex-start':vertical==='end'?'flex-end':'center'}}>
         <div ref={copy} className="cover-copy-fit" style={{fontSize:base,textAlign:align}}>
          <div className="math-cover-title"><MathText content={title}/></div>
