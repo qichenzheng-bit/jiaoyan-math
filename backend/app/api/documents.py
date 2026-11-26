@@ -223,7 +223,7 @@ def origin(id:str,db:Session=Depends(get_db)):
     if not jobs:return None
     def record(job):
         supplements=db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id==job.id,IntakeSupplement.state=="accepted").order_by(IntakeSupplement.created_at.desc()).limit(100))
-        return {"job_id":job.id,"input_text":job.input_text,"provenance":job.provenance or {},"item_uids":[b["uid"] for b in job.items],"supplements":[{"item_uid":s.item_uid,"fields":s.accepted,"state":s.state,"model":s.model} for s in supplements]}
+        return {"job_id":job.id,"input_text":job.input_text,"provenance":job.provenance or {},"item_uids":[b["uid"] for b in job.items],"supplements":[{"item_uid":s.item_uid,"fields":s.accepted,"state":s.state,"model":s.model,"source":(s.base_item or {}).get("_wg_source")} for s in supplements]}
     records=[record(j) for j in jobs]
     return {**records[0],"batches":records}
 @router.put("/{id}",dependencies=[Depends(require_origin)])

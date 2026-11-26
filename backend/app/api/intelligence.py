@@ -1,7 +1,7 @@
 import json
 from uuid import uuid4
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.security import current_user,require_origin,now,audit
 from app.core.solution_methods import normalize_subject, parse_methods, format_methods
 from app.core.content_normalization import canonical_text
-from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession, IntakeImport, IntakeSupplement
+from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession, IntakeImport, IntakeSupplement, WorkBatch, WorkMaterial
 from app.services.pdf_text import extract_pdf
 from app.services import material_import, storage
 from app.api import qoder, documents as docs, resources as bank
@@ -174,7 +174,7 @@ def retry(id:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(curre
     if existing:return view(existing,True)
     if j.state not in ("failed","stopped") or j.revision!=body.revision:
         raise HTTPException(409,"仅失败或已停止任务可重试，请刷新任务状态")
-    provenance={k:v for k,v in (j.provenance or {"kind":"manual","intent":"mixed"}).items() if k not in ("suggested_pages","confirmed_pages","execution_finished_at")}
+    provenance={k:v for k,v in (j.provenance or {"kind":"manual","intent":"mixed"}).items() if k not in ("suggested_pages","confirmed_pages","external_sources","execution_finished_at")}
     if "reviewed_uids" in provenance:provenance["reviewed_uids"]=[]
     draft=Start(title=j.title,subject=j.subject,text=j.input_text,model=j.model,effort=provenance.get("effort"),source_id=j.source_id)
     return launch(db,user,draft,provenance,retry_of=j.id)
@@ -227,6 +227,8 @@ def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(curre
         provenance["confirmed_pages"]={uid:loc for uid,loc in pages.items() if loc}
     for key in ("suggested_pages","confirmed_pages"):
         if key in provenance:provenance[key]={uid:loc for uid,loc in provenance[key].items() if uid in valid}
+    if "external_sources" in provenance:
+        provenance["external_sources"]={b["uid"]:{field:loc for field,loc in provenance["external_sources"].get(b["uid"],{}).items() if b.get(field)==loc.get("excerpt")} for b in items if b["uid"] in provenance["external_sources"]}
     j.provenance=provenance
     j.items=items;j.revision+=1;j.updated_at=now();audit(db,"intelligence.review",user.id);db.commit();return view(j,True)
 def append_candidates(db,j):
@@ -313,6 +315,8 @@ class SupplementStart(Confirm):
     fields:list[SupplementField]=Field(min_length=1,max_length=5)
     instruction:str=Field(default="",max_length=2000)
     revise:bool=False
+class SourceSupplementStart(SupplementStart):
+    source_batch_id:str=Field(min_length=1,max_length=36)
 class SupplementAccept(Confirm):
     fields:list[SupplementField]=Field(min_length=1,max_length=5)
 
@@ -360,8 +364,66 @@ def apply_supplement(item,proposal,fields,revise=False):
             if len(result["solution"])>LIMITS["solution"]:raise HTTPException(422,"合并后解析过长")
     return docs.Block.model_validate(result).model_dump()
 
+def source_batch(db,bid,lock=False):
+    b=db.get(WorkBatch,bid)
+    if not b or not b.verified_text:raise HTTPException(409,"请先完成参考资料原文核对")
+    m=db.get(WorkMaterial,b.material_id)
+    f=db.scalar(select(StoredFile).where(StoredFile.id==m.file_id).with_for_update()) if lock else db.get(StoredFile,m.file_id)
+    if not f or f.archived:raise HTTPException(409,"参考资料原件不可用")
+    return b,m,f
+
+def source_meta(b,m,f):
+    return {"batch_id":b.id,"workspace_id":m.session_id,"material_id":m.id,"file_id":f.id,"file_name":f.name,"media_type":f.media_type,"start":b.start,"end":b.end}
+
+def literal_source_proposal(raw,fields,text):
+    result=parse_supplement(raw,fields)
+    if any(value not in text for value in result.values()):raise ValueError("proposal is not an exact excerpt")
+    return result
+
+def source_page(value,b):
+    matches=[u["unit"] for u in b.units if u.get("state")=="done" and value in u.get("text","")]
+    return matches[0] if len(matches)==1 else None
+
+def source_record(s,field):
+    meta=(s.base_item or {}).get("_wg_source")
+    return {**meta,"suggestion_id":s.id,"field":field,"excerpt":s.proposal[field],"page":(meta.get("pages") or {}).get(field)}
+
+@router.get("/jobs/{id}/source-batches")
+def source_batches(id:str,q:str=Query("",max_length=255),db:Session=Depends(get_db)):
+    if not db.get(Job,id):raise HTTPException(404,"任务不存在")
+    stmt=select(WorkBatch,WorkMaterial,StoredFile).join(WorkMaterial,WorkBatch.material_id==WorkMaterial.id).join(StoredFile,WorkMaterial.file_id==StoredFile.id).where(WorkBatch.verified_text.is_not(None),StoredFile.archived==False)
+    if q.strip():stmt=stmt.where(StoredFile.name.contains(q.strip(),autoescape=True))
+    return [source_meta(b,m,f) for b,m,f in db.execute(stmt.order_by(StoredFile.name,WorkBatch.start,WorkBatch.id).limit(100))]
+
+@router.post("/jobs/{id}/source-match",dependencies=[Depends(require_origin)])
+def source_match(id:str,body:SourceSupplementStart,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    j=get_job(db,id)
+    if j.state!="review" or j.revision!=body.revision:raise HTTPException(409,"草稿版本冲突，请先保存")
+    if body.revise:raise HTTPException(422,"原文匹配仅补充缺失字段")
+    if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
+        raise HTTPException(409,"请先处理当前建议")
+    item=next((x for x in j.items if x["uid"]==body.item_uid),None)
+    if not item or item.get("reuse_resource_id") or len(set(body.fields))!=len(body.fields) or not set(body.fields)<=set(allowed_supplements(item))&{"answer","solution","analysis","proof"}:
+        raise HTTPException(422,"只能匹配缺失的答案、解析、说明或证明")
+    b,m,f=source_batch(db,body.source_batch_id,True)
+    meta=source_meta(b,m,f)
+    prompt=("你是原文匹配助手。根据当前题目与已核对的参考资料，寻找确实对应的答案、解析或证明。"
+        "仅输出JSON对象，键限指定字段，值必须是参考正文中原样连续出现的完整字符串，保留原文符号和换行，不改写、不计算、不补造。"
+        "题号相同不代表题目相同，需核对题干、条件及上下文；无法确认对应关系则省略该字段，全部无法确认输出空对象。"
+        "\n字段："+json.dumps(body.fields)+"\n用户提示："+body.instruction+"\n当前题目："+json.dumps(item,ensure_ascii=False)+"\n【参考正文】\n"+b.verified_text+"\n【参考正文结束】")
+    if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"参考范围过长，请选择较小批次")
+    if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"Qoder执行服务未就绪")
+    s=IntakeSupplement(id=str(uuid4()),job_id=j.id,item_uid=body.item_uid,base_revision=j.revision,base_item={**item,"_wg_source":meta},fields=body.fields,instruction=body.instruction,model=j.model,state="running",detail="匹配已核对的参考原文",proposal={},accepted=[],created_at=now(),updated_at=now())
+    db.add(s);storage.link_file(db,f.id,"intake_supplement",s.id)
+    audit(db,"intelligence.source_match.start",user.id);db.commit()
+    try:qoder.request("POST","/chat/start",{"id":s.id,"model":s.model,"prompt":prompt,**qoder.assistant_effort(db,s.model)})
+    except HTTPException as e:
+        if e.status_code not in (503,504):
+            s=find_supplement(db,id,s.id);s.state="failed";s.detail=str(e.detail)[:400];s.updated_at=now();db.commit()
+    return supplement_view(s)
+
 def supplement_view(s):
-    return {**{k:getattr(s,k) for k in ("id","job_id","item_uid","base_revision","fields","instruction","model","state","detail","proposal","accepted","created_at","updated_at")},"revise":bool((s.base_item or {}).get("_wg_revision"))}
+    return {**{k:getattr(s,k) for k in ("id","job_id","item_uid","base_revision","fields","instruction","model","state","detail","proposal","accepted","created_at","updated_at")},"revise":bool((s.base_item or {}).get("_wg_revision")),"source":(s.base_item or {}).get("_wg_source")}
 
 def find_supplement(db,job_id,ident):
     s=db.scalar(select(IntakeSupplement).where(IntakeSupplement.job_id==job_id,IntakeSupplement.id==ident).with_for_update())
@@ -379,8 +441,17 @@ def sync_supplement(db,s):
         state=r.get("state")
         if state=="running":return
         if state=="done":
-            try:s.proposal=parse_supplement(r.get("answer",""),s.fields);s.state="review";s.detail="AI生成内容待人工核对，尚未合并"
-            except (ValueError,TypeError):s.state="failed";s.detail="补充结果格式无效，请重新发起"
+            try:
+                meta=(s.base_item or {}).get("_wg_source")
+                if meta:
+                    b,m,f=source_batch(db,meta["batch_id"])
+                    s.proposal=literal_source_proposal(r.get("answer",""),s.fields,b.verified_text)
+                    s.base_item={**s.base_item,"_wg_source":{**meta,"pages":{k:source_page(v,b) for k,v in s.proposal.items()}}}
+                    s.detail="已找到参考原文片段，待确认是否对应本题"
+                else:
+                    s.proposal=parse_supplement(r.get("answer",""),s.fields);s.detail="AI生成内容待人工核对，尚未合并"
+                s.state="review"
+            except (ValueError,TypeError,HTTPException):s.state="failed";s.detail="未找到可靠原文片段或结果格式无效，请重新选择参考资料" if (s.base_item or {}).get("_wg_source") else "补充结果格式无效，请重新发起"
         else:s.state="stopped" if state=="stopped" else "failed";s.detail=str(r.get("detail","执行失败"))[:400]
     s.updated_at=now();db.commit()
 
@@ -433,12 +504,30 @@ def supplement_accept(id:str,ident:str,body:SupplementAccept,db:Session=Depends(
     item=next((x for x in j.items if x["uid"]==s.item_uid),None)
     snapshot=dict(s.base_item or {})
     revise=bool(snapshot.pop("_wg_revision",False))
+    source=snapshot.pop("_wg_source",None)
+    if source:source_batch(db,source["batch_id"])
     if item!=snapshot:raise HTTPException(409,"原条目已变化")
     replacement=apply_supplement(item,s.proposal,body.fields,revise=revise)
     replacement["dedup_reason"]=""
     j.items=[replacement if x["uid"]==s.item_uid else x for x in j.items]
-    if "reviewed_uids" in (j.provenance or {}):
-        j.provenance={**j.provenance,"reviewed_uids":[uid for uid in j.provenance["reviewed_uids"] if uid!=s.item_uid]}
+    provenance=dict(j.provenance or {})
+    if "reviewed_uids" in provenance:provenance["reviewed_uids"]=[uid for uid in provenance["reviewed_uids"] if uid!=s.item_uid]
+    external=dict(provenance.get("external_sources",{}));loc=dict(external.get(s.item_uid,{}))
+    for field in body.fields:
+        actual="solution" if field=="alternate" else field
+        loc.pop(actual,None)
+        if source:loc[field]=source_record(s,field)
+    if loc:external[s.item_uid]=loc
+    else:external.pop(s.item_uid,None)
+    if external or "external_sources" in provenance:provenance["external_sources"]=external
+    for key in ("confirmed_pages","suggested_pages"):
+        if key in provenance:
+            mapping=dict(provenance[key]);old=dict(mapping.get(s.item_uid,{}))
+            for field in body.fields:old.pop("solution" if field=="alternate" else field,None)
+            if old:mapping[s.item_uid]=old
+            else:mapping.pop(s.item_uid,None)
+            provenance[key]=mapping
+    j.provenance=provenance
     j.revision+=1;j.updated_at=now();s.accepted=body.fields;s.state="accepted";s.updated_at=now()
     audit(db,"intelligence.supplement.accept",user.id);db.commit();return view(j,True)
 

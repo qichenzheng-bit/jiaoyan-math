@@ -12,7 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
-from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument, DocumentRegistration
+from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument, DocumentRegistration, IntakeSupplement
 from app.services import storage, material_import as imp
 from app.api import intelligence as ai
 
@@ -142,6 +142,9 @@ def archive_library(body:Cleanup,db:Session=Depends(get_db),user:User=Depends(cu
             if ref.owner_type=="intake_job":
                 j=db.get(IntakeJob,ref.owner_id)
                 if j and j.state in ("failed","stopped","converted") and (j.state!="converted" or registered(db,j)):continue
+            if ref.owner_type=="intake_supplement":
+                s=db.get(IntakeSupplement,ref.owner_id);j=db.get(IntakeJob,s.job_id) if s else None
+                if s and (s.state in ("failed","stopped","discarded") or s.state=="accepted" and registered(db,j)):continue
             raise HTTPException(409,f.name+" 仍被未完成任务、聊天或正式资源引用")
         f.archived=True
     audit(db,"work.library.archive",user.id);db.commit()

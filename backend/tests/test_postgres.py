@@ -393,6 +393,31 @@ def test_migration_and_login(tmp_path, monkeypatch):
                 reviewed=client.put(jb,headers=origin,json=payload)
                 assert reviewed.status_code==200,reviewed.text
                 assert reviewed.json()["provenance"]["confirmed_pages"]=={uid:{"content":page}}
+                if page==1:
+                    reference=client.get(jb+"/source-batches?q=notes.txt").json()
+                    assert len(reference)==1 and reference[0]["file_id"]==item["id"]
+                    def match_worker(method,path,body=None):
+                        if path=="/status":return {"chat_available":True}
+                        if path=="/chat/start":return {"state":"running"}
+                        return {"state":"done","answer":'{"answer":"test file"}'}
+                    with monkeypatch.context() as match_patch:
+                        match_patch.setattr(qoder,"request",match_worker)
+                        pending=client.post(jb+"/source-match",headers=origin,json={"revision":reviewed.json()["revision"],"item_uid":uid,"fields":["answer"],"source_batch_id":reference[0]["batch_id"]})
+                        assert pending.status_code==200,pending.text
+                        sid=pending.json()["id"]
+                        assert client.post("/api/workspaces/library/archive",headers=origin,json={"file_ids":[item["id"]],"allow_unfinished":True}).status_code==409
+                        suggestion=next(s for s in client.get(jb+"/supplements").json() if s["id"]==sid)
+                        assert suggestion["state"]=="review" and suggestion["proposal"]["answer"]=="test file"
+                        assert suggestion["source"]["pages"]["answer"]==1
+                        accepted=client.post(jb+"/supplements/"+sid+"/accept",headers=origin,json={"revision":reviewed.json()["revision"],"fields":["answer"]})
+                        assert accepted.status_code==200,accepted.text
+                        j2=accepted.json()
+                        assert j2["items"][0]["answer"]=="test file" and j2["reviewed_uids"]==[]
+                        assert j2["provenance"]["external_sources"][uid]["answer"]["file_id"]==item["id"]
+                        assert client.post(jb+"/document",headers=origin,json={"revision":j2["revision"]}).status_code==409
+                        j2["items"][0]["dedup_reason"]="集成测试独立条目"
+                        reviewed=client.put(jb,headers=origin,json={"revision":j2["revision"],"items":j2["items"],"reviewed_uids":[uid]})
+                        assert reviewed.status_code==200,reviewed.text
                 targets=client.get(jb+"/append-targets").json()
                 conversion={"revision":reviewed.json()["revision"]}
                 if existing_doc:
@@ -465,7 +490,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         retried=client.post(retry_url,headers=origin,json=retry_body)
         assert retried.status_code==200,retried.text
         assert retried.json()["retry_of"]==failed["id"]
-        assert retried.json()["provenance"]==failed["provenance"]
+        assert retried.json()["provenance"]=={k:v for k,v in failed["provenance"].items() if k!="execution_finished_at"}
         assert client.post(retry_url,headers=origin,json=retry_body).json()["id"]==retried.json()["id"]
         asset=client.post("/api/studio",headers=origin,json={"kind":"asset","title":"常用公式","data":{"category":"formula","content":"x^2"}})
         assert asset.status_code==200,asset.text

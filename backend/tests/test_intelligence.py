@@ -67,3 +67,14 @@ def test_pdf_location_hints_are_bounded_and_untrusted():
     assert pdf_range({"file_media_type":"application/pdf","work_batch_id":"b","start":1,"end":10})==(1,10)
     assert pdf_range({"file_media_type":"application/pdf","work_batch_id":"b","start":1,"end":11}) is None
     with pytest.raises(HTTPException):valid_pages({"answer":8},(3,5),True)
+
+
+def test_source_matching_only_accepts_exact_excerpts():
+    from app.api.intelligence import literal_source_proposal,source_page
+    from types import SimpleNamespace
+    assert literal_source_proposal('{"answer":"答案为1"}',["answer"],"第一题：答案为1\n第二题") == {"answer":"答案为1"}
+    with pytest.raises(ValueError):literal_source_proposal('{"answer":"答案为2"}',["answer"],"第一题：答案为1")
+    b=SimpleNamespace(units=[{"unit":2,"state":"done","text":"答案为1"},{"unit":3,"state":"done","text":"答案为2"}])
+    assert source_page("答案为1",b)==2
+    b.units[1]["text"]="答案为1"
+    assert source_page("答案为1",b) is None
