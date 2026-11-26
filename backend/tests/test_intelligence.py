@@ -34,3 +34,25 @@ def test_explicit_targeted_revision_does_not_change_other_fields():
     assert result["answer"]=="新答案" and result["content"]=="原文" and result["solution"]=="原解析"
     with pytest.raises(HTTPException):apply_supplement(item,{"answer":"新答案"},["answer"])
     with pytest.raises(HTTPException):apply_supplement(item,{"proof":"证明"},["proof"],revise=True)
+
+
+def test_duplicate_decision_uses_manual_matcher(monkeypatch):
+    from app.api import intelligence
+    from types import SimpleNamespace
+    item=parse_answer('[{"kind":"question","title":"求导","content":"求导数"}]')[0]
+    calls=[]
+    def matches(body,db):
+        calls.append((body.kind,body.content))
+        return {"total":1}
+    monkeypatch.setattr(intelligence.docs,"manual_matches",matches)
+    with pytest.raises(HTTPException) as exc:
+        intelligence.verify_duplicate_choice(None,item,"")
+    assert exc.value.status_code==409 and calls==[("question","求导数")]
+    intelligence.verify_duplicate_choice(None,{**item,"dedup_reason":"条件不同"},"")
+    assert len(calls)==1
+    resource=SimpleNamespace(**{**item,"archived":False,"revision":2,"subject":"","difficulty":""})
+    monkeypatch.setattr(intelligence.bank,"existing",lambda db,ident:resource)
+    reused={**item,"reuse_resource_id":"old","reuse_revision":2,"subject":""}
+    intelligence.verify_duplicate_choice(None,reused,"")
+    with pytest.raises(HTTPException):intelligence.verify_duplicate_choice(None,{**reused,"reuse_revision":1},"")
+    with pytest.raises(HTTPException):intelligence.verify_duplicate_choice(None,{**reused,"content":"修改后的题干"},"")

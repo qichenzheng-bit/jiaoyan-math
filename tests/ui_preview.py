@@ -692,7 +692,7 @@ with sync_playwright() as p:
             expect(page.locator(".wg-review-matches").get_by_role("button",name="使用原题 · 编号不变",exact=True).first).to_be_visible()
             page.get_by_role("button",name="识别结果",exact=True).click()
             page.get_by_role("button",name="通过并继续",exact=True).click()
-            expect(page.get_by_role("alert").get_by_text("存在重复候选",exact=False)).to_be_visible()
+            expect(page.locator(".wg-review-workbench > .inline-error")).to_contain_text("存在重复候选")
             page.get_by_role("button",name="查重结果",exact=True).click()
             page.locator(".wg-review-matches").get_by_placeholder("例如：条件不同").fill("条件不同，保留独立题目")
             page.get_by_role("button",name="保留当前录入内容",exact=True).click()
