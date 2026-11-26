@@ -7,6 +7,10 @@ on:
     branches: [main]
 permissions:
   contents: read
+# Keep active deployments intact; only the latest queued run is retained.
+concurrency:
+  group: jiaoyan-release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   deployment-syntax:
     runs-on: ubuntu-latest
@@ -28,9 +32,6 @@ jobs:
           retention-days: 3
   backend:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ["3.10", "3.12"]
     services:
       postgres:
         image: postgres:16
@@ -57,7 +58,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
   frontend:
@@ -70,10 +73,19 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          package-manager-cache: false
-      - run: npm install --no-audit --no-fund
+          cache: npm
+          cache-dependency-path: frontend/package.json
+      - run: npm install --prefer-offline --no-audit --no-fund
       - run: npm run build
+      - run: printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 3
   browser:
+    needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -82,17 +94,25 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          package-manager-cache: false
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
-      - run: npm install --no-audit --no-fund && npm run build
-        working-directory: frontend
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: tests/requirements-browser.txt
+      - uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: frontend/dist
+      - name: Verify compiled revision
+        run: |
+          test -s frontend/dist/index.html
+          test "$(cat frontend/dist/release-sha.txt)" = "$GITHUB_SHA"
       - name: Install browser test driver
-        run: python -m pip install playwright
+        run: python -m pip install -r tests/requirements-browser.txt
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/fonts/jiaoyan-cjk
+          key: jiaoyan-cjk-ubuntu2404-v1
       - name: Check preinstalled Chrome and Chinese fonts
         timeout-minutes: 5
         run: |
@@ -100,10 +120,16 @@ jobs:
           google-chrome --version
           # Hosted Ubuntu already has Chrome and its runtime libraries.
           # Only install a Chinese font if no suitable font is present.
+          fontdir="$HOME/.local/share/fonts/jiaoyan-cjk"
+          if [[ -d "$fontdir" ]]; then fc-cache -f "$fontdir"; fi
           if [[ -z "$(fc-list :lang=zh-cn family)" ]]; then
+            tmp=$(mktemp -d)
             sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
-            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y --no-install-recommends fonts-noto-cjk
-            fc-cache -f
+            (cd "$tmp" && apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 download fonts-noto-cjk)
+            dpkg-deb -x "$tmp"/fonts-noto-cjk_*.deb "$tmp/extracted"
+            mkdir -p "$fontdir"
+            cp -a "$tmp/extracted/usr/share/fonts/." "$fontdir/"
+            fc-cache -f "$fontdir"
           fi
           test -n "$(fc-list :lang=zh-cn family)"
           python - <<'PY'
@@ -116,8 +142,9 @@ jobs:
               browser.close()
           PY
       - run: |
-          (cd frontend && npm run preview -- --port 4173) &
+          python tests/serve_frontend.py &
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:4173/ >/dev/null
           python tests/ui_preview.py
       - uses: actions/upload-artifact@v6
         if: always()
@@ -145,18 +172,23 @@ jobs:
         with:
           name: release-source-${{ github.sha }}
           path: ${{ runner.temp }}/release-download-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: actions/setup-node@v5
+      - uses: actions/download-artifact@v7
         with:
-          node-version: "22"
-          package-manager-cache: false
-      - name: Deploy validated source
+          name: frontend-dist-${{ github.sha }}
+          path: ${{ runner.temp }}/release-download-${{ github.run_id }}-${{ github.run_attempt }}/frontend-dist
+      - name: Deploy validated source and frontend
         run: |
           set -euo pipefail
           work=$(mktemp -d "$RUNNER_TEMP/jiaoyan-release.XXXXXX")
           trap 'rm -rf "$work"' EXIT
           tar -xzf "$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/release-source.tar.gz" -C "$work"
+          dist="$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/frontend-dist"
+          test -s "$dist/index.html"
+          test "$(cat "$dist/release-sha.txt")" = "$GITHUB_SHA"
+          mkdir -p "$work/frontend/dist"
+          cp -a "$dist/." "$work/frontend/dist/"
           cd "$work"
-          bash deploy/release.sh
+          JIAOYAN_PREBUILT_FRONTEND=1 bash deploy/release.sh
 
   report:
     # A separate hosted job publishes readable commit statuses for main deployments.

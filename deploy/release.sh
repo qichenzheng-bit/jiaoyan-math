@@ -20,9 +20,41 @@ rsync -a --exclude=.git --exclude=node_modules --exclude=.venv --exclude=.env --
 printf '%s\n' "$sha" > "$release/RELEASE_SHA"
 # Source delivery only: the non-root runner never installs privileged video services.
 bash "$release/deploy/unpack-video-source.sh" "$release/video-engine-source"
-python3 -m venv "$release/venv"
-"$release/venv/bin/python" -m pip install -r "$release/backend/requirements.txt"
-(cd "$release/frontend" && npm install --no-audit --no-fund && npm run build && rm -rf node_modules)
+# Cache completed dependency environments by Python version and requirements.
+# The deployment lock above protects creation; existing environments are not modified.
+dep_root="$base/dependency-envs"
+mkdir -p "$dep_root"
+[[ -d "$dep_root" && ! -L "$dep_root" ]] || { echo "Unexpected dependency cache"; exit 1; }
+dep_key=$({
+  printf '%s\n' 'jiaoyan-venv-v1'
+  python3 -c 'import sys, sysconfig; print(sys.version, sys.executable, sysconfig.get_platform())'
+  sha256sum < "$release/backend/requirements.txt"
+} | sha256sum | cut -d' ' -f1)
+[[ "$dep_key" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid dependency key"; exit 1; }
+dep_link="$dep_root/$dep_key"
+if [[ -L "$dep_link" ]]; then
+  dep_env=$(readlink -f "$dep_link")
+  [[ "$dep_env" == "$dep_root/env-$dep_key-"* && -f "$dep_env/.complete" && -x "$dep_env/bin/python" ]] || { echo "Invalid cached dependency environment"; exit 1; }
+  echo "Reusing dependency environment: $dep_key"
+  "$dep_env/bin/python" -m pip check
+else
+  [[ ! -e "$dep_link" ]] || { echo "Unexpected dependency cache entry"; exit 1; }
+  dep_env=$(mktemp -d "$dep_root/env-$dep_key-XXXXXX")
+  python3 -m venv "$dep_env"
+  "$dep_env/bin/python" -m pip install --disable-pip-version-check -r "$release/backend/requirements.txt"
+  "$dep_env/bin/python" -m pip check
+  touch "$dep_env/.complete"
+  ln -sT "$dep_env" "$dep_link"
+fi
+ln -sT "$dep_env" "$release/venv"
+if [[ "${JIAOYAN_PREBUILT_FRONTEND:-0}" == 1 ]]; then
+  python3 -c 'import sys; assert sys.version_info[:2] == (3, 10), "Production Python differs from CI"'
+  test -s "$release/frontend/dist/index.html"
+  test "$(cat "$release/frontend/dist/release-sha.txt")" = "$sha"
+  echo "Using the exact frontend tested in CI."
+else
+  (cd "$release/frontend" && npm install --prefer-offline --no-audit --no-fund && npm run build)
+fi
 set -a
 # File is provisioned by the administrator; never source repository .env.
 source "$base/config/app.env"
