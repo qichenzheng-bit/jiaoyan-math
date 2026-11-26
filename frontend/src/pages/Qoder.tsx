@@ -1,11 +1,13 @@
 import {confirmAction} from '../components/WorkspaceConfirm'
 import {useEffect,useRef,useState,type FormEvent} from 'react'
 import {api} from '../auth'
+import {getModelCatalog,invalidateModelCatalog,clearModelChoices} from '../components/modelCatalog'
+import {effortOptions as sharedEffortOptions,effortLabel as sharedEffortLabel,type ModelCatalog} from '../components/ReasoningEffort'
 import './QoderCompact.css'
 import QoderUsage from '../components/QoderUsage'
 type Login={state:string;url:string;detail:string}
 type Status={available:boolean;detail:string;verified_at?:number|null;login?:Login;auth_ui?:boolean;model_discovery?:boolean;worker_version?:number;retained_auth?:boolean;user_disconnected?:boolean;busy?:boolean}
-type Catalog={models:{id:string;label:string;efforts:string[]}[];source:string;updated_at?:number|null;capability_source?:string}
+type Catalog=ModelCatalog
 const date=(s:number)=>new Date(s*1000).toLocaleString()
 function officialUrl(value?:string){try{const u=new URL(value??'');return u.protocol==='https:'&&!u.username&&!u.password&&['qoder.cn','qoder.com.cn','qoder.com','aliyun.com','alibabacloud.com'].some(d=>u.hostname===d||u.hostname.endsWith('.'+d))?u.href:''}catch{return ''}}
 
@@ -20,16 +22,16 @@ export default function Qoder(){
  const waiting=status?.login?.state==='starting'||status?.login?.state==='waiting'
  const options=catalog?.models??[]
  const selected=options.find(m=>m.id===saved)
- const effortOptions=(id:string,video=false)=>['default',...((catalog?.source==='cli'?options.find(m=>m.id===id)?.efforts??[]:[]).filter(e=>e!=='default'&&(!video||['low','medium','high','xhigh','max'].includes(e))))]
- const effortLabel=(e:string)=>({default:'模型默认',none:'关闭',off:'关闭',disabled:'关闭',low:'低',medium:'中',high:'高',xhigh:'极高',max:'最大'} as Record<string,string>)[e]??e
+ const effortOptions=(id:string,video=false)=>sharedEffortOptions(catalog,id,video)
+ const effortLabel=(e:string)=>e==='default'?'模型默认':sharedEffortLabel(e)
  const connected=status?.user_disconnected?'已退出':waiting?'等待授权':status?.retained_auth?(status.verified_at?'已登录':'已保留授权'):status?.verified_at?'已验证':status?.login?.state==='finished'?'授权完成':status?.available?'尚未验证':status?'未连接':'检测中'
  async function refresh(){if(pending.current)return;pending.current=true;const revision=loginRevision.current;try{const r=await api<Status>('/qoder/status',{signal:AbortSignal.timeout(10000)});if(alive.current&&revision===loginRevision.current)setStatus(r)}catch(e){if(alive.current&&revision===loginRevision.current)setError(e instanceof Error?e.message:'连接失败')}finally{pending.current=false}}
- useEffect(()=>{alive.current=true;const c=new AbortController();const revision=loginRevision.current;void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string;video_model?:string;effort?:string;video_effort?:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){if(revision===loginRevision.current)setCatalog(m);setSaved(p.model);setDraft(p.model);setVideoSaved(p.video_model??'Auto');setVideoDraft(p.video_model??'Auto');setEffort(p.effort??'default');setSavedEffort(p.effort??'default');setVideoEffort(p.video_effort??'default');setSavedVideoEffort(p.video_effort??'default')}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort()}},[])
+ useEffect(()=>{alive.current=true;const c=new AbortController();const revision=loginRevision.current;void refresh();Promise.all([getModelCatalog(),api<{model:string;video_model?:string;effort?:string;video_effort?:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){if(revision===loginRevision.current)setCatalog(m);setSaved(p.model);setDraft(p.model);setVideoSaved(p.video_model??'Auto');setVideoDraft(p.video_model??'Auto');setEffort(p.effort??'default');setSavedEffort(p.effort??'default');setVideoEffort(p.video_effort??'default');setSavedVideoEffort(p.video_effort??'default')}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort()}},[])
  useEffect(()=>{if(!waiting)return;const t=window.setInterval(()=>void refresh(),2000);return()=>window.clearInterval(t)},[waiting])
  useEffect(()=>{
    if(busy||waiting)return
    let cancelled=false
-   const sync=()=>{const revision=loginRevision.current;api<Catalog>('/qoder/models',{signal:AbortSignal.timeout(10000)}).then(m=>{if(!cancelled&&revision===loginRevision.current&&m.source==='cli')setCatalog(m)}).catch(()=>{})}
+   const sync=()=>{const revision=loginRevision.current;getModelCatalog(false,true).then(m=>{if(!cancelled&&revision===loginRevision.current)setCatalog(m)}).catch(()=>{})}
    const timer=window.setInterval(sync,60000)
    window.addEventListener('focus',sync)
    return()=>{cancelled=true;window.clearInterval(timer);window.removeEventListener('focus',sync)}
@@ -54,7 +56,7 @@ export default function Qoder(){
   }
   await action(kind,async()=>{
     loginRevision.current++
-    if(kind==='start')autoDiscovered.current=false
+    if(kind==='start'){autoDiscovered.current=false;invalidateModelCatalog()}
     setMessage(kind==='start'?'正在生成本次授权链接…':'正在取消授权…')
     try{
       const login=await api<Login>('/qoder/login/'+kind,{method:'POST',signal:AbortSignal.timeout(15000)})
@@ -66,11 +68,11 @@ export default function Qoder(){
     }catch(e){setMessage('');throw e}
   })
  }
- async function disconnect(){if(!await confirmAction('退出本系统 AI？聊天、录入与视频模型调用将停止，直到你主动重新登录。官方 CLI 凭据不会被删除。'))return;await action('disconnect',async()=>{loginRevision.current++;const login=await api<Login>('/qoder/login/disconnect',{method:'POST'});setStatus(prev=>prev?{...prev,login,verified_at:null,retained_auth:false,user_disconnected:true}:prev);setCatalog(undefined);setMessage('已退出本系统 AI');await refresh()})}
+ async function disconnect(){if(!await confirmAction('退出本系统 AI？聊天、录入与视频模型调用将停止，直到你主动重新登录。官方 CLI 凭据不会被删除。'))return;await action('disconnect',async()=>{loginRevision.current++;const login=await api<Login>('/qoder/login/disconnect',{method:'POST'});setStatus(prev=>prev?{...prev,login,verified_at:null,retained_auth:false,user_disconnected:true}:prev);invalidateModelCatalog();setCatalog(undefined);setMessage('已退出本系统 AI');await refresh()})}
  async function discover(automatic=false){await action('models',async()=>{
    setMessage(automatic?'授权完成，正在拉取最新模型…':'正在拉取最新模型…')
    try{
-     const r=await api<Catalog>('/qoder/models/refresh',{method:'POST',signal:AbortSignal.timeout(55000)})
+     const r=await getModelCatalog(true,true)
      if(r.source!=='cli'||!Array.isArray(r.models))throw new Error('未取得 CLI 实际模型清单')
      setCatalog(r)
      if(!r.models.some(m=>m.id===draft))setDraft(r.models[0]?.id??'');if(!r.models.some(m=>m.id===videoDraft))setVideoDraft(r.models[0]?.id??'')
@@ -85,7 +87,7 @@ export default function Qoder(){
      void discover(true)
    }
  },[busy,status?.available,status?.model_discovery,status?.login?.state,catalog])
- async function save(e:FormEvent){e.preventDefault();await action('save',async()=>{const r=await api<{model:string;video_model:string;effort:string;video_effort:string}>('/qoder/preferences',{method:'PUT',body:JSON.stringify({model:draft,video_model:videoDraft,effort,video_effort:videoEffort})});setSaved(r.model);setVideoSaved(r.video_model);setSavedEffort(r.effort);setSavedVideoEffort(r.video_effort);setEditing(false);setMessage('模型设置已保存')})}
+ async function save(e:FormEvent){e.preventDefault();await action('save',async()=>{const r=await api<{model:string;video_model:string;effort:string;video_effort:string}>('/qoder/preferences',{method:'PUT',body:JSON.stringify({model:draft,video_model:videoDraft,effort,video_effort:videoEffort})});setSaved(r.model);setVideoSaved(r.video_model);setSavedEffort(r.effort);setSavedVideoEffort(r.video_effort);setEditing(false);clearModelChoices();setMessage('模型设置已保存')})}
  const disabled=Boolean(busy||waiting||!status?.available||status?.user_disconnected)
  return <div className="model-center qoder-compact">
   <nav className="model-tabs" aria-label="模型管理功能">{([{id:'accounts',label:'账号授权'},{id:'models',label:'模型配置'}] as const).map(t=><button key={t.id} aria-pressed={tab===t.id} onClick={()=>{setTab(t.id);setMessage('');setError('')}}>{t.label}</button>)}</nav>

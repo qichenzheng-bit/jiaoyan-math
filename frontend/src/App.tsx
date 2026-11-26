@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react'
 import {Route,Routes,Navigate,useLocation,useNavigate} from 'react-router-dom'
 import {WorkspaceLink as Link,usePopNavigationGuard,guardNavigation,handleWorkspaceBack} from './components/WorkspaceNavigation'
 import {api,Login} from './auth'
+import {invalidateModelCatalog} from './components/modelCatalog'
 import Settings,{defaults,type Preferences} from './pages/Settings'
 import Resources,{ResourceEdit} from './pages/Resources'
 import TeachingLibrary from './pages/TeachingLibrary'
@@ -56,7 +57,7 @@ export default function App(){
  useEffect(()=>{const c=new AbortController();fetch('/api/auth/me',{signal:c.signal}).then(async r=>{if(r.status===401)return setUser(null);if(!r.ok)throw new Error('认证服务异常');const data=await r.json();if(!c.signal.aborted)setUser(data.username)}).catch(()=>{if(!c.signal.aborted){setError('无法连接认证服务，请检查服务器配置');setUser(null)}});fetch('/api/ready',{signal:c.signal}).then(r=>{if(!c.signal.aborted)setHealth(r.ok?'服务已连接':'服务未就绪')}).catch(()=>{if(!c.signal.aborted)setHealth('服务未连接')});return()=>c.abort()},[])
  useEffect(()=>{if(!user)return;const c=new AbortController();api<Preferences>('/settings',{signal:c.signal}).then(p=>{if(!c.signal.aborted)setPreferences(p)}).catch(()=>{});return()=>c.abort()},[user])
  useEffect(()=>{const media=window.matchMedia('(prefers-color-scheme: dark)');const apply=()=>{document.documentElement.dataset.theme=preferences.theme==='system'?(media.matches?'dark':'light'):preferences.theme};apply();media.addEventListener('change',apply);return()=>media.removeEventListener('change',apply)},[preferences.theme])
- async function logout(){try{await api('/auth/logout',{method:'POST'});setUser(null);try{for(const k of Object.keys(sessionStorage))if(k.startsWith('wg-doc-recovery:'))sessionStorage.removeItem(k)}catch{}setPreferences(defaults);setMenu(false);setError('')}catch(e){setError(e instanceof Error?e.message:'退出失败')}}
+ async function logout(){try{await api('/auth/logout',{method:'POST'});invalidateModelCatalog();setUser(null);try{for(const k of Object.keys(sessionStorage))if(k.startsWith('wg-doc-recovery:'))sessionStorage.removeItem(k)}catch{}setPreferences(defaults);setMenu(false);setError('')}catch(e){setError(e instanceof Error?e.message:'退出失败')}}
  if(user===undefined)return <div className="login-page"><div className="loading-brand"><BrandMark/><p>正在连接教研工作台…</p></div></div>
  if(user===null)return <><Login onLogin={name=>{setUser(name);setError('')}}/>{error&&<p className="auth-error" role="alert">{error}</p>}</>
  return <div className={'shell legacy-shell'+(sidebarCollapsed?' is-collapsed':'')+' clean-workspace'+(isChat||workHome?' chat-route':'')+(modeHome?' mode-home':'')+(isDoc?' doc-route':'')}>

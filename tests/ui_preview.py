@@ -951,8 +951,8 @@ with sync_playwright() as p:
                 model_button=page.get_by_role("button",name="打开模型选择",exact=True)
                 send_button=page.locator(".compact-tools .composer-send")
                 expect(model_button).to_be_visible()
-                assert 30<=model_button.evaluate("(el)=>el.getBoundingClientRect().width")<=44
-                assert model_button.inner_text().strip()==""
+                assert 36<=model_button.evaluate("(el)=>el.getBoundingClientRect().width")<=270
+                expect(model_button).to_contain_text("Auto")
                 assert page.locator(".compact-tools").evaluate("(el)=>getComputedStyle(el).display")=="flex"
                 assert model_button.evaluate("(el)=>el.getBoundingClientRect().right")<=send_button.evaluate("(el)=>el.getBoundingClientRect().left")+1
                 model_button.click()
@@ -962,6 +962,7 @@ with sync_playwright() as p:
                 assert panel.evaluate("(el)=>el.getBoundingClientRect().bottom")<=model_button.evaluate("(el)=>el.getBoundingClientRect().top")+1
                 panel.get_by_role("button",name="高",exact=True).click()
                 expect(panel).to_have_count(0)
+                expect(model_button).to_contain_text("Auto · 高")
                 assert page.locator("#mode-more-panel .reasoning-effort").count()==0
             # Server-reported capabilities, not hardcoded front-end model/effort choices.
             live_models={"source":"cli","models":[{"id":"Auto","label":"Auto","efforts":["medium","high"]}]+[{"id":f"preview-model-{n}","label":f"Preview Model {n}","efforts":["low","xhigh"]} for n in range(7)]}
