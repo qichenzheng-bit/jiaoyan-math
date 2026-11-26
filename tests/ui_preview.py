@@ -668,7 +668,7 @@ with sync_playwright() as p:
             page.set_viewport_size({"width":1600,"height":900})
             # Theme and mobile smoke checks use the same compiled application.
             visit(page,"/",".chat-home-recent")
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#ffffff"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#e9e7e2"
             page.evaluate("document.documentElement.dataset.theme='dark'")
             capture(page,path=str(OUT/"09-home-dark.png"),full_page=False)
             page.evaluate("document.documentElement.dataset.theme='light'")
