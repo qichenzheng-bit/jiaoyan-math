@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
@@ -113,7 +113,7 @@ def original_query():
     return select(StoredFile).where(StoredFile.generated==False,StoredFile.media_type.in_(SUPPORTED))
 @router.get("/library")
 def library(q:str=Query("",max_length=255),archived:bool=False,offset:int=Query(0,ge=0),limit:int=Query(50,ge=1,le=100),db:Session=Depends(get_db)):
-    stmt=original_query().where(StoredFile.archived==archived)
+    stmt=original_query().where(StoredFile.archived==archived,(StoredFile.purged_at.is_(None)) | (StoredFile.purge_pending==True))
     if q.strip():stmt=stmt.where(StoredFile.name.contains(q.strip(),autoescape=True))
     total=db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     return {"items":[library_row(db,f) for f in db.scalars(stmt.order_by(StoredFile.created_at.desc(),StoredFile.id).offset(offset).limit(limit))],"total":total}
@@ -128,24 +128,28 @@ def resolve_library(instruction:str=Query(min_length=1,max_length=500),db:Sessio
             matches.append(library_row(db,f))
             if len(matches)>=20:break
     return {"items":matches}
+def protect_original(db,f):
+    for ref in db.scalars(select(FileReference).where(FileReference.file_id==f.id)):
+        if ref.owner_type=="work_material":continue
+        if ref.owner_type=="intake_job":
+            j=db.get(IntakeJob,ref.owner_id)
+            if j and j.state in ("failed","stopped","converted") and (j.state!="converted" or registered(db,j)):continue
+        if ref.owner_type=="intake_supplement":
+            s=db.get(IntakeSupplement,ref.owner_id);j=db.get(IntakeJob,s.job_id) if s else None
+            if s and (s.state in ("failed","stopped","discarded") or s.state=="accepted" and registered(db,j)):continue
+        raise HTTPException(409,f.name+" 仍被未完成任务、聊天或正式资源引用")
+
 @router.post("/library/archive",dependencies=[Depends(require_origin)])
 def archive_library(body:Cleanup,db:Session=Depends(get_db),user:User=Depends(current_user)):
     ids=sorted(set(body.file_ids))
     for fid in ids:
         f=db.scalar(original_query().where(StoredFile.id==fid).with_for_update())
         if not f:raise HTTPException(404,"原始资料不存在")
+        if f.purged_at is not None:raise HTTPException(410,"原始文件已永久清理")
         if f.archived:continue
         row=library_row(db,f)
         if not row["complete"] and not body.allow_unfinished:raise HTTPException(409,f.name+" 尚未全部入库")
-        for ref in db.scalars(select(FileReference).where(FileReference.file_id==fid)):
-            if ref.owner_type=="work_material":continue
-            if ref.owner_type=="intake_job":
-                j=db.get(IntakeJob,ref.owner_id)
-                if j and j.state in ("failed","stopped","converted") and (j.state!="converted" or registered(db,j)):continue
-            if ref.owner_type=="intake_supplement":
-                s=db.get(IntakeSupplement,ref.owner_id);j=db.get(IntakeJob,s.job_id) if s else None
-                if s and (s.state in ("failed","stopped","discarded") or s.state=="accepted" and registered(db,j)):continue
-            raise HTTPException(409,f.name+" 仍被未完成任务、聊天或正式资源引用")
+        protect_original(db,f)
         f.archived=True
     audit(db,"work.library.archive",user.id);db.commit()
     return {"archived_ids":ids}
@@ -155,6 +159,42 @@ def restore_library(fid:str,db:Session=Depends(get_db),user:User=Depends(current
     if not f:raise HTTPException(404,"原始资料不存在")
     storage.file_path(f);f.archived=False;audit(db,"work.library.restore",user.id);db.commit()
     return library_row(db,f)
+
+class Purge(BaseModel):
+    file_ids:list[str]=Field(min_length=1,max_length=20)
+    confirm:bool=False
+
+@router.post("/library/purge",dependencies=[Depends(require_origin)])
+def purge_library(body:Purge,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    if not body.confirm:raise HTTPException(422,"永久清理需要明确确认")
+    # A backup holds a shared session lock before taking its database snapshot.
+    if not db.scalar(text("SELECT pg_try_advisory_xact_lock(:key)"),{"key":storage.PURGE_LOCK}):
+        raise HTTPException(409,"加密备份正在读取资料，请稍后重试")
+    db.scalar(select(User).where(User.id==user.id).with_for_update())
+    ids=sorted(set(body.file_ids))
+    for fid in ids:
+        f=db.scalar(original_query().where(StoredFile.id==fid).with_for_update())
+        if not f:raise HTTPException(404,"原始资料不存在")
+        if not f.archived:raise HTTPException(409,"请先将资料移入回收区")
+        if f.purged_at is not None:continue
+        protect_original(db,f)
+        # Archive already required separate confirmation of unfinished material.
+        f.purged_at=now();f.purge_pending=True
+    audit(db,"work.library.purge.mark",user.id);db.commit()
+    # Commit the durable tombstone before touching bytes. Future backups exclude these blobs,
+    # while all historic FK references remain intact. Crash/failure can be retried idempotently.
+    completed=[];pending=[];removed_bytes=0
+    for fid in ids:
+        f=db.scalar(original_query().where(StoredFile.id==fid).with_for_update())
+        if not f.purge_pending:
+            completed.append(fid);db.commit();continue
+        try:
+            storage.remove_purged_original(f)
+        except (OSError,ValueError,HTTPException):
+            pending.append(fid);db.rollback();continue
+        f.purge_pending=False;completed.append(fid);removed_bytes+=f.size_bytes
+        audit(db,"work.library.purge.complete",user.id);db.commit()
+    return {"purged_ids":completed,"pending_ids":pending,"removed_bytes":removed_bytes}
 
 @router.get("")
 def listing(db:Session=Depends(get_db)):

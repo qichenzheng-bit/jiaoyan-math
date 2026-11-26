@@ -14,14 +14,14 @@ router = APIRouter(prefix="/files", tags=["files"], dependencies=[Depends(curren
 @router.get("")
 def list_files(db: Session = Depends(get_db), archived: bool = False,
                offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
-    query = select(StoredFile).where(StoredFile.archived == archived)
+    query = select(StoredFile).where(StoredFile.archived == archived, StoredFile.purged_at.is_(None))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(query.order_by(StoredFile.created_at.desc(), StoredFile.id).offset(offset).limit(limit))
     return {"items": [storage.serialize(item) for item in rows], "total": total}
 
 @router.get("/stats")
 def stats(db: Session = Depends(get_db)):
-    count, size = db.execute(select(func.count(), func.coalesce(func.sum(StoredFile.size_bytes), 0))).one()
+    count, size = db.execute(select(func.count(), func.coalesce(func.sum(StoredFile.size_bytes), 0)).where((StoredFile.purged_at.is_(None)) | (StoredFile.purge_pending==True))).one()
     return {"count": count, "bytes": size, "max_file_bytes": settings.max_file_bytes}
 
 @router.post("", dependencies=[Depends(require_origin)])
@@ -71,6 +71,7 @@ def archive(file_id: str, user: User = Depends(current_user), db: Session = Depe
     item = db.scalar(select(StoredFile).where(StoredFile.id == file_id).with_for_update())
     if item is None:
         raise HTTPException(404, "文件不存在")
+    if item.purged_at is not None:raise HTTPException(410,"原始文件已永久清理")
     if storage.reference_count(db, file_id):
         raise HTTPException(409, "文件仍被其他资源引用")
     item.archived = True
@@ -80,7 +81,9 @@ def archive(file_id: str, user: User = Depends(current_user), db: Session = Depe
 
 @router.post("/{file_id}/restore", dependencies=[Depends(require_origin)])
 def restore(file_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    item = find_file(file_id, db)
+    item = db.scalar(select(StoredFile).where(StoredFile.id==file_id).with_for_update())
+    if not item:raise HTTPException(404, "文件不存在")
+    storage.file_path(item)
     item.archived = False
     audit(db, "file.restore", user.id)
     db.commit()

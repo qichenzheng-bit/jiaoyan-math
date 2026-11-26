@@ -33,6 +33,8 @@ class StoredFile(Base):
     media_type: Mapped[str] = mapped_column(String(100))
     generated: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    purged_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    purge_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 class AuditLog(Base):

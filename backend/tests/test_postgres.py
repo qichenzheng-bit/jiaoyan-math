@@ -550,6 +550,63 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.request("DELETE",image_path+"/manual",headers=origin,json={"revision":saved_image_doc["revision"]}).status_code==200
         assert client.post("/api/files/"+file_id+"/archive",headers=origin).status_code==409
 
+        # Permanent deletion keeps historical metadata, respects references and never races a backup.
+        from sqlalchemy import text as sql_text
+        from app.models import StoredFile, FileReference
+        content=b"independent purge fixture"
+        original=client.post("/api/files?name=purge-fixture.txt",headers=origin,content=content).json()
+        pid=original["id"]
+        purge="/api/workspaces/library/purge"
+        payload={"file_ids":[pid],"confirm":True}
+        assert client.post(purge,headers=origin,json=payload).status_code==409
+        pw=client.post("/api/workspaces",headers=origin,json={"title":"永久清理历史保留"}).json()
+        pb="/api/workspaces/"+pw["id"]
+        pm=client.post(pb+"/materials",headers=origin,json={"file_ids":[pid]}).json()["materials"][0]
+        batch=client.post(pb+"/materials/"+pm["id"]+"/batches",headers=origin,json={"start":1,"end":1}).json()
+        br=pb+"/batches/"+batch["id"]
+        assert client.post(br+"/step",headers=origin).json()["units"][0]["state"]=="done"
+        assert client.post(br+"/verify",headers=origin,json={"text":content.decode()}).json()["verified"]
+        assert client.post("/api/workspaces/library/archive",headers=origin,json={"file_ids":[pid],"allow_unfinished":True}).status_code==200
+        assert client.post(purge,headers=origin,json={"file_ids":[pid]}).status_code==422
+        # A real shared advisory lock represents a backup in progress.
+        with engine().connect() as conn:
+            conn.execute(sql_text("SELECT pg_advisory_lock_shared(:key)"),{"key":storage.PURGE_LOCK})
+            try:assert client.post(purge,headers=origin,json=payload).status_code==409
+            finally:conn.execute(sql_text("SELECT pg_advisory_unlock_shared(:key)"),{"key":storage.PURGE_LOCK})
+        with session_factory()() as db:
+            f=db.get(StoredFile,pid);disk=storage.file_path(f)
+            # An unexpected legacy or formal-content reference must still block deletion.
+            db.add(FileReference(file_id=pid,owner_type="teaching_resource",owner_id=saved_image_id));db.commit()
+        assert client.post(purge,headers=origin,json=payload).status_code==409
+        assert disk.exists()
+        with session_factory()() as db:
+            db.delete(db.get(FileReference,(pid,"teaching_resource",saved_image_id)));db.commit()
+        def failed_unlink(f):raise OSError("simulated disk failure")
+        with monkeypatch.context() as patch:
+            patch.setattr(storage,"remove_purged_original",failed_unlink)
+            failed_purge=client.post(purge,headers=origin,json=payload)
+            assert failed_purge.status_code==200,failed_purge.text
+            assert failed_purge.json()["pending_ids"]==[pid]
+            assert disk.exists()
+        assert client.get("/api/files/"+pid+"/download").status_code==410
+        assert client.post("/api/workspaces/library/"+pid+"/restore",headers=origin).status_code==410
+        assert client.post("/api/files/"+pid+"/restore",headers=origin).status_code==410
+        recycle=client.get("/api/workspaces/library?archived=true&q=purge-fixture").json()["items"]
+        assert len(recycle)==1 and recycle[0]["purge_pending"]
+        deleted=client.post(purge,headers=origin,json=payload)
+        assert deleted.status_code==200,deleted.text
+        assert deleted.json()["purged_ids"]==[pid] and deleted.json()["removed_bytes"]==len(content)
+        assert not disk.exists()
+        assert client.post(purge,headers=origin,json=payload).json()["removed_bytes"]==0
+        assert client.get(br).json()["verified_text"]==content.decode()
+        assert client.get(pb).json()["materials"][0]["file"]["purged_at"] is not None
+        assert client.get("/api/workspaces/library?archived=true&q=purge-fixture").json()["total"]==0
+        new=client.post("/api/files?name=purge-fixture.txt",headers=origin,content=content).json()
+        assert new["id"]!=pid and not new["duplicate"]
+        assert client.get("/api/files/"+new["id"]+"/download").content==content
+        assert client.get("/api/resources/"+saved_image_id).json()["content"]==image_text
+        assert client.get("/api/files/"+file_id+"/preview").content==png
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

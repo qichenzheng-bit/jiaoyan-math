@@ -67,3 +67,8 @@ def test_legacy_manifest_work_group_is_all_or_nothing(tmp_path):
     backup.check_manifest(tmp_path,manifest,allow_legacy=True)
     entries.pop("database/schema-pre.sql")
     with pytest.raises(ValueError,match="incomplete"):backup.check_manifest(tmp_path,manifest,allow_legacy=True)
+
+
+def test_original_purge_lock_matches_backup():
+    from app.services import storage
+    assert storage.PURGE_LOCK==backup.PURGE_LOCK
