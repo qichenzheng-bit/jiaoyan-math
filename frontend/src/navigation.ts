@@ -5,7 +5,6 @@ export const modules:Module[]=[
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
- {path:'/tasks',name:'任务中心',desc:'后台任务进度和执行记录',icon:'clock',group:'overview',ready:true},
  {path:'/intake',name:'手动录入',desc:'在同一资料文档内录入题目与知识单元',icon:'intake',group:'resources',ready:true},
  {path:'/intelligence',name:'AI 智能录入',desc:'原文提取与草稿审核',icon:'spark',group:'resources',ready:true},
  {path:'/teaching-library',name:'教学资料库',desc:'自己组编的试卷、讲义和教材',icon:'files',group:'resources',ready:true},

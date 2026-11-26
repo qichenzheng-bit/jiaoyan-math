@@ -274,6 +274,7 @@ with sync_playwright() as p:
                     capture(page,path=str(OUT/"20-intake-linked.png"),full_page=False)
                     continue
                 if name=="00-home":
+                    expect(page.get_by_role("link",name="任务中心",exact=True)).to_have_count(0)
                     expect(page.get_by_label("输入消息")).to_be_visible()
                     expect(page.locator(".clean-chat.chat-main-area")).to_have_count(1)
                     assert page.locator(".clean-chat .chat-main-area").count()==0
@@ -328,6 +329,7 @@ with sync_playwright() as p:
                     assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
                     page.get_by_role("button",name="更多选项",exact=True).click()
                     expect(page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型")).to_be_visible()
+                    expect(page.locator("#mode-more-panel").get_by_role("link",name="任务中心",exact=True)).to_have_count(0)
                     page.get_by_role("button",name="更多选项",exact=True).click()
                     assert page.locator(".workflow-board").count()==0
                     page.locator(".mode-switch").get_by_role("link",name="聊天").click()
