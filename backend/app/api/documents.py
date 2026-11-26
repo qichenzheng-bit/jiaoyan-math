@@ -827,6 +827,12 @@ def manual_review_data(db,d):
         if not normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject):errors.append("请选择科目")
         if actual_kind=="question":
             if not b.get("question_type","").strip():errors.append("请选择题型")
+            if b.get("question_type") in ("选择题","单选题","多选题") and not b.get("reuse_resource_id"):
+                import re
+                options=set(re.findall(r"(?m)^([A-Z])[.、)]\s+\S",b.get("content","")))
+                if len(options)<2:errors.append("选择题至少需要两个有效选项")
+                letters=set(re.findall(r"[A-Z]",b.get("answer",""))) if re.fullmatch(r"[A-Z\s,，、]+",b.get("answer","")) else set()
+                if letters-options:errors.append("答案包含不存在的选项")
             if not b.get("answer","").strip():warnings.append("答案未填写")
             if not b.get("solution","").strip():warnings.append("解析未填写")
         if actual_kind=="knowledge" and not b.get("unit_type","").strip():warnings.append("知识类型未填写")

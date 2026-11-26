@@ -22,6 +22,7 @@ review_suggestion={"id":"supplement-demo","job_id":"review-demo","item_uid":"rev
 ai_doc={**doc,"id":"ai-demo","blocks":[{"uid":"ai-q1","kind":"question","title":"导数计算","content":r"求 $x^2$ 的导数。","answer":"$2x$","solution":"","analysis":"","proof":"","chapter":"","question_type":"解答题","unit_type":"","resource_id":None,"file_id":None,"width":100}]}
 ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["solution"],"instruction":"逐步推导","model":"Auto","state":"review","detail":"待确认","change_count":1,"changes":[{"uid":"ai-q1","field":"solution","before":"","after":r"由幂函数求导公式，$(x^2)'=2x$。"}],"accepted":[]}
 registration_preview={"revision":1,"items":[{"uid":"ai-q1","candidates":[],"knowledge":[{"id":"p4","name":"导数","code":"KP4","chapter":"微积分","matched":"导数"}],"chapter_suggestion":"微积分","peer_ids":[],"missing":["solution"]}],"similar_scan_limit":300}
+manual_saved={}
 def answer(route):
     from urllib.parse import urlsplit,parse_qs
     u=urlsplit(route.request.url);p=u.path.removeprefix("/api");q=parse_qs(u.query)
@@ -44,6 +45,21 @@ def answer(route):
         result=ai_doc
         if route.request.method=="PUT":
             result={**json.loads(route.request.post_data),"revision":2}
+    if p=="/documents/setup" and route.request.method=="POST":
+        body=json.loads(route.request.post_data)
+        result={**doc,"id":"setup-demo","title":body["title"],"subject":"","blocks":[]}
+    if p.endswith("/manual-draft") and route.request.method=="PUT":
+        body=json.loads(route.request.post_data)
+        result={**body,"revision":body["revision"]+1}
+        manual_saved[body["id"]]=result
+    if p.endswith("/manual-review") and route.request.method=="POST":
+        body=manual_saved.get(p.split("/")[2],ai_doc)
+        rows=[{"uid":b["uid"],"number":i+1,"kind":b["kind"],"title":b.get("title") or b["content"][:80],"action":"create","errors":[],"warnings":["答案未填写"] if not b.get("answer") else []} for i,b in enumerate(body["blocks"]) if b["kind"] in ("question","knowledge")]
+        result={"revision":body["revision"],"rows":rows}
+    if p.endswith("/manual-commit") and route.request.method=="POST":
+        body=manual_saved[p.split("/")[2]]
+        saved=[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"id":"saved-"+b["uid"],"code":"QNEW","revision":1}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]
+        result={"document":{**body,"blocks":saved,"revision":body["revision"]+1},"counts":{"question_create":sum(b["kind"]=="question" for b in body["blocks"]),"knowledge_create":sum(b["kind"]=="knowledge" for b in body["blocks"]),"question_reuse":0,"knowledge_reuse":0,"updated":0}}
     if p=="/documents/manual-matches" and route.request.method=="POST":
         body=json.loads(route.request.post_data)
         matches=[{"resource":items[1],"match_kind":"similar","similarity":.87},{"resource":items[2],"match_kind":"similar","similarity":.80}] if "测试查重" in body["content"] else []
@@ -151,13 +167,17 @@ with sync_playwright() as p:
                 assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
                 page.evaluate("document.fonts.ready")
                 if name=="01-intake":
-                    expect(page.locator(".intake-entry")).to_have_count(2)
-                    expect(page.locator(".intake-entry[href='/work']")).to_be_visible()
+                    expect(page.locator(".intake-entry")).to_have_count(1)
+                    expect(page.locator(".intake-entry[href='/work']")).to_have_count(0)
                     expect(page.locator(".intake-entry[href='/intake?mode=document']")).to_be_visible()
                     assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
-                    expect(page.locator(".intake-flow-steps > div")).to_have_count(4)
+                    expect(page.get_by_role("button",name="其他",exact=True)).to_be_visible()
                 if name=="16-intake-document":
-                    expect(page.get_by_text("试卷不限单一科目，逐题填写科目。",exact=True)).to_be_visible()
+                    expect(page.get_by_text("整份资料不限定科目，逐条填写科目。",exact=True)).to_be_visible()
+                    page.get_by_role("button",name="试卷",exact=True).click()
+                    expect(page.get_by_label("考试年份")).to_be_visible()
+                    page.get_by_role("button",name="其他",exact=True).click()
+                    expect(page.get_by_label("资料来源")).to_be_visible()
                     assert page.get_by_label("默认科目",exact=True).count()==0
                     page.get_by_role("button",name="复用已有来源").click()
                     page.get_by_label("选择来源资料",exact=True).first.click()
@@ -316,9 +336,8 @@ with sync_playwright() as p:
                     page.wait_for_url("**/project/intake")
                     page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
                     intake_section=page.locator(".project-hub")
-                    assert intake_section.locator(".project-link").count()==2
-                    assert intake_section.get_by_role("link",name="AI 录入",exact=True).get_attribute("href")=="/work"
-                    assert intake_section.get_by_role("link",name="整套资料录入",exact=True).get_attribute("href")=="/intake?mode=document"
+                    assert intake_section.locator(".project-link").count()==1
+                    assert intake_section.get_by_role("link",name="手动录入",exact=True).get_attribute("href")=="/intake"
                     page.locator("#workspace-navigation").get_by_role("link",name="教学制作",exact=True).click()
                     page.wait_for_url("**/project/creation")
                     page.locator(".project-hub").get_by_role("heading",name="教学制作",exact=True).wait_for()
@@ -355,7 +374,7 @@ with sync_playwright() as p:
                     assert page.locator(".bank-list .katex").count()>0
                 if name=="25-word-ai":
                     page.locator(".manual-word-work").wait_for()
-                    expect(page.locator(".manual-word-matches")).to_be_visible()
+                    expect(page.locator(".manual-word-matches")).to_have_count(0)
                     assert page.get_by_role("button",name="批量审核入库").count()==0
                     assert page.get_by_role("button",name="AI协作",exact=True).count()==0
                     assert page.get_by_role("button",name="原文",exact=True).count()==0
@@ -399,8 +418,8 @@ with sync_playwright() as p:
                     page.locator(".manual-intake-preview .katex").first.wait_for()
                     capture(page,path=str(OUT/"25-word-intake-preview.png"),full_page=False)
                     page.get_by_role("button",name="编辑",exact=True).click()
-                    page.get_by_role("button",name="保存整套资料",exact=True).click()
-                    page.get_by_text("已保存并直接入库",exact=True).wait_for()
+                    page.get_by_role("button",name="保存草稿",exact=True).click()
+                    page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
                 if name=="04-word":
                     page.locator(".manual-word-work .katex").first.wait_for()
                     outline=page.locator(".manual-word-outline nav button")
@@ -423,6 +442,7 @@ with sync_playwright() as p:
                     expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(4)
                     page.get_by_role("button",name="编辑",exact=True).click()
                     page.set_viewport_size({"width":393,"height":873})
+                    page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
                     page.locator(".mobile-doc-card").wait_for()
                     page.locator(".manual-render .katex").first.wait_for()
                     assert page.locator(".manual-word-canvas").count()==0
@@ -431,11 +451,11 @@ with sync_playwright() as p:
                     assert page.get_by_role("link",name="导出 PDF",exact=True).count()==0
                     page.get_by_role("button",name="下一条",exact=True).click()
                     assert page.locator(".mobile-doc-card h2").inner_text()=="第 2 题"
-                    page.get_by_role("button",name="全部题目",exact=True).click()
+                    page.get_by_role("button",name="录入编辑",exact=True).click()
                     expect(page.locator(".manual-list-row")).to_have_count(4)
-                    page.get_by_role("button",name="整套预览",exact=True).click()
+                    page.get_by_role("button",name="Word 预览",exact=True).click()
                     assert page.locator(".manual-intake-preview .katex").count()>0
-                    page.get_by_role("button",name="全部题目",exact=True).click()
+                    page.get_by_role("button",name="录入编辑",exact=True).click()
                     page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                     capture(page,path=str(OUT/"27-mobile-card.png"),full_page=False)
@@ -444,8 +464,8 @@ with sync_playwright() as p:
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                     capture(page,path=str(OUT/"24-word-mobile.png"),full_page=False)
                     page.set_viewport_size({"width":1600,"height":900})
-                    page.get_by_role("button",name="保存整套资料",exact=True).click()
-                    page.get_by_text("已保存并直接入库",exact=True).wait_for()
+                    page.get_by_role("button",name="保存草稿",exact=True).click()
+                    page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
                 if name=="06-cover":
                     page.get_by_label("主标题").fill(r"求极限 $\lim_{x\to0}\frac{\sin x}{x}$")
                     page.locator(".math-cover-art .katex").first.wait_for()
@@ -513,7 +533,8 @@ with sync_playwright() as p:
             print('UI case: phone intake and mobile navigation',flush=True)
             # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
             page.set_viewport_size({"width":393,"height":873})
-            visit(page,"/intake?doc=ai-demo",".mobile-doc-card")
+            visit(page,"/intake?doc=ai-demo",".manual-list-row")
+            page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             page.locator(".mobile-doc-card").wait_for()
             page.get_by_label("题目",exact=True).fill(r"求 $\frac{1}{x}$ 的导数。")
             # select_option changes value but does not reliably move keyboard focus.
@@ -526,7 +547,7 @@ with sync_playwright() as p:
             page.get_by_label("难度",exact=True).click()
             page.get_by_label("题目",exact=True).locator(".inline-math-token .katex").wait_for()
             expect(page.get_by_label("编辑 LaTeX 公式",exact=True)).to_have_count(0)
-            expect(page.get_by_role("button",name="保存整套资料",exact=True)).to_be_enabled()
+            expect(page.get_by_role("button",name="保存草稿",exact=True)).to_be_enabled()
             expect(page.get_by_label("条目标题",exact=True)).to_have_count(0)
             page.get_by_role("button",name="切换 Word 版").click()
             expect(page.locator(".manual-word-canvas")).to_be_visible()
@@ -612,7 +633,7 @@ with sync_playwright() as p:
             page.get_by_role("button",name="下一条 · 新增",exact=True).click()
             page.get_by_role("button",name="＋ 节",exact=True).click()
             page.get_by_label("节标题",exact=True).fill("第一节 函数")
-            page.get_by_role("button",name="整套预览",exact=True).click()
+            page.get_by_role("button",name="Word 预览",exact=True).click()
             expect(page.locator(".manual-intake-preview .print-question-number")).to_have_count(5)
             chapter=page.locator(".manual-intake-preview .print-heading-level-1 h2")
             section=page.locator(".manual-intake-preview .print-heading-level-2 h3")
@@ -621,9 +642,9 @@ with sync_playwright() as p:
             assert chapter.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > section.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)") > page.locator(".manual-intake-preview .chat-rich").first.evaluate("(e)=>parseFloat(getComputedStyle(e).fontSize)")
             assert page.locator(".manual-intake-preview .katex").count()>0
             expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_have_count(0)
-            expect(page.get_by_text("已保存并直接入库",exact=True)).to_have_count(0)
-            with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-save") and req.method=="POST") as request_info:
-                page.get_by_role("button",name="保存整套资料",exact=True).click()
+            expect(page.get_by_text("草稿已保存，尚未入库",exact=True)).to_have_count(0)
+            with page.expect_request(lambda req: req.url.endswith("/documents/ai-demo/manual-draft") and req.method=="PUT") as request_info:
+                page.get_by_role("button",name="保存草稿",exact=True).click()
             submitted=request_info.value.post_data_json
             assert len(submitted["blocks"])==7
             assert [b["heading_level"] for b in submitted["blocks"] if b["kind"]=="heading"]==[1,2]
@@ -635,7 +656,13 @@ with sync_playwright() as p:
             assert submitted["blocks"][3]["content"]=="已知函数\n(1) 求导数"
             assert submitted["blocks"][3]["answer"]=="(1) $2x$"
             assert submitted["blocks"][3]["solution"]=="(1) 利用导数公式"
-            page.get_by_text("已保存并直接入库",exact=True).wait_for()
+            page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
+            page.get_by_role("button",name="检查并入库",exact=True).click()
+            page.get_by_role("heading",name="入库审核",exact=True).wait_for()
+            if page.locator(".manual-review-accept input").count():page.locator(".manual-review-accept input").check()
+            page.get_by_role("button",name="确认入库",exact=True).click()
+            page.get_by_role("dialog",name="确认入库").get_by_role("button",name="确认",exact=True).click()
+            page.get_by_role("heading",name="入库成功",exact=True).wait_for()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             capture(page,path=str(OUT/"28-mobile-review.png"),full_page=False)
             page.set_viewport_size({"width":1600,"height":900})
@@ -680,9 +707,9 @@ with sync_playwright() as p:
             page.wait_for_url("**/project/intake")
             page.locator(".project-hub").get_by_role("heading",name="资料录入",exact=True).wait_for()
             expect(drawer).to_have_count(0)
-            page.locator(".project-hub").get_by_role("link",name="整套资料录入",exact=True).click()
-            page.wait_for_url("**/intake?mode=document")
-            page.locator(".legacy-intake").wait_for()
+            page.locator(".project-hub").get_by_role("link",name="手动录入",exact=True).click()
+            page.wait_for_url("**/intake")
+            page.locator(".manual-new").wait_for()
             assert not page.locator(".nav.open").count()
             visit(page,"/sources",".bank-row")
             page.locator(".bank-row").first.click()
