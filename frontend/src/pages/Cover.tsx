@@ -1,93 +1,94 @@
-import {useEffect,useLayoutEffect,useRef,useState} from 'react'
-import {Link} from 'react-router-dom'
+import {useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointerEvent,type CSSProperties} from 'react'
 import {api} from '../auth'
 import {MathText} from '../components/MathText'
+import {WorkspaceLink as Link,useWorkspaceGuard} from '../components/WorkspaceNavigation'
+import {confirmAction} from '../components/WorkspaceConfirm'
 import {toBlob} from 'html-to-image'
 import './CoverWorkspace.css'
+
 const logo=new URL('../assets/logo.svg',import.meta.url).href
+type Kind='text'|'math'|'question'|'image'|'logo'|'rectangle'|'ellipse'|'line'
+type Layer={id:string;kind:Kind;name:string;content:string;x:number;y:number;w:number;h:number;font:number;color:string;fill:string;weight:number;align:'left'|'center'|'right';rotation:number;opacity:number;hidden:boolean;locked:boolean;resourceId?:string}
+type Design={version:1;name:string;format:string;width:number;height:number;background:string;layers:Layer[]}
 type Presets=Record<string,number[]>
-const groups=[
- {id:'bilibili',name:'B站',formats:[['bilibili','4:3 · 列表封面'],['bilibili_wide','16:9 · 播放页']]},
- {id:'douyin',name:'抖音',formats:[['douyin','3:4 · 竖封面'],['douyin_wide','4:3 · 横封面'],['douyin_full','9:16 · 全屏素材']]},
- {id:'xiaohongshu',name:'小红书',formats:[['xiaohongshu','3:4 · 笔记封面']]},
- {id:'wechat_channels',name:'视频号',formats:[['wechat_channels','6:7 · 竖封面'],['wechat_channels_wide','16:9 · 横封面']]},
- {id:'wechat_top',name:'公众号',formats:[['wechat_top','2.35:1 · 首图'],['wechat_sub','1:1 · 次条']]},
-]
-const palettes=[['#ffffff','#ffffff','#232220'],['#fbf7ee','#f1e9d6','#232220'],['#0d231d','#163a30','#ffffff'],['#122030','#1d364d','#ffffff']]
-const defaultTitle='每日一题'
-export default function Cover(){
- const [presets,setPresets]=useState<Presets>({}),[group,setGroup]=useState('xiaohongshu'),[format,setFormat]=useState('xiaohongshu'),[title,setTitle]=useState(defaultTitle),[subtitle,setSubtitle]=useState('考研数学'),[palette,setPalette]=useState(0),[size,setSize]=useState(100),[align,setAlign]=useState<'left'|'center'|'right'>('center'),[vertical,setVertical]=useState<'start'|'center'|'end'>('center'),[safe,setSafe]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState(false),[saved,setSaved]=useState(false),[scale,setScale]=useState(0.2),[overflow,setOverflow]=useState(false),[logoReady,setLogoReady]=useState(false)
- const viewport=useRef<HTMLDivElement>(null),canvas=useRef<HTMLDivElement>(null),logoRef=useRef<HTMLImageElement>(null),copy=useRef<HTMLDivElement>(null),textArea=useRef<HTMLDivElement>(null),p=presets[format]
- const current=groups.find(g=>g.id===group)??groups[2]
- const w=p?.[0]??1080,h=p?.[1]??1440,short=Math.min(w,h),wide=w/h>=1.5
- const compact=format==='wechat_top'
- const base=short*(compact ? .085 : wide ? .095 : .075)*size/100
- useEffect(()=>{const c=new AbortController();api<Presets>('/studio/presets',{signal:c.signal}).then(setPresets).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>c.abort()},[])
- useEffect(()=>{setSaved(false)},[format,title,subtitle,palette,size,align,vertical])
- useLayoutEffect(()=>{const el=viewport.current;if(!el)return;const resize=()=>{const s=getComputedStyle(el);const available=el.clientWidth-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);setScale(Math.min(1,Math.max(.01,available/w),480/h))};const ro=new ResizeObserver(resize);ro.observe(el);resize();return()=>ro.disconnect()},[w,h])
- function fit(){
-  const el=copy.current,area=textArea.current;if(!el||!area)return false
-  let font=base
-  const minimum=Math.min(base,short*.023)
-  const fits=()=>el.scrollWidth<=area.clientWidth+1&&el.offsetHeight<=area.clientHeight+1
-  el.style.fontSize=font+'px'
-  while(!fits()&&font>minimum){font=Math.max(minimum,font*.92);el.style.fontSize=font+'px'}
-  const ok=fits();setOverflow(!ok);return ok
- }
- useLayoutEffect(()=>{let active=true;fit();void document.fonts.ready.then(()=>{if(active)fit()});return()=>{active=false}},[p,title,subtitle,base,align,vertical,logoReady])
- function resetLayout(){setSize(100);setAlign('center');setVertical('center')}
- function selectGroup(id:string){const next=groups.find(g=>g.id===id);if(!next)return;setGroup(id);setFormat(next.formats[0][0]);resetLayout();setError('')}
- function selectFormat(id:string){setFormat(id);resetLayout();setError('')}
- async function png(){
-  const el=canvas.current;if(!el||!p||!logoReady||!logoRef.current)throw Error('封面尚未就绪')
-  await document.fonts.ready;await logoRef.current.decode()
-  if(el.querySelector('.formula-error'))throw Error('封面公式存在语法错误，请先修正')
-  if(!fit())throw Error('内容超出排版区域，请精简文字或缩小字号')
-  const blob=await toBlob(el,{width:w,height:h,canvasWidth:w,canvasHeight:h,pixelRatio:1,cacheBust:false})
-  if(!blob)throw Error('导出失败')
-  const bitmap=await createImageBitmap(blob);const correct=bitmap.width===w&&bitmap.height===h;bitmap.close()
-  if(!correct)throw Error('导出尺寸校验失败')
-  return blob
- }
- async function save(download=false){
-  setBusy(true);setError('')
-  try{
-   const blob=await png(),filename=format+'-'+w+'x'+h+'-cover.png'
-   if(download){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return}
-   const f=await fetch('/api/files?name='+encodeURIComponent(filename),{method:'POST',body:blob,credentials:'same-origin'})
-   if(!f.ok)throw Error('PNG 保存失败')
-   const r=await f.json()
-   await api('/studio',{method:'POST',body:JSON.stringify({kind:'work',title:title.trim()||'封面',data:{category:'cover',file_id:r.id,content:JSON.stringify({platform:format,group,width:w,height:h,title,subtitle,palette,size,align,vertical}),note:'平台封面 '+w+'×'+h}})})
-   setSaved(true)
-  }catch(e){setError(e instanceof Error?e.message:'保存失败')}finally{setBusy(false)}
- }
- return <div className="cover-workspace">
-  <nav className="cover-platforms" aria-label="发布平台">{groups.map(g=><button key={g.id} disabled={busy} aria-pressed={group===g.id} onClick={()=>selectGroup(g.id)}>{g.name}</button>)}</nav>
-  <div className="cover-format-row"><label>封面比例 <select aria-label="封面比例" disabled={busy} value={format} onChange={e=>selectFormat(e.target.value)}>{current.formats.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><small className="muted">{p?w+' × '+h+' px':'正在读取尺寸…'}</small></div>
-  {error&&<p className="inline-error" role="alert">{error}</p>}
-  <div className="cover-work-grid">
-   <section className="cover-work-preview"><div className="cover-preview-top"><strong>实时预览</strong><label><input type="checkbox" checked={safe} onChange={e=>setSafe(e.target.checked)}/> 安全区</label></div>
-    <div ref={viewport} className="cover-viewport">{p&&<div className="cover-canvas cover-scaled" style={{width:w*scale,height:h*scale,aspectRatio:w+'/'+h}}><div className="cover-native-frame" style={{width:w,height:h,transform:'scale('+scale+')'}}>
-     <div ref={canvas} className="math-cover-art cover-native-art" style={{width:w,height:h,background:'linear-gradient(135deg,'+palettes[palette][0]+','+palettes[palette][1]+')',color:palettes[palette][2]}}>
-      <div className="cover-content-area" style={{top:p[2]+'%',bottom:p[3]+'%',left:p[4]+'%',right:p[5]+'%',gap:short*(compact ? .02 : .045)}}>
-       <div className="cover-brand-row" style={{justifyContent:wide&&!compact?'flex-start':'center'}}><img ref={logoRef} onLoad={()=>setLogoReady(true)} onError={()=>setError('原系统 Logo 加载失败')} src={logo} alt="微光数学" style={{width:Math.min(short*(compact ? .55 : .38),w*(1-(p[4]+p[5])/100)*.75),maxHeight:short*(compact ? .13 : .12),objectFit:'contain',background:palette>=2?'#fff':'transparent',borderRadius:short*.006}}/></div>
-       <div ref={textArea} className="cover-copy-area" style={{justifyContent:vertical==='start'?'flex-start':vertical==='end'?'flex-end':'center'}}>
-        <div ref={copy} className="cover-copy-fit" style={{fontSize:base,textAlign:align}}>
-         <div className="math-cover-title"><MathText content={title}/></div>
-         {subtitle&&<div className="math-cover-subtitle"><MathText content={subtitle}/></div>}
-        </div>
-       </div>
-      </div>
-     </div>
-     {safe&&<div className="cover-safe cover-native-safe" style={{top:p[2]+'%',bottom:p[3]+'%',left:p[4]+'%',right:p[5]+'%'}}/>}
-    </div></div>}</div>
-    {overflow&&<small className="inline-error">文字过长，已达到最小自动字号，请精简内容。</small>}
-    <div className="button-row"><button disabled={busy||!p||!logoReady||overflow} onClick={()=>void save(true)}>下载 PNG</button><button className="primary" disabled={busy||!p||!logoReady||overflow||saved} onClick={()=>void save()}>{saved?'已保存':'保存至作品库'}</button><Link to="/works" className="text-link">查看作品</Link></div>
-   </section>
-   <section className="cover-work-settings"><strong>封面内容</strong><label>主标题<textarea rows={4} maxLength={500} disabled={busy} value={title} onChange={e=>setTitle(e.target.value)}/></label><label>副标题<input maxLength={160} disabled={busy} value={subtitle} onChange={e=>setSubtitle(e.target.value)}/></label><label>配色<select disabled={busy} value={palette} onChange={e=>setPalette(Number(e.target.value))}>{['极简素白','学术暖纸','深林微光','靛青板书'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label>
-    <details><summary>排版微调</summary><label>字号 {size}%<input type="range" min={60} max={150} value={size} disabled={busy} onChange={e=>setSize(Number(e.target.value))}/></label><label>水平对齐<select value={align} disabled={busy} onChange={e=>setAlign(e.target.value as typeof align)}><option value="center">居中</option><option value="left">左对齐</option><option value="right">右对齐</option></select></label><label>垂直位置<select value={vertical} disabled={busy} onChange={e=>setVertical(e.target.value as typeof vertical)}><option value="center">居中</option><option value="start">靠上</option><option value="end">靠下</option></select></label><button type="button" disabled={busy} onClick={resetLayout}>恢复默认排版</button></details>
-    <small className="muted">切换比例时保留文字和配色，自动适配排版。支持 LaTeX。安全区为排版参考线，不进入导出图片。</small>
-   </section>
-  </div>
- </div>
+type Resource={id:string;title:string;content:string;subject:string;question_type:string;source_id?:string}
+type Drag={id:string;mode:'move'|'resize';startX:number;startY:number;scale:number;before:Design;layer:Layer}
+const formats=[['xiaohongshu','小红书图文 / 视频 · 3:4'],['douyin','抖音 · 3:4'],['douyin_wide','抖音 · 4:3'],['douyin_full','抖音 · 9:16'],['bilibili','B站 · 4:3'],['bilibili_wide','B站 · 16:9'],['wechat_top','公众号 · 2.35:1'],['wechat_sub','公众号 · 1:1'],['custom','自定义尺寸']]
+const labels:Record<Kind,string>={text:'文字',math:'公式',question:'题目',image:'图片',logo:'品牌 Logo',rectangle:'矩形',ellipse:'圆形',line:'直线'}
+const blank=():Design=>({version:1,name:'未命名封面',format:'xiaohongshu',width:1080,height:1440,background:'#ffffff',layers:[]})
+const clamp=(v:number,min:number,max:number)=>Math.min(max,Math.max(min,v))
+const uid=()=>crypto.randomUUID()
+function makeLayer(kind:Kind,d:Design,content?:string):Layer{
+ const short=Math.min(d.width,d.height),shape=['rectangle','ellipse','line'].includes(kind)
+ const w=Math.round(kind==='logo'?short*.36:kind==='line'?short*.5:shape?short*.3:d.width*.8)
+ const h=Math.round(kind==='logo'?w*92/390:kind==='line'?Math.max(3,short*.006):kind==='math'?short*.22:kind==='question'?d.height*.4:kind==='image'?short*.35:shape?short*.3:short*.15)
+ return {id:uid(),kind,name:labels[kind],content:content??(kind==='text'?'添加标题':kind==='math'?'\\lim\\limits_{x\\to0}\\frac{\\sin x-x}{x^3}':kind==='logo'?logo:''),x:Math.round((d.width-w)/2),y:Math.round((d.height-h)/2),w,h,font:Math.round(short*(kind==='question'?.046:.07)),color:'#242424',fill:shape?'#dbe5f0':'#ffffff',weight:kind==='text'?600:400,align:'center',rotation:0,opacity:100,hidden:false,locked:false}
 }
+function reposition(d:Design,w:number,h:number,format:string):Design{
+ w=clamp(Math.round(w),100,4096);h=clamp(Math.round(h),100,4096)
+ const sx=w/d.width,sy=h/d.height,s=Math.min(sx,sy)
+ return {...d,width:w,height:h,format,layers:d.layers.map(l=>({...l,x:Math.round(l.x*sx),y:Math.round(l.y*sy),w:Math.max(1,Math.round(l.w*sx)),h:Math.max(1,Math.round(l.h*sy)),font:Math.max(8,Math.round(l.font*s))}))}
+}
+export default function Cover(){
+ const [design,setDesign]=useState<Design>(blank),[past,setPast]=useState<Design[]>([]),[future,setFuture]=useState<Design[]>([]),[selected,setSelected]=useState(''),[panel,setPanel]=useState<'add'|'layers'|'properties'|'questions'|'canvas'>('add'),[presets,setPresets]=useState<Presets>({}),[scale,setScale]=useState(.25),[zoom,setZoom]=useState(100),[guides,setGuides]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[saved,setSaved]=useState(''),[search,setSearch]=useState(''),[questions,setQuestions]=useState<Resource[]>([]),[page,setPage]=useState(0),[total,setTotal]=useState(0),[loading,setLoading]=useState(false)
+ const art=useRef<HTMLDivElement>(null),viewport=useRef<HTMLDivElement>(null),drag=useRef<Drag|null>(null),file=useRef<HTMLInputElement>(null),inFlight=useRef(false)
+ const active=design.layers.find(l=>l.id===selected),dirty=JSON.stringify(design)!==(saved||JSON.stringify(blank()))
+ useWorkspaceGuard({busy,dirty,message:'封面尚未保存，确定离开吗？'})
+ useEffect(()=>{const c=new AbortController();api<Presets>('/studio/presets',{signal:c.signal}).then(setPresets).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});return()=>c.abort()},[])
+ useEffect(()=>{if(panel!=='questions')return;const c=new AbortController();setLoading(true);const timer=window.setTimeout(()=>api<{items:Resource[];total:number}>('/resources?'+new URLSearchParams({kind:'question',archived:'false',q:search,limit:'12',offset:String(page*12)}),{signal:c.signal}).then(r=>{if(!c.signal.aborted){setQuestions(r.items);setTotal(r.total)}}).catch(e=>{if(!c.signal.aborted)setMessage(e.message)}).finally(()=>{if(!c.signal.aborted)setLoading(false)}),180);return()=>{window.clearTimeout(timer);c.abort()}},[panel,search,page])
+ useLayoutEffect(()=>{const el=viewport.current;if(!el)return;const resize=()=>setScale(Math.max(.01,Math.min((el.clientWidth-32)/design.width,Math.max(260,el.clientHeight-32)/design.height,1)));const ro=new ResizeObserver(resize);ro.observe(el);resize();return()=>ro.disconnect()},[design.width,design.height])
+ function commit(next:Design){if(busy||JSON.stringify(next)===JSON.stringify(design))return;setPast(p=>[...p.slice(-49),design]);setFuture([]);setDesign(next);setMessage('')}
+ function patch(p:Partial<Layer>){if(!active||active.locked)return;commit({...design,layers:design.layers.map(l=>l.id===selected?{...l,...p}:l)})}
+ function undo(){if(busy||!past.length||drag.current)return;setFuture(f=>[design,...f]);setDesign(past[past.length-1]);setPast(p=>p.slice(0,-1))}
+ function redo(){if(busy||!future.length||drag.current)return;setPast(p=>[...p,design]);setDesign(future[0]);setFuture(f=>f.slice(1))}
+ function add(kind:Kind,content?:string,resourceId?:string){if(busy)return;const l={...makeLayer(kind,design,content),resourceId};commit({...design,layers:[...design.layers,l]});setSelected(l.id);setPanel('properties')}
+ function remove(){if(!active||active.locked)return;commit({...design,layers:design.layers.filter(l=>l.id!==selected)});setSelected('')}
+ function duplicate(){if(!active)return;const l={...active,id:uid(),name:active.name+' 副本',locked:false,x:active.x+20,y:active.y+20};commit({...design,layers:[...design.layers,l]});setSelected(l.id)}
+ function reorder(delta:number){if(!active||active.locked)return;const layers=[...design.layers],i=layers.findIndex(l=>l.id===selected),j=i+delta;if(j<0||j>=layers.length)return;[layers[i],layers[j]]=[layers[j],layers[i]];commit({...design,layers})}
+ function toggle(id:string,key:'hidden'|'locked'){commit({...design,layers:design.layers.map(l=>l.id===id?{...l,[key]:!l[key]}:l)})}
+ useEffect(()=>{const key=(e:KeyboardEvent)=>{if(busy||e.target instanceof HTMLElement&&(e.target.closest('input,textarea,select,[contenteditable]')))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redo();else undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}else if(e.key==='Delete'){e.preventDefault();remove()}else if(active&&!active.locked&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();const n=e.shiftKey?10:1;patch({x:active.x+(e.key==='ArrowLeft'?-n:e.key==='ArrowRight'?n:0),y:active.y+(e.key==='ArrowUp'?-n:e.key==='ArrowDown'?n:0)})}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key)},[design,active,past,future,busy])
+ const actualScale=scale*zoom/100
+ function start(e:ReactPointerEvent<HTMLElement>,l:Layer,mode:Drag['mode']){if(busy||e.button!==0)return;e.stopPropagation();setSelected(l.id);if(l.locked)return;e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);drag.current={id:l.id,mode,startX:e.clientX,startY:e.clientY,scale:actualScale,before:design,layer:l}}
+ function move(e:ReactPointerEvent<HTMLElement>){const a=drag.current;if(!a)return;const dx=(e.clientX-a.startX)/a.scale,dy=(e.clientY-a.startY)/a.scale,l=a.layer;let p:Partial<Layer>
+  if(a.mode==='move'){let x=Math.round(l.x+dx),y=Math.round(l.y+dy);const snap=6/a.scale;if(Math.abs(x-(a.before.width-l.w)/2)<snap)x=Math.round((a.before.width-l.w)/2);if(Math.abs(y-(a.before.height-l.h)/2)<snap)y=Math.round((a.before.height-l.h)/2);p={x:clamp(x,-l.w+10,a.before.width-10),y:clamp(y,-l.h+10,a.before.height-10)}}
+  else {const w=clamp(Math.round(l.w+dx),10,8192),h=l.kind==='logo'?Math.round(w*92/390):clamp(Math.round(l.h+dy),4,8192);p={w,h}}
+  setDesign({...a.before,layers:a.before.layers.map(v=>v.id===a.id?{...v,...p}:v)})
+ }
+ function end(cancel=false){const a=drag.current;if(!a)return;drag.current=null;if(cancel){setDesign(a.before);return}setPast(p=>[...p.slice(-49),a.before]);setFuture([])}
+ async function upload(f?:File){if(!f||inFlight.current)return;if(!['image/png','image/jpeg','image/webp'].includes(f.type)){setMessage('请选择 PNG、JPEG 或 WebP 图片');return}inFlight.current=true;setBusy(true);try{const r=await fetch('/api/files?name='+encodeURIComponent(f.name),{method:'POST',body:f,credentials:'same-origin'});if(!r.ok)throw Error('图片上传失败');const v=await r.json() as {id:string;previewable?:boolean};if(!v.id||v.previewable===false)throw Error('图片无法预览');add('image','/api/files/'+encodeURIComponent(v.id)+'/preview')}catch(e){setMessage(e instanceof Error?e.message:'上传失败')}finally{inFlight.current=false;setBusy(false);if(file.current)file.current.value=''}}
+ async function exportCover(download:boolean){if(inFlight.current||drag.current)return;inFlight.current=true;setBusy(true);setMessage('');try{const el=art.current;if(!el)throw Error('画布未就绪');await document.fonts.ready;await Promise.all(Array.from(el.querySelectorAll('img')).map(img=>img.decode()));if(el.querySelector('.formula-error,.katex-error'))throw Error('存在公式错误，请先修正')
+  for(const node of Array.from(el.querySelectorAll<HTMLElement>('[data-cover-copy]'))){if(node.scrollWidth>node.clientWidth+2||node.scrollHeight>node.clientHeight+2)throw Error('存在超出文本框的内容，请调整字号或文本框大小')}
+  if(design.layers.some(l=>!l.hidden&&(l.x<0||l.y<0||l.x+l.w>design.width+1||l.y+l.h>design.height+1)))throw Error('有元素超出画布，请先调整位置或尺寸')
+  const blob=await toBlob(el,{width:design.width,height:design.height,canvasWidth:design.width,canvasHeight:design.height,pixelRatio:1,cacheBust:false});if(!blob)throw Error('导出失败');const bitmap=await createImageBitmap(blob);const ok=bitmap.width===design.width&&bitmap.height===design.height;bitmap.close();if(!ok)throw Error('导出尺寸校验失败')
+  const filename=design.name.replace(/[\\/:*?"<>|]/g,'_')+'-'+design.width+'x'+design.height+'.png'
+  if(download){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setMessage('已生成 PNG 下载');return}
+  const res=await fetch('/api/files?name='+encodeURIComponent(filename),{method:'POST',body:blob,credentials:'same-origin'});if(!res.ok)throw Error('封面文件保存失败');const uploaded=await res.json() as {id:string};await api('/studio',{method:'POST',body:JSON.stringify({kind:'work',title:design.name.trim()||'未命名封面',data:{category:'cover',file_id:uploaded.id,content:JSON.stringify(design),note:'可编辑封面 '+design.width+'×'+design.height}})});setSaved(JSON.stringify(design));setMessage('已保存至作品库（新版本）')
+ }catch(e){setMessage(e instanceof Error?e.message:'导出失败')}finally{inFlight.current=false;setBusy(false)}}
+ async function fresh(){if(dirty&&!await confirmAction('放弃未保存的修改并新建空白封面？'))return;const next=blank();setDesign(next);setPast([]);setFuture([]);setSelected('');setSaved('');setPanel('add');setMessage('')}
+ function format(v:string){if(v==='custom'){commit({...design,format:v});return}const p=presets[v];if(!p){setMessage('平台尺寸未加载，请重试或使用自定义尺寸');return}commit(reposition(design,p[0],p[1],v))}
+ const px=(value:number)=>Math.round(value)
+ const field=(label:string,key:'x'|'y'|'w'|'h'|'font'|'rotation'|'opacity'|'weight',min:number,max:number)=>active?<label>{label}<input type="number" min={min} max={max} value={active[key]} disabled={busy||active.locked} onChange={e=>{const n=e.target.valueAsNumber;if(Number.isFinite(n))patch({[key]:clamp(n,min,max)})}}/></label>:null
+ function layerContent(l:Layer){if(l.kind==='logo'||l.kind==='image')return <img src={l.content} alt={l.name} style={{width:'100%',height:'100%',objectFit:'contain',display:'block'}}/>;if(['rectangle','ellipse','line'].includes(l.kind))return <div style={{background:l.fill,borderRadius:l.kind==='ellipse'?'50%':0,width:'100%',height:'100%'}}/>;return <div data-cover-copy style={{width:'100%',height:'100%',overflow:'hidden',fontSize:l.font,color:l.color,fontWeight:l.weight,textAlign:l.align,whiteSpace:'pre-wrap',overflowWrap:'anywhere',lineHeight:1.35}}><MathText content={l.kind==='math'?'$$'+l.content+'$$':l.content}/></div>}
+ function layerStyle(l:Layer):CSSProperties{return {position:'absolute',left:l.x,top:l.y,width:l.w,height:l.h,transform:'rotate('+l.rotation+'deg)',transformOrigin:'center',opacity:l.opacity/100,overflow:'hidden'}}
+ const safe=presets[design.format]
+ return <div className="free-cover">
+ <style>{css}</style>
+ <header className="fc-head"><div><h1>封面设计</h1><input aria-label="封面名称" value={design.name} maxLength={200} disabled={busy} onChange={e=>commit({...design,name:e.target.value})}/></div><div className="fc-actions"><button disabled={busy} onClick={()=>void fresh()}>新建</button><Link className="button-link" to="/works">作品库</Link><button disabled={busy} onClick={()=>void exportCover(true)}>导出 PNG</button><button className="primary" disabled={busy||!dirty} onClick={()=>void exportCover(false)}>保存</button></div></header>
+ {message&&<p className="notice" role="status">{message}</p>}
+ <div className="fc-toolbar"><button disabled={busy||!past.length} onClick={undo}>撤销</button><button disabled={busy||!future.length} onClick={redo}>重做</button><select aria-label="画布比例" value={design.format} disabled={busy} onChange={e=>format(e.target.value)}>{formats.map(([v,n])=><option key={v} value={v}>{n}</option>)}</select><small>{design.width} × {design.height}</small><button onClick={()=>setPanel('canvas')}>画布设置</button><label><input type="checkbox" checked={guides} onChange={e=>setGuides(e.target.checked)}/> 安全区</label></div>
+ <div className="fc-grid">
+ <aside className="fc-add"><h3>添加元素</h3><div className="fc-add-buttons">{(['text','math','logo','rectangle','ellipse','line'] as Kind[]).map(k=><button key={k} disabled={busy} onClick={()=>add(k)}>＋ {labels[k]}</button>)}<button disabled={busy} onClick={()=>file.current?.click()}>＋ 图片</button><button disabled={busy} onClick={()=>setPanel('questions')}>＋ 题库</button></div><input ref={file} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={e=>void upload(e.target.files?.[0])}/><h3>图层</h3><div className="fc-layers">{[...design.layers].reverse().map(l=><div key={l.id} className={selected===l.id?'fc-selected':''}><button className="fc-layer-name" onClick={()=>{setSelected(l.id);setPanel('properties')}}>{l.name}</button><button aria-label={l.hidden?'显示':'隐藏'} title={l.hidden?'显示':'隐藏'} disabled={busy} onClick={()=>toggle(l.id,'hidden')}>{l.hidden?'隐':'显'}</button><button aria-label={l.locked?'解锁':'锁定'} title={l.locked?'解锁':'锁定'} disabled={busy} onClick={()=>toggle(l.id,'locked')}>{l.locked?'锁':'开'}</button></div>)}</div>{!design.layers.length&&<p className="muted">从空白画布开始，自由添加元素。</p>}</aside>
+ <main className="fc-center"><div ref={viewport} className="fc-viewport" onPointerDown={()=>setSelected('')}><div className="fc-sized" style={{width:design.width*actualScale,height:design.height*actualScale}}><div className="fc-native" style={{width:design.width,height:design.height,transform:'scale('+actualScale+')'}}>
+ <div ref={art} className="fc-art" style={{width:design.width,height:design.height,background:design.background}}>{design.layers.filter(l=>!l.hidden).map(l=><div key={l.id} style={layerStyle(l)}>{layerContent(l)}</div>)}</div>
+ <div className="fc-overlay">{guides&&safe&&<div className="fc-guide" style={{top:safe[2]+'%',bottom:safe[3]+'%',left:safe[4]+'%',right:safe[5]+'%'}}/>}{design.layers.filter(l=>!l.hidden).map(l=><div key={l.id} className={'fc-hit'+(selected===l.id?' fc-hit-selected':'')} style={{...layerStyle(l),opacity:1,overflow:'visible',cursor:l.locked?'default':'move',outlineWidth:2/actualScale}} onPointerDown={e=>start(e,l,'move')} onPointerMove={move} onPointerUp={()=>end()} onPointerCancel={()=>end(true)} onDoubleClick={()=>setPanel('properties')}>{selected===l.id&&!l.locked&&<button aria-label="缩放元素" className="fc-handle" style={{width:14/actualScale,height:14/actualScale,minWidth:0,minHeight:0,padding:0}} onPointerDown={e=>start(e,l,'resize')} onPointerMove={e=>{e.stopPropagation();move(e)}} onPointerUp={e=>{e.stopPropagation();end()}} onPointerCancel={e=>{e.stopPropagation();end(true)}}/>}</div>)}</div>
+ </div></div></div><div className="fc-zoom"><button onClick={()=>setZoom(v=>Math.max(25,v-25))}>−</button><small>{px(actualScale*100)}%</small><button onClick={()=>setZoom(v=>Math.min(300,v+25))}>＋</button><button onClick={()=>setZoom(100)}>适应画布</button></div></main>
+ <aside className="fc-inspector"><nav className="fc-tabs">{(['properties','canvas','questions'] as const).map((p,i)=><button key={p} aria-pressed={panel===p} onClick={()=>setPanel(p)}>{['属性','画布','题库'][i]}</button>)}</nav>
+ {panel==='questions'?<><h3>导入题目</h3><input placeholder="搜索题目、知识点" value={search} onChange={e=>{setSearch(e.target.value);setPage(0)}}/>{loading?<p>正在读取题库…</p>:questions.map(q=><details key={q.id}><summary><MathText compact content={q.title}/></summary><div className="fc-question"><MathText content={q.content}/></div><small>{q.subject} · {q.question_type}</small><button disabled={busy} onClick={()=>add('question',q.content,q.id)}>添加完整题干</button></details>)}<div className="fc-actions"><button disabled={!page} onClick={()=>setPage(p=>p-1)}>上一页</button><button disabled={(page+1)*12>=total} onClick={()=>setPage(p=>p+1)}>下一页</button></div></>:panel==='canvas'?<><h3>画布设置</h3><label>背景色<input type="color" disabled={busy} value={design.background} onChange={e=>commit({...design,background:e.target.value})}/></label><div className="fc-fields"><label>宽度<input type="number" min={100} max={4096} value={design.width} disabled={busy} onChange={e=>{if(e.target.valueAsNumber>=100)commit(reposition(design,e.target.valueAsNumber,design.height,'custom'))}}/></label><label>高度<input type="number" min={100} max={4096} value={design.height} disabled={busy} onChange={e=>{if(e.target.valueAsNumber>=100)commit(reposition(design,design.width,e.target.valueAsNumber,'custom'))}}/></label></div><small>调整尺寸会按比例重新定位现有元素；可撤销。</small></>:active?<><h3>{active.name}{active.locked?'（已锁定）':''}</h3>{['text','math','question'].includes(active.kind)&&<><label>{active.kind==='math'?'LaTeX 源码':'内容（支持 LaTeX）'}<textarea rows={5} disabled={busy||active.locked} value={active.content} onChange={e=>patch({content:e.target.value})}/></label><div className="fc-fields">{field('字号', 'font',8,500)}{field('字重','weight',100,900)}<label>文字色<input type="color" value={active.color} disabled={busy||active.locked} onChange={e=>patch({color:e.target.value})}/></label><label>对齐<select value={active.align} disabled={busy||active.locked} onChange={e=>patch({align:e.target.value as Layer['align']})}><option value="left">左</option><option value="center">中</option><option value="right">右</option></select></label></div></>}
+ {['rectangle','ellipse','line'].includes(active.kind)&&<label>填充色<input type="color" value={active.fill} disabled={busy||active.locked} onChange={e=>patch({fill:e.target.value})}/></label>}
+ <div className="fc-fields">{field('X','x',-8192,8192)}{field('Y','y',-8192,8192)}{field('宽度','w',1,8192)}{field('高度','h',1,8192)}{field('旋转°','rotation',-360,360)}{field('不透明度 %','opacity',0,100)}</div>
+ <div className="fc-add-buttons"><button disabled={busy||active.locked} onClick={()=>patch({x:Math.round((design.width-active.w)/2)})}>水平居中</button><button disabled={busy||active.locked} onClick={()=>patch({y:Math.round((design.height-active.h)/2)})}>垂直居中</button><button disabled={busy||active.locked} onClick={()=>reorder(1)}>上移一层</button><button disabled={busy||active.locked} onClick={()=>reorder(-1)}>下移一层</button><button disabled={busy} onClick={duplicate}>复制</button><button disabled={busy||active.locked} onClick={remove}>删除</button></div></>:<p className="muted">选择画布元素后编辑其属性。</p>}</aside>
+ </div></div>
+}
+const css=''+
+'.free-cover{width:100%;min-width:0;display:grid;gap:10px}.free-cover *{box-sizing:border-box}.fc-head,.fc-toolbar,.fc-actions,.fc-zoom,.fc-tabs{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.fc-head{justify-content:space-between}.fc-head>div:first-child{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.fc-head h1{margin:0;font-size:21px}.fc-head input{width:180px;max-width:100%}.fc-toolbar{padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px}.fc-toolbar label{display:flex;align-items:center;gap:4px}.fc-grid{display:grid;grid-template-columns:180px minmax(0,1fr) 235px;gap:10px;align-items:start}.fc-add,.fc-inspector{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;gap:10px;min-width:0;max-height:calc(100dvh - 180px);overflow:auto}.fc-add h3,.fc-inspector h3{font-size:14px;margin:0}.fc-add-buttons,.fc-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.fc-add-buttons button{white-space:normal;padding:5px;min-width:0}.fc-layers{display:grid;gap:3px}.fc-layers>div{display:flex;align-items:center;gap:2px;border-radius:5px;min-width:0}.fc-layers button{padding:3px;min-width:0}.fc-layer-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}.fc-selected{background:var(--selected)}.fc-center{min-width:0}.fc-viewport{height:clamp(320px,65dvh,900px);background:var(--subtle);border:1px solid var(--line);border-radius:8px;overflow:auto;display:flex;padding:16px;align-items:safe center;justify-content:safe center}.fc-sized{position:relative;flex:none}.fc-native{position:absolute;left:0;top:0;transform-origin:top left}.fc-art{position:absolute;left:0;top:0;overflow:hidden;color-scheme:light;box-shadow:0 3px 16px #0002}.fc-art .chat-rich,.fc-art .math-text-block{font-size:inherit!important;line-height:inherit!important;color:inherit!important;white-space:pre-wrap;margin:0;padding:0;overflow:visible;max-width:none}.fc-art .katex{color:inherit;font-size:1.08em}.fc-art .katex-display{margin:.18em 0;overflow:visible}.fc-overlay{position:absolute;inset:0;pointer-events:none}.fc-guide{position:absolute;border:3px dashed #b39a62;pointer-events:none}.fc-hit{pointer-events:auto;touch-action:none;user-select:none}.fc-hit-selected{outline:2px solid #397dcd}.fc-handle{position:absolute;right:0;bottom:0;transform:translate(50%,50%);border:1px solid #397dcd!important;background:#fff!important;border-radius:0!important;touch-action:none;cursor:nwse-resize}.fc-zoom{justify-content:center;margin-top:6px}.fc-inspector label{display:grid;gap:3px;font-size:12px;min-width:0}.fc-inspector input,.fc-inspector textarea,.fc-inspector select{width:100%;min-width:0}.fc-inspector details{border-bottom:1px solid var(--line);padding:7px 0}.fc-inspector details summary{cursor:pointer}.fc-question{max-height:260px;overflow:auto}.fc-tabs{gap:3px}.fc-tabs button{flex:1;padding:4px}.fc-tabs button[aria-pressed=true]{background:var(--selected)}'+
+'@media(max-width:1050px){.fc-grid{grid-template-columns:minmax(0,1fr) 230px}.fc-add{grid-column:1/-1;max-height:none}.fc-add-buttons{display:flex;flex-wrap:wrap}.fc-layers{display:flex;flex-wrap:wrap}.fc-add h3{font-size:12px}}@media(max-width:760px){.fc-grid{display:flex;flex-direction:column}.fc-center,.fc-add,.fc-inspector{width:100%}.fc-center{order:-1}.fc-viewport{height:clamp(300px,48dvh,520px)}.fc-add,.fc-inspector{max-height:none;overflow:visible}.fc-head h1{font-size:18px}.fc-head input{width:145px}.fc-toolbar select{max-width:100%}.fc-inspector input,.fc-inspector select,.fc-inspector textarea{font-size:16px}.fc-add-buttons button{min-height:36px}}'
