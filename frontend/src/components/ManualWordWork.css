@@ -105,3 +105,6 @@
 .doc-selector[hidden]{display:none!important}
 .manual-word-outline nav:empty:after{content:"暂未添加内容";color:var(--muted);padding:6px}
 @media(max-width:900px){.manual-word-layout.no-matches{grid-template-columns:minmax(0,1fr)}.mobile-doc-title{flex-wrap:wrap}.mobile-doc-header .mobile-doc-title>div{flex:1 1 100%}.mobile-doc-header .mobile-doc-title>button{flex:1}}
+
+/* A method is not a subquestion: keep their structural roles separate. */
+.manual-method{min-width:0;display:grid;gap:8px;padding:8px 0}.manual-method+.manual-method{border-top:1px solid var(--line)}
