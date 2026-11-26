@@ -214,7 +214,13 @@ jobs:
           set -euo pipefail
           bundle=$(mktemp -d "$RUNNER_TEMP/jiaoyan-bundle.XXXXXX")
           trap 'rm -rf "$bundle"' EXIT
-          git archive "$GITHUB_SHA" | tar -xf - -C "$bundle"
+          # This step runs from frontend/; archive the repository root, not its subtree.
+          git -C "$GITHUB_WORKSPACE" archive "$GITHUB_SHA" | tar -xf - -C "$bundle"
+          test -s "$bundle/deploy/release.sh"
+          test -s "$bundle/deploy/unpack-video-source.sh"
+          test -s "$bundle/backend/requirements.txt"
+          test -s "$bundle/frontend/package.json"
+          bash -n "$bundle/deploy/release.sh"
           mkdir -p "$bundle/frontend/dist"
           cp -a dist/. "$bundle/frontend/dist/"
           test "$(cat "$bundle/frontend/dist/release-sha.txt")" = "$GITHUB_SHA"
@@ -328,6 +334,8 @@ jobs:
           work=$(mktemp -d "$RUNNER_TEMP/jiaoyan-release.XXXXXX")
           trap 'rm -rf "$work"' EXIT
           tar -xzf "$RUNNER_TEMP/release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/release-bundle.tar.gz" -C "$work"
+          test -s "$work/deploy/release.sh"
+          test -s "$work/backend/requirements.txt"
           test -s "$work/frontend/dist/index.html"
           test "$(cat "$work/frontend/dist/release-sha.txt")" = "$GITHUB_SHA"
           cd "$work"
