@@ -2,7 +2,7 @@ import {useEffect,useRef,useState,type FormEvent} from 'react'
 import {api} from '../auth'
 import {Icon} from '../components/Icon'
 type Login={state:string;url:string;detail:string}
-type Status={available:boolean;detail:string;verified_at?:number|null;login?:Login;auth_ui?:boolean;model_discovery?:boolean;worker_version?:number}
+type Status={available:boolean;detail:string;verified_at?:number|null;login?:Login;auth_ui?:boolean;model_discovery?:boolean;worker_version?:number;retained_auth?:boolean;user_disconnected?:boolean;busy?:boolean}
 type Catalog={models:{id:string;label:string;efforts:string[]}[];source:string;updated_at?:number|null;capability_source?:string}
 const date=(s:number)=>new Date(s*1000).toLocaleString()
 function officialUrl(value?:string){try{const u=new URL(value??'');return u.protocol==='https:'&&!u.username&&!u.password&&['qoder.cn','qoder.com.cn','qoder.com','aliyun.com','alibabacloud.com'].some(d=>u.hostname===d||u.hostname.endsWith('.'+d))?u.href:''}catch{return ''}}
@@ -19,7 +19,7 @@ export default function Qoder(){
  const selected=options.find(m=>m.id===saved)
  const effortOptions=(id:string,video=false)=>['default',...((catalog?.source==='cli'?options.find(m=>m.id===id)?.efforts??[]:[]).filter(e=>e!=='default'&&(!video||['low','medium','high','xhigh','max'].includes(e))))]
  const effortLabel=(e:string)=>({default:'模型默认',none:'关闭',off:'关闭',disabled:'关闭',low:'低',medium:'中',high:'高',xhigh:'极高',max:'最大'} as Record<string,string>)[e]??e
- const connected=status?.verified_at?'已验证':waiting?'等待授权':status?.login?.state==='finished'?'授权完成':status?.available?'尚未验证':status?'未连接':'检测中'
+ const connected=status?.user_disconnected?'已退出':waiting?'等待授权':status?.retained_auth?(status.verified_at?'已登录':'已保留授权'):status?.verified_at?'已验证':status?.login?.state==='finished'?'授权完成':status?.available?'尚未验证':status?'未连接':'检测中'
  async function refresh(){if(pending.current)return;pending.current=true;const revision=loginRevision.current;try{const r=await api<Status>('/qoder/status',{signal:AbortSignal.timeout(10000)});if(alive.current&&revision===loginRevision.current)setStatus(r)}catch(e){if(alive.current&&revision===loginRevision.current)setError(e instanceof Error?e.message:'连接失败')}finally{pending.current=false}}
  useEffect(()=>{alive.current=true;const c=new AbortController();const revision=loginRevision.current;void refresh();Promise.all([api<Catalog>('/qoder/models',{signal:c.signal}),api<{model:string;video_model?:string;effort?:string;video_effort?:string}>('/qoder/preferences',{signal:c.signal})]).then(([m,p])=>{if(!c.signal.aborted){if(revision===loginRevision.current)setCatalog(m);setSaved(p.model);setDraft(p.model);setVideoSaved(p.video_model??'Auto');setVideoDraft(p.video_model??'Auto');setEffort(p.effort??'default');setSavedEffort(p.effort??'default');setVideoEffort(p.video_effort??'default');setSavedVideoEffort(p.video_effort??'default')}}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>{alive.current=false;c.abort()}},[])
  useEffect(()=>{if(!waiting)return;const t=window.setInterval(()=>void refresh(),2000);return()=>window.clearInterval(t)},[waiting])
@@ -63,6 +63,7 @@ export default function Qoder(){
     }catch(e){setMessage('');throw e}
   })
  }
+ async function disconnect(){if(!window.confirm('退出本系统 AI？聊天、录入与视频模型调用将停止，直到你主动重新登录。官方 CLI 凭据不会被删除。'))return;await action('disconnect',async()=>{loginRevision.current++;const login=await api<Login>('/qoder/login/disconnect',{method:'POST'});setStatus(prev=>prev?{...prev,login,verified_at:null,retained_auth:false,user_disconnected:true}:prev);setCatalog(undefined);setMessage('已退出本系统 AI');await refresh()})}
  async function discover(automatic=false){await action('models',async()=>{
    setMessage(automatic?'授权完成，正在拉取最新模型…':'正在拉取最新模型…')
    try{
@@ -76,24 +77,24 @@ export default function Qoder(){
  useEffect(()=>{
    // The worker clears its catalog on each new login. On return to this page,
    // also recover a completed authorization whose catalog was not yet fetched.
-   if(!busy&&status?.available&&status.model_discovery&&status.login?.state==='finished'&&catalog&&catalog.source!=='cli'&&!autoDiscovered.current){
+   if(!busy&&status?.available&&!status.user_disconnected&&status.model_discovery&&(status.retained_auth||status.login?.state==='finished')&&catalog&&catalog.source!=='cli'&&!autoDiscovered.current){
      autoDiscovered.current=true
      void discover(true)
    }
  },[busy,status?.available,status?.model_discovery,status?.login?.state,catalog])
  async function save(e:FormEvent){e.preventDefault();await action('save',async()=>{const r=await api<{model:string;video_model:string;effort:string;video_effort:string}>('/qoder/preferences',{method:'PUT',body:JSON.stringify({model:draft,video_model:videoDraft,effort,video_effort:videoEffort})});setSaved(r.model);setVideoSaved(r.video_model);setSavedEffort(r.effort);setSavedVideoEffort(r.video_effort);setEditing(false);setMessage('模型设置已保存')})}
- const disabled=Boolean(busy||waiting||!status?.available)
+ const disabled=Boolean(busy||waiting||!status?.available||status?.user_disconnected)
  return <div className="model-center">
   <div className="page-heading"><h1>AI 账号与模型</h1><p className="muted">统一授权与模型配置</p></div>
   <nav className="model-tabs" aria-label="模型管理功能">{([{id:'accounts',label:'账号授权'},{id:'models',label:'模型配置'}] as const).map(t=><button key={t.id} aria-pressed={tab===t.id} onClick={()=>{setTab(t.id);setMessage('');setError('')}}>{t.label}</button>)}</nav>
   {error&&<div className="model-feedback inline-error" role="alert">{error}</div>}{message&&<div className="model-feedback" role="status">{message}</div>}
   {tab==='accounts'&&<>
    <div className="model-account-grid">
-    <section className="panel provider-card"><div className="provider-head"><span className="provider-icon" style={{background:'var(--ink)',color:'var(--surface)'}}>Q</span><strong>Qoder CN</strong><span className={'provider-state '+(status?.verified_at?'is-verified':'')}>{connected}</span></div><dl><div><dt>用途</dt><dd>AI 教研与智能录入</dd></div><div><dt>授权方式</dt><dd>阿里云 / 官方浏览器授权</dd></div><div><dt>执行服务</dt><dd>{status?.detail??'正在检测'}</dd></div><div><dt>最近验证</dt><dd>{status?.verified_at?date(status.verified_at):'—'}</dd></div></dl>
+    <section className="panel provider-card"><div className="provider-head"><span className="provider-icon" style={{background:'var(--ink)',color:'var(--surface)'}}>Q</span><strong>Qoder CN</strong><span className={'provider-state '+(status?.verified_at?'is-verified':'')}>{connected}</span></div><dl><div><dt>用途</dt><dd>AI 教研与智能录入</dd></div><div><dt>授权方式</dt><dd>阿里云 / 官方浏览器授权</dd></div><div><dt>执行服务</dt><dd>{status?.detail??'正在检测'}</dd></div><div><dt>登录保留</dt><dd>常驻服务器，关闭网页不退出</dd></div><div><dt>最近验证</dt><dd>{status?.verified_at?date(status.verified_at):'—'}</dd></div></dl>
      {status?.available&&!status.model_discovery&&<p className="muted">独立执行服务需要升级，以支持动态模型探测。</p>}
      {status&&!status.available&&<p className="inline-error" role="status">Qoder CN 暂不可用：{status.detail}。点击获取授权链接可查看处理提示。</p>}{status?.available&&!status.auth_ui&&<p className="inline-error" role="status">服务器执行服务版本过旧，不支持网页授权。</p>}{status?.login&&status.login.state!=='idle'&&<p role="status" className={['failed','expired'].includes(status.login.state)?'inline-error':'muted'}>{status.login.detail}</p>}
      {legacyWorker&&!authUrl&&<p className="muted">当前独立授权服务版本过旧，尚未支持 qoder.cn 新域名，请更新服务器上的 Qoder 服务后重新获取链接。</p>}{waiting&&<div className="auth-inline-area">{authUrl?<div className="auth-inline-row"><input ref={authInput} className="auth-inline-field" aria-label="授权链接" value={authUrl} readOnly spellCheck={false} onFocus={e=>e.currentTarget.select()}/><button type="button" className="primary auth-copy-button" aria-label="复制授权链接" onClick={()=>void copyAuthorization()}>复制</button></div>:<p className="muted" role="status">正在获取授权链接…</p>}<button type="button" className="auth-cancel-link" disabled={Boolean(busy)} onClick={()=>void authorize('cancel')}>取消本次授权</button></div>}
-     <div className="provider-actions"><button className="primary" disabled={Boolean(busy||waiting)} onClick={()=>void authorize('start')}>{busy==='start'?'正在生成…':status?.verified_at?'重新获取授权链接':'获取授权链接'}</button><button disabled={Boolean(busy)} onClick={()=>void refresh()}>刷新状态</button>{status?.login?.state==='finished'&&<button disabled={disabled||!status.model_discovery} onClick={()=>void discover()}>{busy==='models'?'正在拉取…':'刷新模型'}</button>}</div>{status?.login?.state==='finished'&&catalog?.source==='cli'&&<p className="muted">已获取 {options.length} 个实际模型。<button type="button" onClick={()=>setTab('models')}>选择模型</button></p>}
+     <div className="provider-actions"><button className="primary" disabled={Boolean(busy||waiting)} onClick={()=>void authorize('start')}>{busy==='start'?'正在生成…':status?.retained_auth?'重新授权':'获取授权链接'}</button><button disabled={Boolean(busy)} onClick={()=>void refresh()}>刷新状态</button>{status?.retained_auth&&Number(status.worker_version??0)>=11&&<button type="button" disabled={Boolean(busy||waiting||status.busy)} onClick={()=>void disconnect()}>退出本系统 AI</button>}{!status?.user_disconnected&&(status?.retained_auth||status?.login?.state==='finished')&&<button disabled={disabled||!status.model_discovery} onClick={()=>void discover()}>{busy==='models'?'正在拉取…':'刷新模型'}</button>}</div>{status?.login?.state==='finished'&&catalog?.source==='cli'&&<p className="muted">已获取 {options.length} 个实际模型。<button type="button" onClick={()=>setTab('models')}>选择模型</button></p>}
     </section>
 
    </div>

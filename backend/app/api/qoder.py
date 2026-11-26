@@ -63,6 +63,10 @@ def login_start():
 def login_cancel():
     return request("POST", "/login/cancel", {})
 
+@router.post("/login/disconnect", dependencies=[Depends(require_origin)])
+def login_disconnect():
+    return request("POST", "/login/disconnect", {})
+
 MODEL_KEY = "ai.qoder.model"
 VIDEO_MODEL_KEY = "ai.qoder.video_model"
 EFFORT_KEY = "ai.qoder.effort"
@@ -98,7 +102,7 @@ def refresh_if_due(now=None):
         return "busy"
     try:
         status = request("GET", "/status")
-        if not status.get("available") or not status.get("model_discovery"):
+        if status.get("user_disconnected") or not status.get("available") or not status.get("model_discovery"):
             return "unavailable"
         if status.get("busy") or (status.get("login") or {}).get("state") in ("starting", "waiting"):
             return "busy"

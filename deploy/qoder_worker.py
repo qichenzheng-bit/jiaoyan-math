@@ -60,6 +60,9 @@ catalog = None
 catalog_at = None
 catalog_efforts = {}
 catalog_capability_source = "unavailable"
+AUTH_STATE_PATH = Path.home() / ".jiaoyan-auth-state.json"
+retained_auth = False
+user_disconnected = False
 SDK_PYTHON = Path("/opt/jiaoyan-qoder/sdk-venv/bin/python")
 SUPPORTED_EFFORTS = ('none','off','disabled','low','medium','high','xhigh','max')
 
@@ -173,6 +176,61 @@ def sdk_catalog(exe):
     except (OSError,ValueError):
         return None,"sdk_failed"
 
+def save_auth_state():
+    """Only non-secret metadata. Credentials remain exclusively in the official CLI home."""
+    fd,name=tempfile.mkstemp(dir=AUTH_STATE_PATH.parent,prefix=".jiaoyan-auth-")
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as handle:
+            json.dump({"retained":retained_auth,"disconnected":user_disconnected,
+                       "verified_at":verified_at,"catalog":catalog_efforts if catalog is not None else None,
+                       "catalog_at":catalog_at,"capability_source":catalog_capability_source},handle)
+            handle.flush();os.fsync(handle.fileno())
+        os.replace(name,AUTH_STATE_PATH)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+def persist_auth_metadata():
+    try:save_auth_state()
+    except OSError:pass
+
+def restore_auth_state():
+    global retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source
+    try:
+        if AUTH_STATE_PATH.stat().st_size>524288:return
+        data=json.loads(AUTH_STATE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data,dict):return
+    except (OSError,ValueError):return
+    user_disconnected=data.get("disconnected") is True
+    retained_auth=data.get("retained") is True and not user_disconnected
+    if user_disconnected:
+        login.update(state="disconnected",url="",detail="已主动退出本系统 AI")
+        return
+    if retained_auth:
+        last=data.get("verified_at")
+        verified_at=last if type(last) is int and last>0 else None
+        login.update(state="finished",url="",detail="已保留上次授权，继续使用官方 CLI 凭据")
+    old=data.get("catalog")
+    updated=data.get("catalog_at")
+    if isinstance(old,dict) and type(updated) is int and 0<=time.time()-updated<86400:
+        catalog_efforts={k:[e for e in SUPPORTED_EFFORTS if e in v] for k,v in list(old.items())[:200] if isinstance(k,str) and MODEL_ID.fullmatch(k) and isinstance(v,list)}
+        catalog=list(catalog_efforts);catalog_at=updated
+        catalog_capability_source=data.get("capability_source") if data.get("capability_source") in ("sdk","cli_metadata") else "unavailable"
+
+def disconnect():
+    global retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source
+    with lock:
+        if chat_active or login_process is not None:return 409,{"detail":"请先完成当前任务或取消授权"}
+        old=(retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source)
+        retained_auth=False;user_disconnected=True;verified_at=None
+        catalog,catalog_at,catalog_efforts=None,None,{}
+        catalog_capability_source="unavailable"
+        try:save_auth_state()
+        except OSError:
+            retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source=old
+            return 503,{"detail":"无法保存退出状态，未断开"}
+        login.update(state="disconnected",url="",detail="已退出本系统 AI；官方 CLI 凭据未删除")
+        return 200,dict(login)
+
 def model_catalog():
     with lock:
         names = list(FALLBACK_MODELS if catalog is None else catalog)
@@ -181,8 +239,9 @@ def model_catalog():
                 "updated_at": catalog_at,"capability_source":catalog_capability_source}
 
 def refresh_models():
-    global catalog, catalog_at, catalog_efforts, catalog_capability_source
+    global catalog, catalog_at, catalog_efforts, catalog_capability_source, retained_auth
     with lock:
+        if user_disconnected:return 409,{"detail":"已退出本系统 AI，请主动登录"}
         if login_process is not None or chat_active:
             return 409, {"detail": "请先完成当前授权或对话"}
     exe = executable()
@@ -194,6 +253,9 @@ def refresh_models():
             with lock:
                 catalog, catalog_at, catalog_efforts = list(metadata),int(time.time()),metadata
                 catalog_capability_source=capability_source
+                retained_auth=True
+                if login["state"] not in ("starting","waiting"):login.update(state="finished",url="",detail="官方 SDK 模型清单已获取，已保留授权")
+                persist_auth_metadata()
             return 200,model_catalog()
         with tempfile.TemporaryDirectory(prefix="qoder-models-") as work:
             proc = subprocess.Popen([exe, "--list-models"], cwd=work, stdin=subprocess.DEVNULL,
@@ -215,6 +277,7 @@ def refresh_models():
         with lock:
             catalog, catalog_at, catalog_efforts = names, int(time.time()), metadata
             catalog_capability_source="cli_metadata" if any(metadata.values()) else capability_source
+            persist_auth_metadata()
         return 200, model_catalog()
     except OSError:
         return 503, {"detail": "无法启动模型探测"}
@@ -232,7 +295,7 @@ def stop_process(proc):
         pass
 
 def login_worker(proc):
-    global login_process
+    global login_process, retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source
     deadline = time.monotonic() + 300
     link_deadline = time.monotonic() + 45
     buffer = ""
@@ -275,6 +338,11 @@ def login_worker(proc):
             if login_process is proc:
                 if login["state"] != "cancelled":
                     login.update(state=outcome, url="", detail=detail)
+                    if outcome=="finished":
+                        retained_auth=True;user_disconnected=False;verified_at=None
+                        catalog,catalog_at,catalog_efforts=None,None,{}
+                        catalog_capability_source="unavailable"
+                        persist_auth_metadata()
                 login_process = None
 
 def start_login():
@@ -297,9 +365,6 @@ def start_login():
         except OSError:
             return 503, {"detail": "无法启动官方登录命令"}
         login_process = proc
-        verified_at = None
-        catalog, catalog_at, catalog_efforts = None, None, {}
-        catalog_capability_source = "unavailable"
         login.update(state="starting", url="", detail="正在获取官方授权链接")
         threading.Thread(target=login_worker, args=(proc,), daemon=True).start()
         return 200, dict(login)
@@ -315,11 +380,12 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 10, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 11, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
-    global verified_at
+    global verified_at,retained_auth
     with lock:
+        if user_disconnected:return 409,{"detail":"已退出本系统 AI，请主动登录"}
         if login_process is not None or chat_active:
             return 409, {"detail": "请先完成当前授权或对话"}
     exe = executable()
@@ -338,14 +404,12 @@ def invoke(model, prompt):
                 proc.communicate()
                 return 504, {"detail": "模型调用超时，请检查账号授权及网络"}
             if proc.returncode != 0:
-                with lock:
-                    verified_at = None
                 return 503, {"detail": "CLI 调用失败，请检查登录状态及网络"}
             answer = out.decode("utf-8", errors="replace").strip()
             if not answer:
                 return 503, {"detail": "CLI 未返回正文"}
             with lock:
-                verified_at = int(time.time())
+                verified_at = int(time.time());retained_auth=True;persist_auth_metadata()
             return 200, {"model": model, "answer": answer[:30000]}
         except OSError:
             return 503, {"detail": "CLI 无法启动"}
@@ -434,7 +498,7 @@ def prune_snapshots():
 def chat_run(job, exe, model, prompt):
     video = job.get("video", False)
     output_limit = 300000 if video else 48000
-    global chat_active
+    global chat_active,verified_at,retained_auth
     proc = None
     failure = False
     try:
@@ -504,6 +568,9 @@ def chat_run(job, exe, model, prompt):
             if proc.stdout: proc.stdout.close()
         with lock:
             state="stopped" if job["cancel"] else "failed" if failure or not job["answer"] else "done"
+            if state=="done":
+                verified_at=int(time.time());retained_auth=True
+                persist_auth_metadata()
             job.update(state=state,detail={"stopped":"已停止生成","failed":"模型调用失败或超时，请检查授权、额度及 CLI 事件格式","done":""}[state],proc=None)
             try:
                 save_snapshot(job)
@@ -530,6 +597,7 @@ def chat_start(data, video=False):
         if ident in chat_jobs: return 200,chat_snapshot(chat_jobs[ident])
         cached=load_snapshot(ident)
         if cached: return 200,cached
+        if user_disconnected:return 409,{"detail":"已退出本系统 AI，请主动登录"}
         if chat_active or login_process is not None: return 409,{"detail":"当前已有模型任务或授权，请先完成"}
         # Keep a bounded number of completed jobs for reconnecting clients.
         for old in list(chat_jobs)[:-31]:
@@ -590,6 +658,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(*start_login())
         if self.path == "/login/cancel":
             return self.reply(200, cancel_login())
+        if self.path == "/login/disconnect":
+            return self.reply(*disconnect())
         if self.path != "/test":
             return self.reply(404, {"detail": "Not found"})
         try:
@@ -613,6 +683,7 @@ class Server(socketserver.UnixStreamServer):
 if __name__ == "__main__":
     if os.geteuid() == 0:
         raise SystemExit("Do not run as root")
+    restore_auth_state()
     if os.path.exists(SOCKET):
         os.unlink(SOCKET)
     with Server(SOCKET, Handler) as server:

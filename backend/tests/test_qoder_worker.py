@@ -75,7 +75,10 @@ def test_official_model_info_thinking_config():
     assert result["Auto"]==[] and "Disabled" not in result
 
 
-def test_sdk_catalog_is_preferred(monkeypatch):
+def test_sdk_catalog_is_preferred(monkeypatch,tmp_path):
+    monkeypatch.setattr(worker,"AUTH_STATE_PATH",tmp_path/"auth.json")
+    monkeypatch.setattr(worker,"retained_auth",False)
+    monkeypatch.setattr(worker,"login",dict(worker.login))
     monkeypatch.setattr(worker,"executable",lambda:"/usr/bin/qoderclicn")
     monkeypatch.setattr(worker,"sdk_catalog",lambda exe:({"Auto":[],"Qwen4-Max":["high","max"]},"sdk"))
     for key in ("catalog","catalog_at","catalog_efforts","catalog_capability_source"):
@@ -100,3 +103,26 @@ def test_sdk_display_names_match_cli_preferences():
       {"value":"unknown","thinking_config":{"enabled":{"efforts":{"high":{}}}}}
     ]
     assert worker.parse_sdk_catalog({"models":rows})=={"Qwen4-Max":["disabled","low","high","xhigh"],"Auto":[],"DeepSeek-V4-Pro":["high","max"]}
+
+
+def test_retained_auth_survives_restart_and_explicit_disconnect(monkeypatch,tmp_path):
+    import json
+    monkeypatch.setattr(worker,"AUTH_STATE_PATH",tmp_path/"auth.json")
+    for key in ("retained_auth","user_disconnected","verified_at","catalog","catalog_at","catalog_efforts","catalog_capability_source"):
+        monkeypatch.setattr(worker,key,getattr(worker,key))
+    monkeypatch.setattr(worker,"login",dict(worker.login))
+    monkeypatch.setattr(worker,"executable",lambda:"/usr/bin/qoderclicn")
+    monkeypatch.setattr(worker,"retained_auth",True)
+    monkeypatch.setattr(worker,"verified_at",int(worker.time.time()))
+    worker.save_auth_state()
+    worker.retained_auth=False
+    worker.verified_at=None
+    worker.restore_auth_state()
+    assert worker.status()["retained_auth"] and worker.status()["verified_at"]
+    assert worker.disconnect()[0]==200
+    worker.user_disconnected=False
+    worker.restore_auth_state()
+    assert worker.status()["user_disconnected"] and not worker.status()["chat_available"]
+    assert worker.refresh_models()[0]==409
+    assert worker.chat_start({"id":"12345678-1234-1234-1234-123456789abc","model":"Auto","prompt":"test"})[0]==409
+    assert set(json.loads(worker.AUTH_STATE_PATH.read_text()))=={"retained","disconnected","verified_at","catalog","catalog_at","capability_source"}
