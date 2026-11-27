@@ -2,6 +2,8 @@ import {useEffect,useRef,useState} from 'react'
 import {useLocation,useSearchParams} from 'react-router-dom'
 import {api} from '../auth'
 import {Icon} from '../components/Icon'
+import FinishedMediaPreview from '../components/FinishedMediaPreview'
+import {confirmAction} from '../components/WorkspaceConfirm'
 import {MathText} from '../components/MathText'
 import {WorkspaceLink as Link,useWorkspaceBack} from '../components/WorkspaceNavigation'
 import './TeachingWorks.css'
@@ -9,6 +11,7 @@ import './TeachingWorks.css'
 type Work={id:string;title:string;kind:string;subject:string;origin_scope:string;origin_id:string;current_version:number|null;created_at:number;updated_at:number}
 type Asset={role:string;filename:string;pages:number;size_bytes:number;media_type:string}
 type Version={number:number;created_at:number;files:Asset[]}
+type EditContext={origin_scope:string;origin_id:string;kind:string;version:number;edition:{chapter?:string|null;stem?:boolean;answerOnly?:boolean}}
 type Detail=Work&{versions:Version[];pending_cover:{filename:string;created_at:number}|null;video?:{project_id:string;cover_file_id:string|null;resource_id:string}}
 type Question={uid:string;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string}
 type Related={items:Question[];total:number;question_count:number;knowledge_points:string[];knowledge_tags:string[];source_count:number;partial_pages:boolean}
@@ -28,9 +31,10 @@ export default function TeachingWorks(){
  const [rows,setRows]=useState<Work[]>([]),[total,setTotal]=useState(0),[subjects,setSubjects]=useState<string[]>([]),[busy,setBusy]=useState(true),[error,setError]=useState(''),[reload,setReload]=useState(0)
  const [detail,setDetail]=useState<Detail>(),[detailError,setDetailError]=useState(''),[version,setVersion]=useState<number>(),[tab,setTab]=useState('files')
  const [related,setRelated]=useState<Related>(),[relatedError,setRelatedError]=useState(''),[questionPage,setQuestionPage]=useState(0),[questionQuery,setQuestionQuery]=useState('')
- const [menu,setMenu]=useState(''),[preview,setPreview]=useState<{url:string;name:string;video?:boolean}>()
+ const [menu,setMenu]=useState(''),[preview,setPreview]=useState<{url:string;name:string;video?:boolean;pages?:number;pageUrl?:string}>()
+ const [actionBusy,setActionBusy]=useState(false),[actionMessage,setActionMessage]=useState(''),[edit,setEdit]=useState<EditContext>()
  const scroll=useRef(0),returnScroll=useRef(false)
- const activeVersion=detail?.versions.find(v=>v.number===version)??detail?.versions[0]
+ const activeVersion=(tab==='related'?detail?.versions.find(v=>v.number===version):detail?.versions.find(v=>v.number===detail.current_version))??detail?.versions[0]
  const detailReady=detail?.id===id
  useEffect(()=>{const c=new AbortController();api<string[]>('/teaching-works/subjects',{signal:c.signal}).then(v=>{if(!c.signal.aborted)setSubjects(v)}).catch(()=>{});return()=>c.abort()},[reload])
  useEffect(()=>{
@@ -47,7 +51,7 @@ export default function TeachingWorks(){
   returnScroll.current=false;requestAnimationFrame(()=>document.querySelector('.main-content')?.scrollTo(0,scroll.current))
  },[id,busy])
  useEffect(()=>{
-  setDetail(undefined);setDetailError('');setVersion(undefined);setTab('files');setPreview(undefined);setRelated(undefined);setMenu('')
+  setDetail(undefined);setDetailError('');setVersion(undefined);setTab('files');setPreview(undefined);setRelated(undefined);setMenu('');setEdit(undefined);setActionMessage('')
   if(!id)return
   const c=new AbortController()
   api<Detail>('/teaching-works/'+encodeURIComponent(id),{signal:c.signal}).then(v=>{if(!c.signal.aborted){setDetail(v);setVersion(v.current_version??undefined)}}).catch(e=>{if(!c.signal.aborted)setDetailError(errorText(e))})
@@ -66,23 +70,28 @@ export default function TeachingWorks(){
  useWorkspaceBack(()=>{if(preview){setPreview(undefined);return true}if(id){closeWork();return true}return false},20)
  function filter(fn:()=>void){fn();setPage(0);setMenu('')}
  function clear(){filter(()=>{setQ('');setKind('');setSubject('');setScope('');setSort('recent');setFrom('');setTo('')})}
- function openFile(f:Asset,v:Version){if(detail)setPreview({url:fileUrl(detail.id,v.number,f.role),name:f.filename})}
+ function openFile(f:Asset,v:Version){if(detail){const url=fileUrl(detail.id,v.number,f.role);setPreview({url,name:f.filename,pages:f.pages,pageUrl:url+'/pages'})}}
+ async function restore(v:Version){if(!detail||!detail.current_version||actionBusy)return;if(!await confirmAction('将 V'+v.number+' 恢复为新的正式版本？原制作草稿与已发布内容不变。','恢复历史版本','确认恢复'))return;setActionBusy(true);setActionMessage('');try{await api('/teaching-works/'+encodeURIComponent(detail.id)+'/versions/'+v.number+'/restore',{method:'POST',body:JSON.stringify({expected_version:detail.current_version})});setReload(n=>n+1)}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
+ async function openEdit(){if(!detail||actionBusy)return;setActionBusy(true);setActionMessage('');try{setEdit(await api<EditContext>('/teaching-works/'+encodeURIComponent(detail.id)+'/edit-context'))}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
+ const editQuery=edit?new URLSearchParams({from_work:id,...(edit.edition.chapter?{chapter:edit.edition.chapter}:{}),...(edit.edition.stem?{stem:'1'}:{}),...(edit.edition.answerOnly?{answer:'1'}:{})}).toString():''
  if(id)return <div className="finished-works">
   <header className="finished-heading"><button type="button" className="finished-back" onClick={()=>preview?setPreview(undefined):closeWork()}><Icon name="back" size={18}/> {preview?'返回详情':'返回作品列表'}</button><button type="button" onClick={()=>setReload(x=>x+1)}>刷新</button></header>
   {detailError?<p className="inline-error" role="alert">{detailError}</p>:!detailReady||!detail?<p className="muted">正在读取作品…</p>:<>
    <h1><MathText compact content={detail.title}/></h1>
    <p className="muted">{label(detail.kind)} · {detail.kind==='video'?'引擎已归档':detail.current_version?'V'+detail.current_version:'待匹配正文'} · {day(detail.updated_at)}</p>
-   {preview?<section className="finished-preview panel"><div className="finished-actions"><MathText compact content={preview.name}/><a className="button-link" href={preview.url} target="_blank" rel="noopener noreferrer">新窗口打开</a><button onClick={()=>setPreview(undefined)}>关闭预览</button></div>{preview.video?<video controls playsInline preload="metadata" src={preview.url}/>:<iframe title="成品 PDF 预览" src={preview.url}/>}</section>:<>
+   {actionMessage&&<p className="inline-error" role="alert">{actionMessage}</p>}
+   {preview?<FinishedMediaPreview key={preview.url} file={preview} onClose={()=>setPreview(undefined)}/>:<>
     {detail.video?<section className="panel finished-video">
       {detail.video.cover_file_id&&<img src={'/api/files/'+encodeURIComponent(detail.video.cover_file_id)+'/preview'} alt="视频封面" loading="lazy"/>}
       <div className="finished-actions"><button className="primary" onClick={()=>setPreview({url:'/api/video/projects/'+encodeURIComponent(detail.video!.project_id)+'/media',name:detail.title,video:true})}>播放视频</button><a className="button-link" href={'/api/video/projects/'+encodeURIComponent(detail.video.project_id)+'/media?download=true'}>下载视频</a><Link className="button-link" to={'/videos?project='+encodeURIComponent(detail.video.project_id)}>原视频项目</Link></div><p className="muted">视频文件及成片版本由原视频引擎管理。</p>
     </section>:<>
+     <div className="finished-actions"><button className="primary" disabled={actionBusy||!detail.current_version} onClick={()=>void openEdit()}>修改作品</button></div>{edit&&<section className="panel finished-info"><h2>返回原工作台</h2><p className="muted">正式成品不变。可在原排版工作台主动应用 V{edit.version} 的配置，不覆盖当前草稿内容。</p><div className="finished-actions"><Link className="button-link" to={(edit.origin_scope==='source'?'/source-print/':'/print/')+encodeURIComponent(edit.origin_id)+'?'+editQuery}>修改排版</Link>{edit.origin_scope==='doc'&&['paper','handout','textbook'].includes(edit.kind)&&<Link className="button-link" to={(edit.kind==='paper'?'/papers':edit.kind==='handout'?'/handouts':'/textbooks')+'?doc='+encodeURIComponent(edit.origin_id)}>修改内容</Link>}<button onClick={()=>setEdit(undefined)}>取消</button></div></section>}
      <div className="finished-detail-tabs" role="group" aria-label="作品详情分类">{[['files','作品文件'],['info','基本信息'],['related','关联信息'],['versions','历史版本']].map(([v,n])=><button key={v} aria-pressed={tab===v} onClick={()=>setTab(v)}>{n}</button>)}</div>
      {tab==='files'&&<section className="panel finished-files"><h2>当前成品</h2>{activeVersion&&activeVersion.files.map(f=><article className="finished-file" key={f.role}><Icon name="works" size={23}/><div className="finished-name"><strong><MathText compact content={f.filename}/></strong><small>{f.role==='cover'?'印刷书衣':'正文'} · {f.pages} 页 · {size(f.size_bytes)} · V{activeVersion.number}</small></div><div className="finished-actions"><button onClick={()=>openFile(f,activeVersion)}>预览</button><a className="button-link" href={fileUrl(detail.id,activeVersion.number,f.role)+'?download=true'}>下载</a></div></article>)}{!activeVersion&&<p className="muted">尚无匹配的正文成品。</p>}
-      {detail.pending_cover&&<article className="finished-file"><Icon name="book" size={23}/><div className="finished-name"><strong><MathText compact content={detail.pending_cover.filename}/></strong><small>待匹配正文的书衣 · {day(detail.pending_cover.created_at)}</small></div><div className="finished-actions"><button onClick={()=>setPreview({url:pendingUrl(detail.id),name:detail.pending_cover!.filename})}>预览</button><a className="button-link" href={pendingUrl(detail.id)+'?download=true'}>下载</a></div></article>}
+      {detail.pending_cover&&<article className="finished-file"><Icon name="book" size={23}/><div className="finished-name"><strong><MathText compact content={detail.pending_cover.filename}/></strong><small>待匹配正文的书衣 · {day(detail.pending_cover.created_at)}</small></div><div className="finished-actions"><button onClick={()=>setPreview({url:pendingUrl(detail.id),name:detail.pending_cover!.filename,pages:1,pageUrl:'/api/teaching-works/'+encodeURIComponent(detail.id)+'/pending-cover/pages'})}>预览</button><a className="button-link" href={pendingUrl(detail.id)+'?download=true'}>下载</a></div></article>}
      </section>}
      {tab==='info'&&<section className="panel finished-info"><h2>基本信息</h2><dl>{[['作品名称',detail.title],['类型',label(detail.kind)],['科目',detail.subject||'未记录'],['来源',detail.origin_scope==='source'?'来源库':'教学制作'],['创建时间',day(detail.created_at)],['最近更新',day(detail.updated_at)]].map(([k,v])=><div key={k}><dt>{k}</dt><dd><MathText compact content={v}/></dd></div>)}</dl><Link className="button-link" to={(detail.origin_scope==='source'?'/source-print/':'/print/')+encodeURIComponent(detail.origin_id)}>打开原排版工作台</Link></section>}
-     {tab==='versions'&&<section className="panel finished-files"><h2>历史版本</h2><p className="muted">仅保留最近两个正式版本。</p>{detail.versions.map(v=><article key={v.number} className="finished-version"><div className="finished-actions"><strong>V{v.number}{v.number===detail.current_version?' · 当前版本':''}</strong><small>{day(v.created_at)}</small></div>{v.files.map(f=><div className="finished-file" key={f.role}><div className="finished-name"><MathText compact content={f.filename}/><small>{f.pages} 页 · {size(f.size_bytes)}</small></div><button onClick={()=>openFile(f,v)}>预览</button><a className="button-link" href={fileUrl(detail.id,v.number,f.role)+'?download=true'}>下载</a></div>)}<button onClick={()=>{setVersion(v.number);setTab('related')}}>查看版本关联信息</button></article>)}</section>}
+     {tab==='versions'&&<section className="panel finished-files"><h2>历史版本</h2><p className="muted">仅保留最近两个正式版本。</p>{detail.versions.map(v=><article key={v.number} className="finished-version"><div className="finished-actions"><strong>V{v.number}{v.number===detail.current_version?' · 当前版本':''}</strong><small>{day(v.created_at)}</small></div>{v.files.map(f=><div className="finished-file" key={f.role}><div className="finished-name"><MathText compact content={f.filename}/><small>{f.pages} 页 · {size(f.size_bytes)}</small></div><button onClick={()=>openFile(f,v)}>预览</button><a className="button-link" href={fileUrl(detail.id,v.number,f.role)+'?download=true'}>下载</a></div>)}<div className="finished-actions"><button onClick={()=>{setVersion(v.number);setTab('related')}}>查看版本关联信息</button>{v.number!==detail.current_version&&<button disabled={actionBusy} onClick={()=>void restore(v)}>恢复版本</button>}</div></article>)}</section>}
      {tab==='related'&&<section className="panel finished-related"><h2>关联信息 {activeVersion&&'· V'+activeVersion.number}</h2>{!activeVersion?<p className="muted">暂无正式正文版本。</p>:relatedError?<p role="alert">{relatedError}</p>:!related?<p className="muted">正在读取版本快照…</p>:<>
        <p className="muted">{related.question_count} 道题 · {related.source_count} 个直接来源</p>{related.partial_pages&&<p className="muted">此为选页文件，关联题目按排版内容快照统计，不代表实际选中页面内的题目。</p>}
        <details><summary>知识点（{related.knowledge_points.length}）</summary><div className="finished-tags">{related.knowledge_points.map(t=><span key={t}><MathText compact content={t}/></span>)}</div></details>

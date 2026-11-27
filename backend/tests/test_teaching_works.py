@@ -77,3 +77,32 @@ def test_cover_first_and_mismatch_do_not_replace_body(tmp_path, monkeypatch):
         assert teaching_works.retire_files(db) == 2
         assert all(f.purged_at is not None for f in retired)
         assert all(not (tmp_path/f.storage_key).exists() for f in retired)
+
+
+def test_restore_reuses_bytes_and_does_not_change_original(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "settings", replace(storage.settings, storage_root=str(tmp_path)))
+    engine = create_engine("sqlite://")
+    for model in (User, StoredFile, FileReference, AuditLog, TeachingWork, TeachingWorkVersion,
+                  TeachingWorkAsset, TeachingWorkPendingCover):
+        model.__table__.create(engine)
+    with Session(engine) as db:
+        db.add(User(id=1,username="test",password_hash="test",created_at=1))
+        db.commit()
+        for text in ("old","new"):
+            path=tmp_path/(text+".pdf")
+            path.write_bytes(("%PDF-1.7\n"+text).encode())
+            wid,_=teaching_works.register_pdf(db,user_id=1,scope="doc",identity="doc",
+                filename="work.pdf",path=path,payload={"doc":{"title":"讲义","blocks":[{"content":text}]},"layout":{}},pages=1)
+            db.commit()
+        original=db.get(TeachingWorkAsset,(wid,1,"body")).file_id
+        assert teaching_works.restore_version(db,user_id=1,work_id=wid,number=1,expected=2)==(wid,3)
+        db.commit()
+        assert db.get(TeachingWorkAsset,(wid,3,"body")).file_id==original
+        assert db.get(TeachingWorkVersion,(wid,3)).snapshot["restored_from"]==1
+        assert db.get(TeachingWorkVersion,(wid,1)) is None
+        assert len(list(db.scalars(select(StoredFile))))==2
+        import pytest
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as err:
+            teaching_works.restore_version(db,user_id=1,work_id=wid,number=2,expected=2)
+        assert err.value.status_code==409

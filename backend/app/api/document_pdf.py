@@ -326,6 +326,8 @@ def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
     images = resolve_images(db, {"blocks":[]} if body.wrap else data, body.layout)
     payload = {"doc": data, "layout": body.layout.model_dump(), "stem": body.stem,
                "answerOnly": body.answerOnly, "source": scope == "source", "page_ranges":body.page_ranges, "preview_pages":body.preview_pages,"wrap":body.wrap.model_dump() if body.wrap else None}
+    payload["overrides"] = {key: value.model_dump(exclude_none=True) for key, value in body.overrides.items()}
+    payload["snapshot_image_ids"] = [key.split("/")[-2] for key in images]
     payload["chapter_uid"] = body.chapter_uid
     payload["selected_uids"] = body.selected_uids
     payload["work_context"] = teaching_works.context(payload)

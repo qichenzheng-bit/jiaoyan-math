@@ -13,6 +13,7 @@ from app.core.security import now, audit
 from app.models import (User, StoredFile, FileReference, TeachingWork,
                         TeachingWorkVersion, TeachingWorkAsset, TeachingWorkPendingCover)
 from app.services import storage
+from app.services.inline_images import image_ids
 
 OWNER = "teaching_work_version"
 PENDING = "teaching_work_pending_cover"
@@ -102,11 +103,58 @@ def append_version(db, work, fingerprint, snapshot, assets):
         db.add(TeachingWorkAsset(work_id=work.id, version=number, role=role,
                                  file_id=fid, filename=filename, pages=pages))
         storage.link_file(db, fid, OWNER, version_owner(work.id, number))
+    protect_snapshot_images(db, work.id, number, snapshot)
     work.current_version = number
     work.updated_at = now()
     db.flush()
     trim_versions(db, work)
     return work.id, number
+
+
+def protect_snapshot_images(db, work_id, number, snapshot):
+    ids = set(snapshot.get("image_ids", []))
+    layout = snapshot.get("layout", {})
+    ids.update(fid for fid in (layout.get("coverFileId"), layout.get("backCoverFileId")) if fid)
+    for block in snapshot.get("doc", {}).get("blocks", []):
+        if block.get("kind") == "image" and block.get("file_id"):
+            ids.add(block["file_id"])
+        ids.update(image_ids(block))
+        ids.update(image_ids(block.get("snapshot") or {}))
+    # Existing archived originals can be protected without unarchiving them.
+    # Purged legacy originals cannot be recreated; keep the already rendered PDF usable.
+    for fid in sorted(ids):
+        item = db.scalar(select(StoredFile).where(StoredFile.id == fid).with_for_update())
+        if item and item.purged_at is None and item.media_type in storage.IMAGE_TYPES:
+            key = (fid, OWNER, version_owner(work_id, number))
+            if db.get(FileReference, key) is None:
+                db.add(FileReference(file_id=fid, owner_type=OWNER, owner_id=key[2]))
+
+
+def restore_version(db, *, user_id, work_id, number, expected):
+    from fastapi import HTTPException
+    if not db.scalar(select(User.id).where(User.id == user_id).with_for_update()):
+        raise HTTPException(404, "用户不存在")
+    work = db.scalar(select(TeachingWork).where(
+        TeachingWork.id == work_id, TeachingWork.user_id == user_id).with_for_update())
+    if not work:
+        raise HTTPException(404, "作品不存在")
+    if work.current_version != expected:
+        raise HTTPException(409, "作品版本已经变化，请刷新后重试")
+    old = db.get(TeachingWorkVersion, (work.id, number))
+    if not old:
+        raise HTTPException(404, "历史版本已清理")
+    if number == expected:
+        return work.id, expected
+    assets = list(db.scalars(select(TeachingWorkAsset).where(
+        TeachingWorkAsset.work_id == work.id, TeachingWorkAsset.version == number)))
+    if not any(a.role == "body" for a in assets):
+        raise HTTPException(409, "历史正文缺失")
+    for a in assets:
+        storage.file_path(db.get(StoredFile, a.file_id))
+    result = append_version(db, work, old.fingerprint, {**old.snapshot, "restored_from": number},
+                            [asset_tuple(a) for a in assets])
+    audit(db, "teaching_work.restore", user_id)
+    return result
 
 
 def asset_tuple(asset):
@@ -128,7 +176,8 @@ def register_pdf(db: Session, *, user_id: int, scope: str, identity: str,
     variant, fingerprint = ctx["variant"], ctx["fingerprint"]
     edition = ctx["edition"]
     snapshot = {"doc": doc, "layout": payload["layout"], "edition": edition,
-                "stem": bool(payload.get("stem")), "answerOnly": bool(payload.get("answerOnly"))}
+                "stem": bool(payload.get("stem")), "answerOnly": bool(payload.get("answerOnly")),
+                "overrides": payload.get("overrides", {}), "image_ids": payload.get("snapshot_image_ids", [])}
     work = db.scalar(select(TeachingWork).where(
         TeachingWork.user_id == user_id, TeachingWork.origin_scope == scope,
         TeachingWork.origin_id == identity, TeachingWork.variant == variant

@@ -2,15 +2,17 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, literal, cast, Integer
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.security import current_user
+from app.core.security import current_user, require_origin
 from app.models import (User, TeachingWork, TeachingWorkVersion, TeachingWorkAsset,
-                        TeachingWorkPendingCover, StoredFile, StudioItem, VideoProject)
-from app.services import storage
+                        TeachingWorkPendingCover, StoredFile, StudioItem, VideoProject, TeachingDocument, TeachingResource)
+from app.services import storage, teaching_works
+from app.services.finished_pdf_preview import render_page
 
 router = APIRouter(prefix="/teaching-works", tags=["teaching-works"], dependencies=[Depends(current_user)])
 FIELDS = ("id", "title", "kind", "subject", "origin_scope", "origin_id",
@@ -190,3 +192,60 @@ def read_file(ident: str, number: int, role: str, download: bool = False,
         raise HTTPException(404, "成品文件不存在")
     item = db.get(StoredFile, asset.file_id)
     return file_response(item, asset.filename, download)
+
+
+class RestoreRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+
+
+@router.post("/{ident}/versions/{number}/restore", dependencies=[Depends(require_origin)])
+def restore(ident: str, number: int, body: RestoreRequest, db: Session = Depends(get_db),
+            user: User = Depends(current_user)):
+    wid, version = teaching_works.restore_version(db, user_id=user.id, work_id=ident,
+                                                   number=number, expected=body.expected_version)
+    db.commit()
+    return {"id":wid, "current_version":version}
+
+
+@router.get("/{ident}/edit-context")
+def edit_context(ident: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    work = owned(db, user, ident)
+    origin = db.get(TeachingDocument if work.origin_scope == "doc" else TeachingResource, work.origin_id)
+    if not origin or origin.archived:
+        raise HTTPException(409, "原制作项目已不存在或已归档，成品仍可使用")
+    version = db.get(TeachingWorkVersion, (work.id, work.current_version))
+    if not version:
+        raise HTTPException(409, "尚无正式正文版本")
+    snap = version.snapshot
+    return {"origin_scope":work.origin_scope,"origin_id":work.origin_id,
+            "kind":snap.get("doc",{}).get("kind"),"version":version.number,
+            "layout":snap.get("layout",{}),"edition":snap.get("edition",{}),
+            "export_token":snap.get("doc",{}).get("export_token"),
+            "overrides":snap.get("overrides",{}),"wrap":snap.get("wrap")}
+
+
+@router.get("/{ident}/versions/{number}/files/{role}/pages/{page}")
+def preview_page(ident: str, number: int, role: str, page: int, dpi: int = Query(120, ge=72, le=180),
+                 db: Session = Depends(get_db), user: User = Depends(current_user)):
+    work = owned(db, user, ident)
+    asset = db.get(TeachingWorkAsset, (work.id, number, role))
+    if not asset or not 1 <= page <= asset.pages:
+        raise HTTPException(404, "成品或页码不存在")
+    item = db.get(StoredFile, asset.file_id)
+    path = storage.file_path(item)
+    db.rollback()
+    return Response(render_page(path, page, dpi), media_type="image/png",
+                    headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+
+
+@router.get("/{ident}/pending-cover/pages/{page}")
+def preview_pending(ident: str, page: int, dpi: int = Query(120, ge=72, le=180),
+                    db: Session = Depends(get_db), user: User = Depends(current_user)):
+    work = owned(db, user, ident)
+    pending = db.get(TeachingWorkPendingCover, work.id)
+    if not pending or page != 1:
+        raise HTTPException(404, "待配对书衣不存在")
+    path = storage.file_path(db.get(StoredFile, pending.file_id))
+    db.rollback()
+    return Response(render_page(path, page, dpi), media_type="image/png",
+                    headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
