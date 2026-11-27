@@ -1,4 +1,6 @@
 """Structured source metadata. The original source and all associations remain unchanged."""
+import json
+from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -8,7 +10,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.bank_history import record, history
 from app.core.solution_methods import normalize_subject
-from app.models import SourceCatalogDetail as Detail, TeachingResource as Resource, User
+from app.models import SourceCatalogDetail as Detail, TeachingResource as Resource, User, Setting
 from app.api.resources import existing, admin_lock
 
 router=APIRouter(prefix="/source-catalog",tags=["source-catalog"],dependencies=[Depends(current_user)])
@@ -99,9 +101,8 @@ class StatisticsRequest(BaseModel):
     limit:int=Field(default=50,ge=1,le=100)
     offset:int=Field(default=0,ge=0)
 
-@router.post("/statistics",dependencies=[Depends(require_origin)])
-def statistics(body:StatisticsRequest,db:Session=Depends(get_db)):
-    """Count recorded question knowledge names, not graph labels or inferred source totals."""
+def statistics_scope(body:StatisticsRequest):
+    """Shared selection for aggregation, reports and drill-down."""
     if not (body.all_sources or body.source_ids or body.years or body.institutions or body.categories or body.exam_types or body.source_types):
         raise HTTPException(422,"请选择统计来源或明确选择全部来源")
     filters=["s.kind='source'","s.archived=false"]
@@ -149,6 +150,11 @@ def statistics(body:StatisticsRequest,db:Session=Depends(get_db)):
         GROUP BY n.subject,n.name
     )
     """
+    return cte,params
+
+@router.post("/statistics",dependencies=[Depends(require_origin)])
+def statistics(body:StatisticsRequest,db:Session=Depends(get_db)):
+    cte,params=statistics_scope(body)
     # One statement gives all counts a consistent snapshot. A source-question pair
     # is not a physical page occurrence; multiple roles and legacy primary links are deduplicated.
     query=cte+"""
@@ -165,3 +171,73 @@ def statistics(body:StatisticsRequest,db:Session=Depends(get_db)):
     result=dict(db.execute(text(query),params).mappings().one())
     return {**result,"limit":body.limit,"offset":body.offset,"scope":"recorded_questions_only",
             "count_unit":"distinct_source_question_pairs","original_question_total":None}
+
+
+class StatisticsQuestions(StatisticsRequest):
+    knowledge_name:str=Field(min_length=1,max_length=180)
+    knowledge_subject:str=Field(default="",max_length=40)
+
+@router.post("/statistics/questions",dependencies=[Depends(require_origin)])
+def statistics_questions(body:StatisticsQuestions,db:Session=Depends(get_db)):
+    cte,params=statistics_scope(body)
+    params.update(knowledge_name=body.knowledge_name.strip(),knowledge_subject=body.knowledge_subject)
+    query=cte+"""
+    , matched AS (
+        SELECT q.id,q.code,q.title,q.subject,q.question_type,q.revision,q.updated_at,
+               count(*) AS source_count
+        FROM names n JOIN teaching_resources q ON q.id=n.question_id
+        JOIN pairs p ON p.question_id=q.id
+        WHERE n.name=:knowledge_name AND n.subject=:knowledge_subject
+        GROUP BY q.id
+    )
+    SELECT (SELECT count(*) FROM matched) AS total,
+           coalesce((SELECT jsonb_agg(to_jsonb(m) ORDER BY m.updated_at DESC,m.id)
+                     FROM (SELECT * FROM matched ORDER BY updated_at DESC,id
+                           LIMIT :limit OFFSET :offset) m),'[]'::jsonb) AS items
+    """
+    return {**dict(db.execute(text(query),params).mappings().one()),"limit":body.limit,"offset":body.offset}
+
+class SaveStatisticsScope(BaseModel):
+    name:str=Field(min_length=1,max_length=80)
+    scope:StatisticsRequest
+
+def scope_key(user):
+    return "source.statistics.scopes."+str(user.id)
+
+def saved_scopes(db,user):
+    row=db.get(Setting,scope_key(user))
+    return json.loads(row.value) if row else []
+
+def store_scopes(db,user,items):
+    key=scope_key(user)
+    row=db.get(Setting,key)
+    if row is None:
+        row=Setting(key=key,value="[]");db.add(row)
+    row.value=json.dumps(items,ensure_ascii=False)
+    db.commit()
+
+@router.get("/statistics/scopes")
+def list_scopes(db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return {"items":saved_scopes(db,user)}
+
+@router.post("/statistics/scopes",dependencies=[Depends(require_origin)])
+def save_scope(body:SaveStatisticsScope,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    name=body.name.strip()
+    if not name:raise HTTPException(422,"请输入统计方案名称")
+    statistics_scope(body.scope)
+    admin_lock(db,user)
+    items=saved_scopes(db,user)
+    if len(items)>=50:raise HTTPException(422,"最多保存50个方案")
+    if any(i["name"]==name for i in items):raise HTTPException(409,"已有同名方案，请更换名称")
+    item={"id":str(uuid4()),"name":name,"scope":body.scope.model_dump(exclude={"limit","offset"}),"created_at":now()}
+    store_scopes(db,user,[item,*items])
+    return item
+
+@router.delete("/statistics/scopes/{id}",dependencies=[Depends(require_origin)])
+def delete_scope(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    items=saved_scopes(db,user)
+    remaining=[i for i in items if i["id"]!=id]
+    if len(remaining)==len(items):raise HTTPException(404,"统计方案不存在")
+    store_scopes(db,user,remaining)
+    return {"items":remaining}

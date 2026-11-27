@@ -256,7 +256,7 @@ def capture(work, publish):
                 for path, table, predicate, order in EXPORTS:
                     copy_out(cur, "SELECT * FROM public." + table + " WHERE " + predicate + " ORDER BY " + order, tmp)
                     publish(path + ".csv", tmp)
-                cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
+                cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' ORDER BY key", (list(SAFE_SETTINGS),))
                 settings = dict(cur.fetchall())
                 for name, rows in (
                     ("system/settings/preferences.csv", [(k,v) for k,v in settings.items() if k != "qiandao.qoder_cn.v1"]),

@@ -412,6 +412,18 @@ def test_migration_and_login(tmp_path, monkeypatch):
         single=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"years":["2018"]}).json()
         assert single["source_count"]==1 and single["source_question_count"]==1
         assert len(client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"limit":1,"offset":1}).json()["items"])==1
+        drill=client.post(stats_path+"/questions",headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"knowledge_name":"专项甲","knowledge_subject":"高等数学"})
+        assert drill.status_code==200,drill.text
+        assert drill.json()["total"]==1 and drill.json()["items"][0]["id"]==seed["id"]
+        assert drill.json()["items"][0]["source_count"]==2
+        wrong=client.post(stats_path+"/questions",headers=origin,json={"source_ids":[source_a["id"]],"knowledge_name":"专项甲","knowledge_subject":"线性代数"})
+        assert wrong.status_code==200 and wrong.json()["total"]==0
+        scope_payload={"name":"组合统计测试","scope":{"source_ids":[source_a["id"],source_b["id"]]}}
+        stored=client.post(stats_path+"/scopes",headers=origin,json=scope_payload)
+        assert stored.status_code==200,stored.text
+        assert client.get(stats_path+"/scopes").json()["items"][0]["id"]==stored.json()["id"]
+        assert client.post(stats_path+"/scopes",headers=origin,json=scope_payload).status_code==409
+        assert client.delete(stats_path+"/scopes/"+stored.json()["id"],headers=origin).json()["items"]==[]
         def seed_search(**kw):
             response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":seed["code"],**kw})
             assert response.status_code==200,response.text
