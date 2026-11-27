@@ -277,6 +277,14 @@ def convert(id:str,body:Convert,db:Session=Depends(get_db),user:User=Depends(cur
         draft=docs.Draft(title=j.title,subject=j.subject,source_id=j.source_id,blocks=j.items)
         d=TeachingDocument(id=str(uuid4()),title=j.title,kind="intake",subject=j.subject,source_id=j.source_id,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
         db.add(d);db.flush()
+    if d.source_id and "reviewed_uids" in (j.provenance or {}):
+        state=docs.manual_review_state(db,d)
+        approved=set(j.provenance["reviewed_uids"])
+        for b in d.blocks:
+            if b["uid"] in approved:
+                rows=docs.manual_review_data(db,d,b["uid"])["rows"]
+                if rows and not rows[0]["errors"]:state[b["uid"]]=docs.manual_item_digest(d,b)
+        db.merge(docs.Setting(key=docs.manual_review_key(d),value=json.dumps(state)))
     docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.append" if body.append_document_id else "intelligence.convert",user.id);db.commit();return {"document_id":d.id}
 
 class PDFRequest(BaseModel):

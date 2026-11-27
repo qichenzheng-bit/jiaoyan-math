@@ -133,12 +133,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         link=client.get("/api/knowledge/resources/"+rid).json()
         assert client.put("/api/knowledge/resources/"+rid,headers=origin,json={"revision":link["revision"],"items":[{"knowledge_id":k["id"],"role":"core"}]}).status_code==200
         assert client.get("/api/knowledge/points/"+k["id"]+"/resources").json()[0]["id"]==rid
-        doc=client.post("/api/documents",headers=origin,json={"title":"录入测试","subject":"高数","blocks":[{"uid":"a","kind":"question","title":"新题","content":"求导数","answer":"1"}]})
+        doc=client.post("/api/documents",headers=origin,json={"title":"录入测试","subject":"高数","source_id":created_doc["source_id"],"blocks":[{"uid":"a","kind":"question","title":"新题","content":"求导数","answer":"1","question_type":"综合题"}]})
         assert doc.status_code==200,doc.text
         d=doc.json()
-        registered=client.post("/api/documents/"+d["id"]+"/blocks/a/register",headers=origin,json={"revision":d["revision"]})
+        assert client.post("/api/documents/"+d["id"]+"/blocks/a/register",headers=origin,json={"revision":d["revision"]}).status_code==409
+        def approve_and_commit(path,doc):
+            checked=client.post(path+"/manual-review",headers=origin,json={"revision":doc["revision"]})
+            assert checked.status_code==200,checked.text
+            for item in checked.json()["rows"]:
+                approval=client.post(path+"/manual-review-progress",headers=origin,json={"revision":doc["revision"],"uid":item["uid"],"approved":True})
+                assert approval.status_code==200,approval.text
+            return client.post(path+"/manual-commit",headers=origin,json={"revision":doc["revision"],"accept_warnings":True})
+        registered=approve_and_commit("/api/documents/"+d["id"],d)
         assert registered.status_code==200,registered.text
-        rd=registered.json()
+        rd=registered.json()["document"]
         assert rd["blocks"][0]["snapshot"]["code"].startswith("Q")
         assert rd["blocks"][0]["kind"]=="reference"
         assert client.put("/api/documents/"+d["id"],headers=origin,json=d).status_code==409
@@ -147,8 +155,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert updated.json()["blocks"][0]["snapshot"]==rd["blocks"][0]["snapshot"]
         # Full-library stem matching and transactional registration.
         batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[
-            {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法"},
-            {"uid":"new","kind":"question","title":"新问题","content":"计算新的定积分","answer":"2"}]}).json()
+            {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法","question_type":"综合题"},
+            {"uid":"new","kind":"question","title":"新问题","content":"计算新的定积分","answer":"2","question_type":"综合题","dedup_reason":"测试独立题目"}]}).json()
         base="/api/documents/"+batch["id"]
         review=client.post(base+"/registration-preview",headers=origin,json={"revision":batch["revision"],"block_ids":["same","new"]})
         assert review.status_code==200,review.text
@@ -159,12 +167,12 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert any(p["id"]==k["id"] for p in review.json()["items"][0]["knowledge"])
         choices=[{"uid":"new","action":"create"},{"uid":"same","action":"append","resource_id":rid,"resource_revision":match["revision"],"knowledge_ids":["missing"]}]
         count=client.get("/api/resources?kind=question").json()["total"]
-        failure=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices})
+        failure=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True})
         assert failure.status_code==422,failure.text
         assert client.get("/api/resources?kind=question").json()["total"]==count
         assert client.get(base).json()["revision"]==batch["revision"]
         choices[1]["knowledge_ids"]=[k["id"]]
-        committed=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices})
+        committed=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True})
         assert committed.status_code==200,committed.text
         assert all(x["kind"]=="reference" for x in committed.json()["blocks"])
         assert "另一种解法" in client.get("/api/resources/"+rid).json()["solution"]
@@ -173,7 +181,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert history[0]["count"]==2
         record=client.get(base+"/registration-history/"+history[0]["id"]).json()
         assert record["entries"][1]["input"]["solution"]=="另一种解法"
-        assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices}).status_code==409
+        assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True}).status_code==409
         # Phone entry saves the entire draft and registers it atomically, without review.
         manual=reused.json()
         manual_path="/api/documents/"+manual["id"]
@@ -184,13 +192,17 @@ def test_migration_and_login(tmp_path, monkeypatch):
         ]
         before_count=client.get("/api/resources?kind=question").json()["total"]
         bad=client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":[*draft_blocks,{"uid":"bad","kind":"question","content":""}]})
-        assert bad.status_code==422
+        assert bad.status_code==409
         assert client.get("/api/resources?kind=question").json()["total"]==before_count
         assert client.get(manual_path).json()["revision"]==manual["revision"]
         no_subject=client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":[draft_blocks[0],{**draft_blocks[1],"subject":""}]})
-        assert no_subject.status_code==422
-        saved=client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":draft_blocks})
+        assert no_subject.status_code==409
+        drafted=client.put(manual_path+"/manual-draft",headers=origin,json={**manual,"blocks":draft_blocks})
+        assert drafted.status_code==200,drafted.text
+        saved=approve_and_commit(manual_path,drafted.json())
         assert saved.status_code==200,saved.text
+        from types import SimpleNamespace
+        saved=SimpleNamespace(json=lambda:client.get(manual_path).json())
         assert saved.json()["blocks"][1]["snapshot"]["subject"]=="线性代数"
         assert saved.json()["blocks"][1]["snapshot"]["chapter"]=="矩阵"
         assert saved.json()["blocks"][1]["snapshot"]["answer"]=="AB"
@@ -261,8 +273,12 @@ def test_migration_and_login(tmp_path, monkeypatch):
         changed=client.post(reuse_path,headers=origin,json={**new_source,"blocks":[{**reused_block,"content":"篡改原题"}]})
         assert changed.status_code==409
         assert client.get("/api/documents/"+new_source["id"]).json()["revision"]==new_source["revision"]
-        reused_saved=client.post(reuse_path,headers=origin,json={**new_source,"blocks":[reused_block]})
+        reuse_base=reuse_path.removesuffix("/manual-save")
+        reuse_draft=client.put(reuse_base+"/manual-draft",headers=origin,json={**new_source,"blocks":[reused_block]})
+        assert reuse_draft.status_code==200,reuse_draft.text
+        reused_saved=approve_and_commit(reuse_base,reuse_draft.json())
         assert reused_saved.status_code==200,reused_saved.text
+        reused_saved=SimpleNamespace(json=lambda:client.get(reuse_base).json())
         same=reused_saved.json()["blocks"][0]["snapshot"]
         assert same["id"]==original["id"] and same["code"]==original["code"]
         assert same["content"]==original["content"]
@@ -272,8 +288,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert new_source["source_id"] in {x["source_id"] for x in client.get("/api/resources/"+same["id"]+"/sources").json()["items"]}
         fork={**reused_block,"uid":"fork-question","content":"另一个矩阵选择题","reuse_resource_id":None,"reuse_revision":None,"fork_from_id":same["id"]}
         reused_doc=reused_saved.json()
-        fork_saved=client.post(reuse_path,headers=origin,json={**reused_doc,"blocks":[*reused_doc["blocks"],fork]})
+        fork_draft=client.put(reuse_base+"/manual-draft",headers=origin,json={**reused_doc,"blocks":[*reused_doc["blocks"],{**fork,"dedup_reason":"独立矩阵测试"}]})
+        assert fork_draft.status_code==200,fork_draft.text
+        fork_saved=approve_and_commit(reuse_base,fork_draft.json())
         assert fork_saved.status_code==200,fork_saved.text
+        fork_saved=SimpleNamespace(json=lambda:client.get(reuse_base).json())
         new=fork_saved.json()["blocks"][1]["snapshot"]
         assert new["code"]!=same["code"] and new["id"]!=same["id"]
         assert client.get("/api/resources/"+same["id"]).json()["content"]==same["content"]
@@ -681,12 +700,15 @@ def test_migration_and_login(tmp_path, monkeypatch):
         # One continuous chat-source -> extraction -> supplement -> document edit -> bank registration chain.
         final_doc=applied.json()
         final_base="/api/documents/"+final_doc["id"]
+        typed=client.put(final_base+"/manual-draft",headers=origin,json={**final_doc,"blocks":[{**b,"question_type":b.get("question_type") or "综合题"} if b["kind"]=="question" else b for b in final_doc["blocks"]]})
+        assert typed.status_code==200,typed.text
+        final_doc=typed.json()
         final_uid=final_doc["blocks"][0]["uid"]
         final_review=client.post(final_base+"/registration-preview",headers=origin,json={"revision":final_doc["revision"],"block_ids":[final_uid]})
         assert final_review.status_code==200,final_review.text
         final_match=next(c for c in final_review.json()["items"][0]["candidates"] if c["id"]==rid)
         assert final_match["kind"]=="same_stem"
-        final_commit=client.post(final_base+"/registration-commit",headers=origin,json={"revision":final_doc["revision"],"items":[{"uid":final_uid,"action":"append","resource_id":rid,"resource_revision":final_match["revision"],"knowledge_ids":[k["id"]]}]})
+        final_commit=client.post(final_base+"/registration-commit",headers=origin,json={"revision":final_doc["revision"],"accept_warnings":True,"items":[{"uid":final_uid,"action":"append","resource_id":rid,"resource_revision":final_match["revision"],"knowledge_ids":[k["id"]]}]})
         assert final_commit.status_code==200,final_commit.text
         snapshot=final_commit.json()["blocks"][0]["snapshot"]
         assert snapshot["id"]==rid and snapshot["answer"]=="1" and "新解析" in snapshot["solution"]

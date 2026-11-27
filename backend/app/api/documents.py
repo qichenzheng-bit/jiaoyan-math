@@ -257,23 +257,7 @@ def restore(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
 
 @router.post("/{id}/blocks/{uid}/register",dependencies=[Depends(require_origin)])
 def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=Depends(current_user)):
-    bank.admin_lock(db,user);d=row(db,id)
-    if d.archived or d.revision!=body.revision:raise HTTPException(409,"文档版本冲突")
-    block=next((b for b in d.blocks if b["uid"]==uid),None)
-    if not block:raise HTTPException(404,"文档块不存在")
-    if block["kind"]=="reference":return public(d)
-    if block["kind"] not in ("question","knowledge") or not block["title"].strip() or not block["content"].strip():raise HTTPException(422,"只能将完整题目或知识单元入库")
-    source=bank.active_source(db,d.source_id) if body.bind_source and d.source_id else None
-    draft=bank.Draft(kind=block["kind"],title=block["title"],subject=d.subject if block.get("subject") is None else block["subject"],exam_type=source.exam_type if source else "",content=block["content"],answer=block["answer"],solution=block["solution"],analysis=block["analysis"],proof=block["proof"],chapter=block["chapter"],question_type=block["question_type"],question_data=block.get("question_data"),difficulty=block.get("difficulty",""),unit_type=block["unit_type"],source_id=d.source_id if body.bind_source else None,dedup_override=bool(body.duplicate_reason.strip()),dedup_reason=body.duplicate_reason)
-    values=bank.clean(draft,db);bank.guard_duplicate(db,values)
-    primary=values.pop("source_id")
-    r=Resource(id=str(uuid4()),code=bank.new_code(db,draft.kind),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
-    db.add(r);db.flush();protect_resource_images(db,r)
-    if primary:bank.change_primary(db,r,primary)
-    replacement=Block(uid=uid,kind="reference",resource_id=r.id,score=block.get("score",0)).model_dump()
-    replacement["snapshot"]=bank.view(r)
-    d.blocks=[replacement if b["uid"]==uid else b for b in d.blocks]
-    d.revision+=1;d.updated_at=now();references(db,d);audit(db,"resource.create",user.id);audit(db,"document.register",user.id);db.commit();return public(d)
+    raise HTTPException(409,"请进入统一入库审核，单题也必须确认来源及审核状态")
 
 @router.post("/{id}/promote",dependencies=[Depends(require_origin)])
 def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -487,6 +471,7 @@ class ReviewDecision(BaseModel):
 class CommitBatch(BaseModel):
     revision:int=Field(ge=1)
     bind_source:bool=True
+    accept_warnings:bool=False
     items:list[ReviewDecision]=Field(min_length=1,max_length=20)
 
 def registration_values(db,d,b,bind=False,reason="",chapter=None):
@@ -677,52 +662,41 @@ def attach_review_knowledge(db,r,ids):
 @router.post("/{id}/registration-commit",dependencies=[Depends(require_origin)])
 def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
+    if d.kind!="intake" or not d.source_id or not body.bind_source:raise HTTPException(422,"正式录入必须绑定来源")
     blocks=review_blocks(d,body.revision,[x.uid for x in body.items])
-    if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):
-        raise HTTPException(409,"请先处理当前AI编辑建议")
-    replacements={};history=[];evaluate={}
+    mapped={};overrides={}
     for b,decision in zip(blocks,body.items):
-        values=registration_values(db,d,b,body.bind_source,decision.reason,decision.chapter)
-        source=values.pop("source_id")
-        before=None
+        item={**b,"chapter":decision.chapter or b.get("chapter",""),"dedup_reason":decision.reason}
+        values=registration_values(db,d,item,True,decision.reason,item["chapter"])
         if decision.action=="create":
             if decision.resource_id:raise HTTPException(422,"新建操作不能指定已有资源")
-            if b["kind"]=="question" and any(matching.same_question(r.content,b["content"]) for r in strict_candidates(db,values) if not r.archived):raise HTTPException(409,"相同题干已存在，请复用原题或追加解法")
-            if strict_candidates(db,values) and not decision.reason.strip():
-                raise HTTPException(409,"发现完全重复或同题候选，选择复用、追加解法或填写保留原因")
-            bank.guard_duplicate(db,values)
-            r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
-            db.add(r);db.flush()
-            attach_review_source(db,r,source,source_occurrence(db,d,b,source));attach_review_knowledge(db,r,decision.knowledge_ids)
-            audit(db,"resource.create",user.id)
-            if r.kind=="question":evaluate[r.id]=r
         else:
             if not decision.resource_id or decision.resource_revision is None:raise HTTPException(422,"请选择已有资源及版本")
             r=bank.existing(db,decision.resource_id,True)
-            if r.archived or r.kind!=b["kind"] or r.revision!=decision.resource_revision:
-                raise HTTPException(409,"候选资源已修改或归档，请重新审核")
-            if match_kind(r,values)=="similar" or r.kind=="question" and not matching.same_question(r.content,b["content"]):raise HTTPException(422,"疑似相似题不能直接合并，请核对后单独保留")
-            before=bank.view(r);changed=False
-            if decision.action=="append":
-                if r.kind!="question" or answer_conflict(r,b):raise HTTPException(422,"答案冲突或不是题目，不能追加解法")
-                changed=merge_question_methods(r,b,values["subject"])
-                if not changed:raise HTTPException(422,"没有可追加的新解法")
-                evaluate[r.id]=r
-                audit(db,"resource.methods.append",user.id)
-            elif (match_kind(r,values)!="exact" or r.subject!=values["subject"] or answer_conflict(r,b) or canonical_text(r.analysis)!=canonical_text(b.get("analysis","")) or canonical_text(r.proof)!=canonical_text(b.get("proof",""))) and not decision.reason.strip():
-                raise HTTPException(422,"复用会保留已有资源内容，请填写确认原因；草稿保存在入库历史")
-            changed=attach_review_source(db,r,source,source_occurrence(db,d,b,source)) or changed
-            changed=attach_review_knowledge(db,r,decision.knowledge_ids) or changed
-            if changed:r.revision+=1;r.updated_at=now()
-        db.flush();protect_resource_images(db,r)
-        replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
-        replacement["snapshot"]=bank.view(r);replacements[b["uid"]]=replacement
-        history.append({"uid":b["uid"],"action":decision.action,"reason":decision.reason,"input":b,"before":before,"after":bank.view(r),"knowledge_ids":decision.knowledge_ids,"source_id":source})
-    d.blocks=[replacements.get(b["uid"],b) for b in d.blocks];d.revision+=1;d.updated_at=now();references(db,d)
-    record=DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=body.revision,result_revision=d.revision,entries=history,created_at=now())
-    for r in evaluate.values():bank.enqueue_recommendation(db,r,user.id)
-    db.add(record);audit(db,"document.registration.batch",user.id);db.commit()
-    return public(d)
+            if r.archived or r.kind!=b["kind"] or r.revision!=decision.resource_revision:raise HTTPException(409,"候选资源已变化，请重新审核")
+            if r.kind=="question":
+                if not matching.same_question(r.content,b["content"]):raise HTTPException(422,"相似题不能合并")
+                if matching.answer_conflict(r.answer,b["answer"]):raise HTTPException(422,"答案冲突，请先核对")
+                if decision.action=="reuse" and matching.method_keys(b["solution"])-matching.method_keys(r.solution):
+                    raise HTTPException(422,"存在新解法，请选择追加解法")
+            elif match_kind(r,values)=="similar":raise HTTPException(422,"相似知识单元不能合并")
+            if decision.action=="append":validate_append(r,b,values["subject"])
+            else:
+                if match_kind(r,values)!="exact" and not decision.reason.strip():raise HTTPException(422,"引用已有内容请填写确认原因")
+                for key in (("title","content","answer","solution","subject","chapter","question_type","difficulty") if r.kind=="question" else ("title","content","proof","subject","chapter","unit_type")):item[key]=getattr(r,key)
+                item["question_data"]=getattr(r,"question_data",None)
+            item.update(reuse_resource_id=r.id,reuse_revision=r.revision,reuse_mode=decision.action,reuse_code=r.code)
+        mapped[b["uid"]]=item;overrides[b["uid"]]=decision.knowledge_ids
+    # The explicit submitted decisions are the human confirmation of these exact saved blocks.
+    # Validate the same rules used by the shared review, without modifying persisted drafts first.
+    draft=Draft.model_validate({**public(d),"blocks":[mapped.get(b["uid"],b) for b in d.blocks],"merge_same_batch":True})
+    checked=validate(db,draft,d.blocks,allow_reference_edits=True)
+    from types import SimpleNamespace
+    candidate=SimpleNamespace(id=d.id,revision=d.revision,source_id=d.source_id,subject=d.subject,blocks=checked)
+    checks=[r for r in manual_review_data(db,candidate)["rows"] if r["uid"] in mapped]
+    if any(r["errors"] for r in checks):raise HTTPException(422,"审核存在必须处理的问题："+ "；".join(e for r in checks for e in r["errors"]))
+    if any(r["warnings"] for r in checks) and not body.accept_warnings:raise HTTPException(422,"请确认缺失信息")
+    return write_registration(id,draft,db,user,selected=set(mapped),knowledge_overrides=overrides)
 
 class ManualSearch(BaseModel):
     kind:Literal["question","knowledge"]="question"
@@ -804,22 +778,26 @@ def apply_reference_edit(db,block,user):
     db.flush()
     return before,r
 
-@router.post("/{id}/manual-save",dependencies=[Depends(require_origin)])
-def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,knowledge_overrides=None,commit=True,return_record=False):
     """Save manual intake, including explicit corrections to existing references, in one transaction."""
     bank.admin_lock(db,user)
     d=row(db,id)
     if d.archived or body.revision!=d.revision or d.kind!="intake" or body.kind!="intake":
         raise HTTPException(409,"录入文档已归档、类型错误或版本变化，请重新加载")
-    if body.source_id!=d.source_id:
-        raise HTTPException(422,"不能在卡片录入中更换资料来源")
+    if body.source_id!=d.source_id or not d.source_id:
+        raise HTTPException(422,"正式入库必须关联有效资料来源，不能临时更换")
+    bank.active_source(db,d.source_id)
+    if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):
+        raise HTTPException(409,"请先处理当前AI编辑建议")
     blocks=validate(db,body,d.blocks,allow_reference_edits=True)
     history=[]
+    knowledge_overrides=knowledge_overrides or {}
     original_revisions={}
     count=0
     edited_refs=set()
     batch_resources=[];evaluate={}
     for i,b in enumerate(blocks):
+        if selected is not None and b["uid"] not in selected:continue
         if b.get("edit_reference_revision") is not None:
             if b["resource_id"] in edited_refs:
                 raise HTTPException(409,"同一原题存在多处微调，请只修改一次")
@@ -853,6 +831,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
         primary=data.pop("source_id")
         tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[]))
+        knowledge_ids=list(dict.fromkeys([*knowledge_ids,*knowledge_overrides.get(b["uid"],[])]))
         before=None
         peer=next((r for content,r in batch_resources if b["kind"]=="question" and matching.same_question(content,b["content"])),None) if body.merge_same_batch and not b.get("reuse_resource_id") else None
         if peer is not None:
@@ -902,7 +881,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             if r.kind=="question":evaluate[r.id]=r
         db.flush();protect_resource_images(db,r)
         if b["kind"]=="question":batch_resources.append((b["content"],r))
-        replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
+        replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0),original_question_number=b.get("original_question_number",""),source_page_start=b.get("source_page_start"),source_page_end=b.get("source_page_end")).model_dump()
         replacement["snapshot"]=bank.view(r)
         blocks[i]=replacement
         history.append({"uid":b["uid"],"action":action,"reason":"手动录入复用原题" if action=="reuse" else "手动直接入库","input":b,"before":before,
@@ -915,10 +894,18 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
     before=d.revision
     d.blocks=blocks;d.subject=normalize_subject(body.subject);d.title=body.title.strip()
     d.revision+=1;d.updated_at=now();references(db,d)
-    db.add(DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=before,result_revision=d.revision,entries=history,created_at=now()))
+    if not history:raise HTTPException(422,"没有可入库条目")
+    record=DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=before,result_revision=d.revision,entries=history,created_at=now())
+    db.add(record)
     for r in evaluate.values():bank.enqueue_recommendation(db,r,user.id)
-    audit(db,"document.manual.save",user.id);db.commit()
-    return public(d)
+    audit(db,"document.registration.batch",user.id);db.flush()
+    if commit:db.commit()
+    return (public(d),record) if return_record else public(d)
+
+@router.post("/{id}/manual-save",dependencies=[Depends(require_origin)])
+def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    # Retired direct-write route. Keep draft clients safe rather than silently registering data.
+    raise HTTPException(409,"请先保存草稿并完成逐条审核，再确认正式入库")
 
 @router.get("/{id}/registration-history")
 def registration_history(id:str,db:Session=Depends(get_db)):
@@ -1061,10 +1048,10 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     review=manual_review_data(db,d)
     if not review["rows"]:raise HTTPException(422,"没有待入库的资源")
     if any(r["errors"] for r in review["rows"]):raise HTTPException(422,"仍有必须处理的问题，请重新检查")
-    if (body.require_reviewed or db.get(Setting,manual_review_key(d)) is not None) and not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
+    if not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
         raise HTTPException(409,"请先逐条完成审核")
     if any(r["warnings"] for r in review["rows"]) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
-    saved=manual_save(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user)
+    saved=write_registration(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user)
     counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0}
     for item in review["rows"]:
         key="updated" if item["action"] in ("update","append") else "question_reuse" if item["action"]=="batch_reuse" else item["kind"]+"_"+item["action"]
