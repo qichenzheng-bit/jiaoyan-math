@@ -21,7 +21,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin
 from app.models import User, StoredFile
 from app.services import storage
-from app.services.document_pdf import render_pdf
+from app.services.document_pdf import render_pdf, selected_pages
 from app.services.inline_images import image_ids
 
 router = APIRouter(prefix="/document-pdf", tags=["document-pdf"], dependencies=[Depends(current_user)])
@@ -51,6 +51,8 @@ class PdfRequest(BaseModel):
     overrides: dict[str, LocalEdit] = Field(default_factory=dict, max_length=5100)
     chapter_uid: str | None = Field(default=None, max_length=100)
     filename: str = Field(min_length=1, max_length=200)
+    page_ranges: str = Field(default="", max_length=2000)
+    preview_pages: int | None = Field(default=None, ge=1, le=10000)
     confirmed: Literal[True]
 
     @model_validator(mode="after")
@@ -59,6 +61,9 @@ class PdfRequest(BaseModel):
             raise ValueError("导出内容为空或编号重复")
         if any(len(uid) > 100 for uid in (self.selected_uids or []) + list(self.overrides)):
             raise ValueError("内容编号无效")
+        if self.page_ranges.strip():
+            if self.preview_pages is None:raise ValueError("请先计算完整预览页数")
+            selected_pages(self.page_ranges,self.preview_pages)
         return self
 
 @dataclass
@@ -75,6 +80,8 @@ class Job:
     detail: str = ""
     pages: int = 0
     bytes: int = 0
+    total_pages: int = 0
+    page_ranges: str = ""
     changed: float = field(default_factory=time.monotonic)
     stop: threading.Event = field(default_factory=threading.Event)
 
@@ -88,7 +95,7 @@ class Job:
 
     def view(self):
         return {"id": self.id, "state": self.state, "stage": self.stage, "detail": self.detail,
-                "filename": self.filename, "pages": self.pages, "bytes": self.bytes}
+                "filename": self.filename, "pages": self.pages, "bytes": self.bytes, "total_pages": self.total_pages, "page_ranges":self.page_ranges}
 
 def cleanup():
     # Caller holds lock. Never remove data from a running render.
@@ -114,7 +121,7 @@ def run(job):
             job.output.unlink(missing_ok=True)
             change(job, state="cancelled", stage="已取消")
         else:
-            change(job, state="ready", stage="生成完成", pages=result["pages"], bytes=result["bytes"])
+            change(job, state="ready", stage="生成完成", pages=result["pages"], bytes=result["bytes"], total_pages=result.get("total_pages",result["pages"]))
     except ValueError as exc:
         job.output.unlink(missing_ok=True)
         change(job, state="failed", stage="排版检查失败", detail=str(exc)[:300])
@@ -184,7 +191,7 @@ def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
     data = build_snapshot(scope, identity, body, db)
     images = resolve_images(db, data)
     payload = {"doc": data, "layout": body.layout.model_dump(), "stem": body.stem,
-               "answerOnly": body.answerOnly, "source": scope == "source"}
+               "answerOnly": body.answerOnly, "source": scope == "source", "page_ranges":body.page_ranges, "preview_pages":body.preview_pages}
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
     check_complete_export_size(len(raw))
     filename = storage.safe_name(body.filename.strip().removesuffix(".pdf") + ".pdf")
@@ -196,7 +203,7 @@ def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
         if len(jobs) >= 12:
             raise HTTPException(429, "请先清理已生成的临时 PDF")
         folder = tempfile.TemporaryDirectory(prefix="wg-layout-pdf-")
-        job = Job(str(uuid4()), user.id, scope, identity, filename, folder, images)
+        job = Job(str(uuid4()), user.id, scope, identity, filename, folder, images, page_ranges=body.page_ranges)
         try:
             job.payload.write_bytes(raw)
             jobs[job.id] = job
