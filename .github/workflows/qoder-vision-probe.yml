@@ -1,0 +1,86 @@
+name: Qoder vision diagnostic
+on:
+  push:
+    branches: [diagnostics/qoder-vision-probe]
+    paths: ['.github/workflows/qoder-vision-probe.yml']
+permissions: {}
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/diagnostics/qoder-vision-probe' && github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 3
+    steps:
+      - name: Check isolated worker and synthetic image recognition
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, http.client, json, secrets, shutil, socket, struct, time, uuid, zlib, subprocess
+          class Conn(http.client.HTTPConnection):
+              def connect(self):
+                  self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+                  self.sock.settimeout(self.timeout)
+                  self.sock.connect("/run/jiaoyan-qoder/worker.sock")
+          def request(method,path,data=None):
+              c=Conn("localhost",timeout=10)
+              try:
+                  c.request(method,path,json.dumps(data).encode() if data is not None else None,{"Content-Type":"application/json"})
+                  r=c.getresponse()
+                  return r.status,json.loads(r.read(524288))
+              finally: c.close()
+          for name in ("prlimit","pdftoppm","pdftotext","tesseract"):
+              print(name, bool(shutil.which(name)),flush=True)
+          if shutil.which("tesseract"):
+              p=subprocess.run(["tesseract","--list-langs"],capture_output=True,text=True,timeout=8)
+              print("OCR languages ready:", {"chi_sim","eng"}.issubset(set(p.stdout.splitlines())),flush=True)
+          _,s=request("GET","/status")
+          print("worker version:",s.get("worker_version"),"vision interface:",bool(s.get("vision_attachment")),"chat available:",bool(s.get("chat_available")),flush=True)
+          if not s.get("vision_attachment") or not s.get("chat_available") or s.get("busy"):
+              print("PROBE_NOT_RUN: unavailable or busy",flush=True)
+              raise SystemExit(1)
+          _,catalog=request("GET","/models")
+          models=[m.get("id") for m in catalog.get("models",[]) if isinstance(m,dict)]
+          model=next((m for m in models if isinstance(m,str) and m.lower()=="deepseek-flash"),None)
+          if not model:
+              print("PROBE_NOT_RUN: exact DeepSeek-Flash not in catalog",flush=True)
+              raise SystemExit(1)
+          digits=["111101101101111","010110010010111","111001111100111","111001111001111","101101111001001","111100111001111","111100111101111","111001001001001","111101111101111","111101111001111"]
+          code="".join(str(secrets.randbelow(10)) for _ in range(8))
+          scale=18
+          w,h=8*4*scale+2*scale,7*scale
+          pixels=bytearray([255])*(w*h)
+          for i,ch in enumerate(code):
+              for n,bit in enumerate(digits[int(ch)]):
+                  if bit=="1":
+                      x0=scale+(4*i+n%3)*scale
+                      y0=(1+n//3)*scale
+                      for y in range(y0,y0+scale):
+                          pixels[y*w+x0:y*w+x0+scale]=bytes(scale)
+          def chunk(t,b): return struct.pack(">I",len(b))+t+b+struct.pack(">I",zlib.crc32(t+b)&0xffffffff)
+          png=b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",w,h,8,0,0,0,0))+chunk(b"IDAT",zlib.compress(b"".join(b"\0"+pixels[y*w:(y+1)*w] for y in range(h))))+chunk(b"IEND",b"")
+          ident=str(uuid.uuid4())
+          payload={"id":ident,"model":model,"prompt":"Read the eight digits in the attached image from left to right. Return only those digits, no spaces or explanation. If you cannot see the image, return UNREADABLE. Do not use tools.","effort":"default","attachment":{"media_type":"image/png","base64":base64.b64encode(png).decode()}}
+          status,start=request("POST","/vision/start",payload)
+          print("requested model:",model,"start HTTP:",status,flush=True)
+          if status!=200:
+              print("PROBE_NOT_RUN: start rejected",flush=True)
+              raise SystemExit(1)
+          try:
+              deadline=time.monotonic()+100
+              while time.monotonic()<deadline:
+                  _,result=request("GET","/chat/"+ident)
+                  if result.get("state")=="done":
+                      exact=result.get("answer","").strip()==code
+                      print("EXACT_IMAGE_DIGITS_MATCH:",exact,flush=True)
+                      raise SystemExit(0 if exact else 1)
+                  if result.get("state") in ("failed","stopped"):
+                      print("MODEL_REQUEST_STATE:",result.get("state"),flush=True)
+                      raise SystemExit(1)
+                  time.sleep(1)
+              print("PROBE_TIMEOUT",flush=True)
+              raise SystemExit(1)
+          finally:
+              try:
+                  _,result=request("GET","/chat/"+ident)
+                  if result.get("state")=="running": request("POST","/chat/"+ident+"/cancel",{})
+              except Exception: pass
+          PY
