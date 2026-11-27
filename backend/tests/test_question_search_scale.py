@@ -74,10 +74,10 @@ def test_question_bank_pressure_500k():
                 fingerprint,stem_key,search_features,bank_facts,archived,created_at,updated_at,question_type,difficulty)
               SELECT :prefix||g::text,'Z'||:prefix||lpad(g::text,7,'0'),'question','压力测试题目',
                 CASE WHEN g%3=0 THEN '高等数学' ELSE '线性代数' END,
-                '求参数为 '||g::text||' 的函数极限 $\\lim_{x\\to0}x$','0','直接代入法','[]'::json,'[]'::json,
+                '求参数为 '||g::text||' 的函数极限 $\\lim_{x\\to0}x$','0',CASE WHEN g%1000=0 THEN '泰勒展开' ELSE '直接代入法' END,'[]'::json,'[]'::json,
                 md5(:prefix||g::text),md5(:prefix||g::text),'{}'::jsonb,
-                CASE WHEN g%1000=0 THEN '{"answer_complete":true,"solution_complete":true,"ambiguous":false,"method:泰勒展开":true,"single":true}'::jsonb
-                  ELSE '{"answer_complete":true,"solution_complete":true,"ambiguous":false,"single":true}'::jsonb END,
+                CASE WHEN g%1000=0 THEN '{"answer_complete": true,"solution_complete": true,"ambiguous": false,"method:泰勒展开": true,"single": true}'::jsonb
+                  ELSE '{"answer_complete": true,"solution_complete": true,"ambiguous": false,"single": true}'::jsonb END,
                 false,g,g,'综合题','简单' FROM generate_series(:start,:end) g
             """),{"prefix":prefix,"start":previous+1,"end":n})
             previous=n
