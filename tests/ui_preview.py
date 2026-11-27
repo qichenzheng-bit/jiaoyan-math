@@ -928,8 +928,9 @@ with sync_playwright() as p:
         if GROUP in {'all','desktop','mobile'}:
             print('UI case: chaptered textbook on desktop and mobile',flush=True)
             page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
-            book={**doc,"id":"book-preview","title":"分章教材测试","kind":"textbook","chaptered":True,"source_id":None,"blocks":[],"revision":3}
-            chapter={**doc,"id":"chapter-preview","title":"第一章 极限","kind":"textbook","chaptered":False,"parent_document_id":book["id"],"source_id":None,"blocks":[{**doc["blocks"][0],"uid":"chapter-question"}],"revision":1}
+            book_kind="handout" if GROUP=="mobile" else "textbook"
+            book={**doc,"id":"book-preview","title":"分章教学资料测试","kind":book_kind,"chaptered":True,"source_id":None,"blocks":[],"revision":3}
+            chapter={**doc,"id":"chapter-preview","title":"第一章 极限","kind":book_kind,"chaptered":False,"parent_document_id":book["id"],"source_id":None,"blocks":[{**doc["blocks"][0],"uid":"chapter-question"}],"revision":1}
             directory=[{"id":chapter["id"],"title":chapter["title"],"revision":1,"chapter_order":1,"archived":False,"updated_at":1,"blocks_count":1}]
             book_requests=[]
             def book_api(route):
@@ -958,7 +959,7 @@ with sync_playwright() as p:
                 route.fulfill(json=result)
             book_route=re.compile(r".*/api/documents/(?:book-preview|chapter-preview)(?:/[^?]*)?(?:[?].*)?$")
             page.route(book_route,book_api)
-            visit(page,"/textbooks?doc=book-preview",".chaptered-book")
+            visit(page,("/handouts" if book_kind=="handout" else "/textbooks")+"?doc=book-preview",".chaptered-book")
             expect(page.locator(".book-chapter-row")).to_have_count(1)
             assert ("GET","chapter-preview") not in book_requests
             page.get_by_label("新章节名称").fill("第二章 导数")

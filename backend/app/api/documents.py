@@ -80,10 +80,10 @@ def book_parent(db,d,lock=True):
     if not d.parent_document_id:return None
     parent=row(db,d.parent_document_id) if lock else db.get(Doc,d.parent_document_id)
     if not parent:raise HTTPException(404,"所属教材不存在")
-    if not parent.chaptered or parent.archived:raise HTTPException(409,"所属教材已归档或不可编辑")
+    if not parent.chaptered or parent.archived:raise HTTPException(409,"所属讲义或资料已归档或不可编辑")
     return parent
 def begin_chapter_edit(db,d):
-    if d.chaptered:raise HTTPException(409,"请在教材目录中管理章节")
+    if d.chaptered:raise HTTPException(409,"请在资料目录中管理章节")
     parent=book_parent(db,d)
     if parent:record_version(db,parent)
     return parent
@@ -92,15 +92,19 @@ def finish_chapter_edit(db,parent):
     parent.revision+=1;parent.updated_at=now();record_version(db,parent)
 def check_book_capacity(db,parent,additional=0,replace_id=None):
     count=sum(v["blocks_count"] for v in chapter_index(db,parent) if v["id"]!=replace_id)+additional
-    if count>5000:raise HTTPException(422,"教材最多 5000 个内容条目，请另建分册")
+    if count>5000:raise HTTPException(422,"讲义或教材最多 5000 个内容条目，请另建分册")
 
 def public(d):
     blocks=[{**b,"question_data":resolve(b.get("content",""),b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data")).model_dump()} if b.get("kind")=="question" else b for b in d.blocks]
     return {**summary(d),"blocks":blocks}
+HISTORY_KEEP=2
+
 def record_version(db,d):
     if d.kind not in ("paper","handout","textbook"):return
     if d.parent_document_id:d.chapter_blocks_count=len(d.blocks)
-    if db.get(TeachingDocumentVersion,(d.id,d.revision)):return
+    if db.get(TeachingDocumentVersion,(d.id,d.revision)):
+        prune_document_history(db,d)
+        return
     snapshot={"title":d.title,"kind":d.kind,"subject":d.subject,"source_id":d.source_id,"blocks":d.blocks}
     if d.chaptered:snapshot["chapters"]=chapter_index(db,d)
     # Historical document images must remain protected from physical purge.
@@ -116,7 +120,11 @@ def record_version(db,d):
             db.add(FileReference(file_id=fid,owner_type="document_version",owner_id=owner))
     db.add(TeachingDocumentVersion(document_id=d.id,revision=d.revision,snapshot=snapshot,created_at=d.updated_at))
     db.flush()
-    stale=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==d.id).order_by(TeachingDocumentVersion.revision.desc()).offset(30)))
+    prune_document_history(db,d)
+
+def prune_document_history(db,d):
+    # Keep current snapshot plus only two earlier revisions.
+    stale=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==d.id,TeachingDocumentVersion.revision<d.revision).order_by(TeachingDocumentVersion.revision.desc()).offset(HISTORY_KEEP)))
     for version in stale:
         db.execute(delete(FileReference).where(FileReference.owner_type=="document_version",FileReference.owner_id==d.id+":"+str(version.revision)))
         db.delete(version)
@@ -133,7 +141,7 @@ def validate(db,body,previous,*,allow_reference_edits=False,within_chapter=False
         if not src or src.kind!="source" or src.archived:raise HTTPException(422,"来源资料无效")
     if len({b.uid for b in body.blocks})!=len(body.blocks):raise HTTPException(422,"文档块编号重复")
     if any(b.kind!="heading" and b.heading_level is not None for b in body.blocks):raise HTTPException(422,"只有标题条目可以设置章/节层级")
-    if body.kind=="textbook":
+    if body.kind=="textbook" or within_chapter:
         has_chapter=within_chapter
         for block in body.blocks:
             if block.kind=="heading" and block.heading_level==1:
@@ -205,6 +213,7 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
     d=Doc(id=str(uuid4()),title=body.title.strip(),kind=body.kind,subject=normalize_subject(body.subject),source_id=body.source_id,blocks=validate(db,body,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();references(db,d);record_version(db,d);audit(db,"document.create",user.id);db.commit();return public(d)
 class BookCreate(BaseModel):
+    kind:Literal["textbook","handout"]="textbook"
     title:str=Field(min_length=1,max_length=200)
     subject:str=Field(default="",max_length=40)
 class ChapterCreate(BaseModel):
@@ -219,15 +228,15 @@ class ChapterChange(BaseModel):
 
 def require_book(db,id,revision=None):
     d=row(db,id)
-    if not d.chaptered or d.parent_document_id or d.kind!="textbook":raise HTTPException(422,"请选择分章教材")
-    if revision is not None and (d.archived or d.revision!=revision):raise HTTPException(409,"教材目录已变化或已归档，请重新加载")
+    if not d.chaptered or d.parent_document_id or d.kind not in ("textbook","handout"):raise HTTPException(422,"请选择分章讲义或教材")
+    if revision is not None and (d.archived or d.revision!=revision):raise HTTPException(409,"资料目录已变化或已归档，请重新加载")
     return d
 
 @router.post("/books",dependencies=[Depends(require_origin)])
 def create_book(body:BookCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user)
-    if not body.title.strip():raise HTTPException(422,"教材名称不能为空")
-    d=Doc(id=str(uuid4()),title=body.title.strip(),kind="textbook",subject=normalize_subject(body.subject),source_id=None,blocks=[],chaptered=True,revision=1,archived=False,created_at=now(),updated_at=now())
+    if not body.title.strip():raise HTTPException(422,"资料名称不能为空")
+    d=Doc(id=str(uuid4()),title=body.title.strip(),kind=body.kind,subject=normalize_subject(body.subject),source_id=None,blocks=[],chaptered=True,revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();record_version(db,d);audit(db,"book.create",user.id);db.commit();return public(d)
 
 @router.get("/{id}/chapters")
@@ -240,9 +249,9 @@ def create_chapter(id:str,body:ChapterCreate,db:Session=Depends(get_db),user:Use
     bank.admin_lock(db,user);d=require_book(db,id,body.revision)
     if not body.title.strip():raise HTTPException(422,"章节名称不能为空")
     existing=chapter_index(db,d,True)
-    if sum(not v["archived"] for v in existing)>=100:raise HTTPException(422,"每本教材最多 100 个有效章节")
+    if sum(not v["archived"] for v in existing)>=100:raise HTTPException(422,"每份资料最多 100 个有效章节")
     record_version(db,d)
-    c=Doc(id=str(uuid4()),title=body.title.strip(),kind="textbook",subject=d.subject,source_id=None,blocks=[],parent_document_id=d.id,chapter_order=max((v["chapter_order"] for v in existing),default=0)+1,revision=1,archived=False,created_at=now(),updated_at=now())
+    c=Doc(id=str(uuid4()),title=body.title.strip(),kind=d.kind,subject=d.subject,source_id=None,blocks=[],parent_document_id=d.id,chapter_order=max((v["chapter_order"] for v in existing),default=0)+1,revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(c);db.flush();record_version(db,c);finish_chapter_edit(db,d);audit(db,"book.chapter.create",user.id);db.commit()
     return {"document":summary(d),"items":chapter_index(db,d,True),"chapter":summary(c)}
 
@@ -266,7 +275,7 @@ def chapter_archive(id:str,cid:str,action:Literal["archive","restore"],body:Chap
     if c.archived!=archived:
         existing=chapter_index(db,d,True)
         if not archived:
-            if sum(not v["archived"] for v in existing)>=100:raise HTTPException(422,"每本教材最多 100 个有效章节")
+            if sum(not v["archived"] for v in existing)>=100:raise HTTPException(422,"每份资料最多 100 个有效章节")
             check_book_capacity(db,d,len(c.blocks),c.id)
         record_version(db,d);record_version(db,c)
         c.archived=archived;c.revision+=1;c.updated_at=now()
@@ -277,7 +286,7 @@ def chapter_archive(id:str,cid:str,action:Literal["archive","restore"],body:Chap
 @router.put("/{id}/book-settings",dependencies=[Depends(require_origin)])
 def book_settings(id:str,body:ChapterCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=require_book(db,id,body.revision)
-    if not body.title.strip():raise HTTPException(422,"教材名称不能为空")
+    if not body.title.strip():raise HTTPException(422,"资料名称不能为空")
     if d.title!=body.title.strip():
         record_version(db,d);d.title=body.title.strip();finish_chapter_edit(db,d);audit(db,"book.settings",user.id);db.commit()
     return {"document":summary(d),"items":chapter_index(db,d,True)}
@@ -332,7 +341,7 @@ def source_export(source_id:str,db:Session=Depends(get_db)):
 def reference_updates(id:str,db:Session=Depends(get_db)):
     doc=row(db,id)
     if doc.kind=="intake":raise HTTPException(422,"仅用于自编教学资料")
-    if doc.chaptered:raise HTTPException(409,"请从教材目录进入具体章节检查资源更新")
+    if doc.chaptered:raise HTTPException(409,"请从资料目录进入具体章节检查资源更新")
     items=[]
     for b in doc.blocks:
         if b["kind"]!="reference":continue
@@ -375,7 +384,7 @@ def export_document(id:str,db:Session=Depends(get_db)):
     if d.kind=="intake":raise HTTPException(409,"录入文档不支持直接导出，请入库后从来源库导出")
     if d.parent_document_id:book_parent(db,d,False)
     if d.chaptered:
-        if d.archived:raise HTTPException(409,"教材已归档")
+        if d.archived:raise HTTPException(409,"资料已归档")
         result=public(d);blocks=[];size=0
         for meta in chapter_index(db,d):
             c=db.get(Doc,meta["id"])
@@ -413,7 +422,7 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if d.kind=="intake" and (body.kind!=d.kind or body.source_id!=d.source_id):raise HTTPException(409,"请通过来源绑定入口处理录入文档")
     parent=begin_chapter_edit(db,d)
     if parent:
-        if body.kind!="textbook" or body.source_id or normalize_subject(body.subject)!=d.subject:raise HTTPException(422,"章节类型、科目和来源由教材管理")
+        if body.kind!=parent.kind or body.source_id or normalize_subject(body.subject)!=d.subject:raise HTTPException(422,"章节类型、科目和来源由教材管理")
         check_book_capacity(db,parent,len(body.blocks),d.id)
     record_version(db,d)
     d.blocks=validate(db,body,d.blocks,within_chapter=bool(parent));d.title=body.title.strip();d.subject=normalize_subject(body.subject);d.source_id=body.source_id;d.kind=body.kind
@@ -425,12 +434,12 @@ class VersionRestore(BaseModel):
 def document_versions(id:str,db:Session=Depends(get_db)):
     d=row(db,id)
     if d.kind=="intake":raise HTTPException(409,"录入草稿使用入库记录，不适用创作版本历史")
-    rows=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==id).order_by(TeachingDocumentVersion.revision.desc()).limit(30)))
+    rows=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==id,TeachingDocumentVersion.revision<=d.revision).order_by(TeachingDocumentVersion.revision.desc()).limit(HISTORY_KEEP+1)))
     items=[{"revision":v.revision,"created_at":v.created_at,"title":v.snapshot.get("title",d.title),"blocks_count":sum(x["blocks_count"] for x in v.snapshot["chapters"]) if "chapters" in v.snapshot else len(v.snapshot.get("blocks",[])),"chapter_count":len(v.snapshot["chapters"]) if "chapters" in v.snapshot else None,"current":v.revision==d.revision} for v in rows]
     if not any(v["revision"]==d.revision for v in items):
         chapters=chapter_index(db,d) if d.chaptered else []
         items.insert(0,{"revision":d.revision,"created_at":d.updated_at,"title":d.title,"blocks_count":sum(x["blocks_count"] for x in chapters) if d.chaptered else len(d.blocks),"chapter_count":len(chapters) if d.chaptered else None,"current":True})
-    return {"current_revision":d.revision,"items":items}
+    return {"current_revision":d.revision,"history_limit":HISTORY_KEEP,"items":items[:HISTORY_KEEP+1]}
 
 @router.post("/{id}/versions/{version}/restore",dependencies=[Depends(require_origin)])
 def restore_document_version(id:str,version:int,body:VersionRestore,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -439,9 +448,11 @@ def restore_document_version(id:str,version:int,body:VersionRestore,db:Session=D
     target=db.get(TeachingDocumentVersion,(id,version))
     if not target:raise HTTPException(404,"指定历史版本不存在或已超出保留范围")
     if version==d.revision:return public(d)
+    recent=set(db.scalars(select(TeachingDocumentVersion.revision).where(TeachingDocumentVersion.document_id==id,TeachingDocumentVersion.revision<d.revision).order_by(TeachingDocumentVersion.revision.desc()).limit(HISTORY_KEEP)))
+    if version not in recent:raise HTTPException(404,"指定历史版本已超出保留范围")
     snapshot=target.snapshot
     if d.chaptered:
-        if "chapters" not in snapshot:raise HTTPException(409,"此版本不是分章教材版本")
+        if "chapters" not in snapshot:raise HTTPException(409,"此版本不是分章资料版本")
         restore_book_snapshot(db,d,snapshot)
         audit(db,"book.version.restore",user.id);db.commit();return public(d)
     parent=begin_chapter_edit(db,d)
@@ -465,7 +476,7 @@ def restore_book_snapshot(db,d,snapshot):
         target=db.get(TeachingDocumentVersion,(cid,meta["revision"]))
         if not target:raise HTTPException(409,"历史章节版本已超出保留范围")
         data=target.snapshot
-        draft=Draft(title=data["title"],kind="textbook",subject=d.subject,blocks=data["blocks"])
+        draft=Draft(title=data["title"],kind=d.kind,subject=d.subject,blocks=data["blocks"])
         plans.append((c,draft.title,validate(db,draft,data["blocks"],within_chapter=True)))
     record_version(db,d)
     for cid,meta in current.items():
@@ -481,13 +492,13 @@ def restore_book_snapshot(db,d,snapshot):
 @router.post("/{id}/archive",dependencies=[Depends(require_origin)])
 def archive(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
-    if d.parent_document_id:raise HTTPException(409,"请从教材目录归档章节")
-    d.archived=True;d.revision+=1;d.updated_at=now();audit(db,"document.archive",user.id);db.commit();return public(d)
+    if d.parent_document_id:raise HTTPException(409,"请从资料目录归档章节")
+    record_version(db,d);d.archived=True;d.revision+=1;d.updated_at=now();record_version(db,d);audit(db,"document.archive",user.id);db.commit();return public(d)
 @router.post("/{id}/restore",dependencies=[Depends(require_origin)])
 def restore(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
-    if d.parent_document_id:raise HTTPException(409,"请从教材目录恢复章节")
-    d.archived=False;d.revision+=1;d.updated_at=now();audit(db,"document.restore",user.id);db.commit();return public(d)
+    if d.parent_document_id:raise HTTPException(409,"请从资料目录恢复章节")
+    record_version(db,d);d.archived=False;d.revision+=1;d.updated_at=now();record_version(db,d);audit(db,"document.restore",user.id);db.commit();return public(d)
 
 @router.post("/{id}/blocks/{uid}/register",dependencies=[Depends(require_origin)])
 def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=Depends(current_user)):

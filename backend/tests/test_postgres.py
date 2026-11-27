@@ -229,6 +229,34 @@ def test_migration_and_login(tmp_path, monkeypatch):
         restored_index=client.get(bpath+"/chapters").json()
         assert [v["id"] for v in restored_index["items"]]==[cid,cid2]
         assert client.get("/api/documents/"+cid).json()["blocks"]==[]
+        # Shared handout chapter model and two retained historical revisions.
+        handout=client.post("/api/documents/books",headers=origin,json={"kind":"handout","title":"分章讲义"}).json()
+        hpath="/api/documents/"+handout["id"]
+        assert handout["kind"]=="handout" and handout["chaptered"]
+        hchapter=client.post(hpath+"/chapters",headers=origin,json={"revision":handout["revision"],"title":"极限专题"}).json()["chapter"]
+        hcpath="/api/documents/"+hchapter["id"]
+        hd=client.get(hcpath).json()
+        assert hd["kind"]=="handout" and hd["parent_document_id"]==handout["id"]
+        for number in range(4):
+            edit=client.put(hcpath,headers=origin,json={**hd,"blocks":[{"uid":"section","kind":"heading","heading_level":2,"title":"小节"},{"uid":"text","kind":"text","content":str(number)}]})
+            assert edit.status_code==200,edit.text
+            hd=edit.json()
+        hv=client.get(hcpath+"/versions").json()
+        assert hv["history_limit"]==2 and [v["revision"] for v in hv["items"]]==[5,4,3]
+        assert client.post(hcpath+"/versions/2/restore",headers=origin,json={"revision":5}).status_code==404
+        from app.models import TeachingDocumentVersion
+        from sqlalchemy import select
+        with session_factory()() as db:
+            assert set(db.scalars(select(TeachingDocumentVersion.revision).where(TeachingDocumentVersion.document_id==hd["id"])))=={3,4,5}
+        handout_export=client.get(hpath+"/export").json()
+        assert handout_export["kind"]=="handout" and handout_export["blocks"][-1]["content"]=="3"
+        hv=client.get(hpath+"/versions").json()
+        assert len(hv["items"])==3
+        old_book_revision=hv["items"][-1]["revision"]
+        restore_handout=client.post(hpath+"/versions/"+str(old_book_revision)+"/restore",headers=origin,json={"revision":hv["current_revision"]})
+        assert restore_handout.status_code==200,restore_handout.text
+        assert client.get(hcpath).json()["blocks"][-1]["content"]=="1"
+        assert hchapter["id"] not in [x["id"] for x in client.get("/api/documents?kind=handout").json()["items"]]
         # Exercise the 5000-block boundary through the actual API, not a raised JSON limit.
         import time
         scale_book=client.post("/api/documents/books",headers=origin,json={"title":"5000项教材容量测试"}).json()
@@ -257,7 +285,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.put(extra_path,headers=origin,json={**extra_doc,"blocks":[{"uid":"overflow","kind":"text","content":"超容量"}]}).status_code==422
         assert client.get(extra_path).json()["blocks"]==[]
         receipt=client.get(scale_path+"/versions").json()
-        assert len(receipt["items"])==30 and receipt["items"][0]["blocks_count"]==5000
+        assert len(receipt["items"])==3 and receipt["history_limit"]==2 and receipt["items"][0]["blocks_count"]==5000
         rolled=client.post(scale_path+"/versions/"+str(scale_book["revision"])+"/restore",headers=origin,json={"revision":extra["document"]["revision"]})
         assert rolled.status_code==200,rolled.text[:500]
         after=client.get(scale_path+"/chapters").json()
