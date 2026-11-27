@@ -47,6 +47,47 @@ def create_selection(body: Selection, db, user):
                                             subject=body.subject, blocks=blocks), db, user)
 
 
+class BlockPatch(StrictBody):
+    uid: str = Field(min_length=1, max_length=36)
+    field: Literal["title","content","answer","solution","analysis","proof","score","hidden_fields"]
+    value: str | float | list[str]
+
+
+class DocumentPatch(StrictBody):
+    revision: int = Field(ge=1)
+    patches: list[BlockPatch] = Field(min_length=1,max_length=100)
+
+
+def patch_document(id: str, body: DocumentPatch, db, user):
+    d = documents.row(db,id)
+    if d.kind == "intake" or d.chaptered or d.archived or d.revision != body.revision:
+        raise HTTPException(409,"仅支持当前版本的创作文档局部编辑")
+    blocks = [dict(b) for b in d.blocks]
+    by_id = {b["uid"]: b for b in blocks}
+    seen=set()
+    for p in body.patches:
+        b=by_id.get(p.uid)
+        if not b or (p.uid,p.field) in seen:
+            raise HTTPException(422,"修改对象不存在或重复")
+        seen.add((p.uid,p.field))
+        if p.field=="score":
+            if d.kind!="paper" or b.get("snapshot",b).get("kind")!="question" or b.get("subquestion_scores") or not isinstance(p.value,(int,float)):
+                raise HTTPException(422,"仅允许设置试卷整题分值")
+        elif p.field=="hidden_fields":
+            if b["kind"]!="reference" or not isinstance(p.value,list):
+                raise HTTPException(422,"仅引用块可设置字段显示")
+        else:
+            if not isinstance(p.value,str) or b["kind"] not in ("heading","text","question","knowledge","reference"):
+                raise HTTPException(422,"不支持该字段")
+            if b["kind"]=="reference":
+                b["local_fields"]=list(dict.fromkeys([*(b.get("local_fields") or []),p.field]))
+            elif p.field not in documents.EDITABLE.get(b["kind"],set()):
+                raise HTTPException(422,"不支持该字段")
+        b[p.field]=p.value
+    return documents.update(id,documents.Draft(title=d.title,kind=d.kind,subject=d.subject,source_id=d.source_id,
+                                                blocks=blocks,revision=body.revision),db,user)
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -116,6 +157,8 @@ register("document_read", "读取文档及真实版本", documents.read, ("id",)
 register("book_chapters", "读取教材章节", documents.book_chapters, ("id",))
 register("layout_read", "读取文档或来源排版设置", settings.read_document_layout, ("scope","identity"))
 register("template_search", "查询用户排版模板", settings.read_document_templates)
+register("work_search", "查询已归档教学作品", teaching_works.listing, ("q","kind","subject","scope","limit","offset"))
+register("work_read", "读取教学作品实际版本", teaching_works.detail, ("ident",))
 register("video_search", "查询视频项目", video.listing)
 register("video_read", "查询视频实际状态与任务", video.detail, ("ident",))
 register("video_history", "读取视频微调记录", video.history, ("ident",))
@@ -127,6 +170,8 @@ register("selection_create", "从已存在题目或知识点创建试卷、讲�
          ("body",), write=True)
 register("book_create", "创建教材或章节式讲义草稿", documents.create_book, ("body",), write=True)
 register("chapter_create", "在指定教材中新增章节", documents.create_chapter, ("id","body"), write=True)
+register("document_patch", "按真实文档块编号局部修改创作文档，不修改题库原件；需要当前版本", patch_document, ("id","body"), write=True)
+register("layout_update", "修改指定文档或来源排版配置，必须使用最新revision；不自动正式导出", settings.update_document_layout, ("scope","identity","body"), write=True)
 register("video_create", "根据题库原题和已有推荐解析创建视频项目", video.create, ("body",), write=True)
 register("video_generate", "提交指定视频的代码生成任务，不代表渲染完成", video.produce, ("ident",), fixed={"action":"generate"}, write=True)
 register("video_render", "提交指定视频的渲染任务，不代表成片完成", video.produce, ("ident",), fixed={"action":"render"}, write=True)
