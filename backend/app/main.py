@@ -11,6 +11,7 @@ from app.api.files import router as files_router
 from app.api.settings import router as settings_router
 from app.core.config import settings
 from app.api.resources import router as resource_router
+from app.api.bank_work import router as bank_work_router
 from app.services.recommendation_worker import recommendation_loop
 from app.api.qoder import router as qoder_router, model_refresh_loop
 from app.api.chat import router as chat_router
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(files_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
     app.include_router(resource_router, prefix="/api")
+    app.include_router(bank_work_router, prefix="/api")
     app.include_router(qoder_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")

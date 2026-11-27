@@ -17,6 +17,7 @@ from app.core import question_matching as matching
 from app.core import method_recommendation as recommendation
 from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument, KnowledgeRelation, VideoProject, Setting
 from app.services import storage
+from app.core.bank_history import record as record_bank_history
 from app.services.inline_images import validate_images,protect_resource_images
 
 router=APIRouter(prefix="/resources",tags=["resources"],dependencies=[Depends(current_user)])
@@ -183,7 +184,7 @@ def question_list_summaries(db,rows,data):
         item["bank_summary"]={"source_count":len(sources[r.id]),"source_title":titles.get(r.source_id) or next((titles[s] for s in sorted(sources[r.id]) if s in titles),""),"method_count":count,"has_answer":bool(r.answer.strip()),"has_solution":bool(r.solution.strip())}
 
 @router.get("")
-def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),bank_summary:bool=False,origin_exam:str=Query("",max_length=80),origin_authority:str=Query("",max_length=24),origin_edition:str=Query("",max_length=60),year_from:int|None=Query(None,ge=1900,le=2200),year_to:int|None=Query(None,ge=1900,le=2200),original_number:str=Query("",max_length=40),original_page:int|None=Query(None,ge=1),knowledge_mode:Literal["any","all"]="any",method_name:str=Query("",max_length=60),integrity:Literal["complete","missing_answer","missing_solution","ambiguous"]|None=None,method_state:Literal["single","multi","pending","review","failed","confirmed"]|None=None,source_count:Literal["none","single","multiple"]|None=None,sort:Literal["updated","created","year","number","difficulty","sources"]="updated",db:Session=Depends(get_db)):
+def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),bank_summary:bool=False,origin_exam:str=Query("",max_length=80),origin_authority:str=Query("",max_length=24),origin_edition:str=Query("",max_length=60),year_from:int|None=Query(None,ge=1900,le=2200),year_to:int|None=Query(None,ge=1900,le=2200),original_number:str=Query("",max_length=40),original_page:int|None=Query(None,ge=1),knowledge_mode:Literal["any","all"]="any",method_name:str=Query("",max_length=60),integrity:Literal["complete","missing_answer","missing_solution","ambiguous"]|None=None,method_state:Literal["single","multi","pending","review","failed","confirmed"]|None=None,source_count:Literal["none","single","multiple"]|None=None,sort:Literal["updated","created","year","number","difficulty","sources"]="updated",selection_only:bool=False,compact:bool=False,db:Session=Depends(get_db)):
     filters=[TeachingResource.archived==archived]
     if kind: filters.append(TeachingResource.kind==kind)
     if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
@@ -229,7 +230,7 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
             old_pos.extend([L.page_start<=original_page,func.coalesce(L.page_end,L.page_start)>=original_page])
             new_pos.extend([page_start<=original_page,func.coalesce(page_end,page_start)>=original_page])
         link_match=select(L.resource_id).join(S,S.id==L.source_id).where(*source_filters)
-        if position_requested:link_match=link_match.where(or_(and_(*old_pos),select(literal(1)).select_from(occ).where(*new_pos).correlate(L).exists()))
+        if position_requested:link_match=link_match.where(or_(and_(func.jsonb_array_length(cast(L.occurrences,JSONB))==0,*old_pos),select(literal(1)).select_from(occ).where(*new_pos).correlate(L).exists()))
         primary_match=select(S.id).where(*source_filters)
         if origin_requested:filters.append(R.id.in_(link_match) if position_requested else or_(R.id.in_(link_match),R.source_id.in_(primary_match)))
         all_source_links=select(L.source_id.label("sid")).where(L.resource_id==R.id).correlate(R).union(select(R.source_id.label("sid")).where(R.source_id.is_not(None)).correlate(R)).subquery()
@@ -292,6 +293,9 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
         term=q.strip()
         filters.append(or_(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
     total=db.scalar(select(func.count()).select_from(TeachingResource).where(*filters))
+    if selection_only:
+        if kind!="question" or total>2000:raise HTTPException(422,"一次最多选择2000道题，请缩小筛选范围")
+        return {"items":[{"id":r.id,"revision":r.revision} for r in db.execute(select(TeachingResource.id,TeachingResource.revision).where(*filters).order_by(*order).limit(2000))],"total":total}
     rows=list(db.scalars(select(TeachingResource).where(*filters).order_by(*order).offset(offset).limit(limit)))
     knowledge_lookup={}
     if bank_query and rows:
@@ -299,6 +303,9 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
             knowledge_lookup.setdefault(point.resource_id,[]).append(point)
     data=[view(r,knowledge_lookup=knowledge_lookup if bank_query else None) for r in rows]
     if bank_summary:question_list_summaries(db,rows,data)
+    if compact and bank_query:
+        for item in data:
+            for key in ("answer","solution","analysis","proof","question_data"):item.pop(key,None)
     return {"items":data,"total":total}
 
 @router.post("/source-matches",dependencies=[Depends(require_origin)])
@@ -365,7 +372,9 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if row.source_id!=primary: change_primary(db,row,primary)
     if row.kind in ("question","knowledge") and (body.tags!=before["tags"] or row.subject!=before["subject"]):sync_knowledge_names(db,row,row.tags)
     row.revision+=1;row.updated_at=now()
-    if row.kind=="question" and row.solution!=before["solution"]:enqueue_recommendation(db,row,user.id)
+    if row.kind=="question" and (row.solution!=before["solution"] or row.answer!=before["answer"] or row.content!=before["content"]):
+        enqueue_recommendation(db,row,user.id)
+        record_bank_history(db,row.id,"question_edit",before,view(row),user.id,row.revision)
     snapshot(db,row);audit(db,"resource.update",user.id);db.commit()
     return view(row)
 
@@ -378,6 +387,8 @@ def set_archived(db,row,value,user):
             raise HTTPException(409,"来源已被文档引用，请先解除绑定")
         if db.scalar(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==row.id).limit(1)):
             raise HTTPException(409,"来源仍被资源引用，请先解除关联")
+    if not value and row.kind=="question" and any(matching.same_question(r.content,row.content) for r in db.scalars(select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.archived==False,TeachingResource.id!=row.id,TeachingResource.stem_key==row.stem_key))):
+        raise HTTPException(409,"有效题库已有相同题干，请先核对")
     row.archived=value;row.revision+=1;row.updated_at=now();snapshot(db,row)
     audit(db,"resource.archive" if value else "resource.restore",user.id);db.commit()
     return view(row)
@@ -483,9 +494,11 @@ def confirm_recommendation(id:str,body:MethodSelection,db:Session=Depends(get_db
     if not solution or len(solution)>50000:raise HTTPException(422,"推荐解析为空或超出限制")
     evaluation=read_recommendation(db,row)
     accepted_ai=evaluation.get("state")=="review" and evaluation.get("choices")==body.choices
+    before={"solution":row.solution,"question_data":row.question_data,"evaluation":evaluation}
     row.solution=solution;row.question_data=data;row.fingerprint=question_fingerprint(row.content,row.solution,row.answer)
     row.revision+=1;row.updated_at=now()
     store_recommendation(db,row,{"revision":row.revision,"state":"confirmed","choices":body.choices,"reason":evaluation.get("reason") if accepted_ai else body.reason,"model":evaluation.get("model") if accepted_ai else None,"confirmed_at":now()})
+    record_bank_history(db,row.id,"recommendation",before,{"solution":row.solution,"question_data":row.question_data,"choices":body.choices},user.id,row.revision)
     audit(db,"resource.recommendation.confirm",user.id);db.commit()
     return {"revision":row.revision,"groups":recommendation_groups(row),"evaluation":read_recommendation(db,row)}
 
@@ -503,7 +516,18 @@ class SourceLinks(BaseModel):
     revision:int=Field(ge=1)
     items:list[SourceLink]=Field(max_length=100)
 def link_view(db,row):
-    return {"revision":row.sources_revision,"items":[{**{k:getattr(l,k) for k in SourceLink.model_fields},"source_title":db.get(TeachingResource,l.source_id).title,"occurrences":l.occurrences or []} for l in links(db,row)]}
+    linked=links(db,row)
+    sources={s.id:s for s in db.scalars(select(TeachingResource).where(TeachingResource.id.in_({l.source_id for l in linked})))}
+    items=[];positions=set()
+    for l in linked:
+        s=sources[l.source_id]
+        occurrences=l.occurrences or []
+        for o in occurrences:
+            loc=tuple(o.get(k) or "" for k in ("original_question_number","page_start","page_end","chapter"))
+            positions.add((s.id,*loc) if loc[0] or loc[1] else (s.id,*loc,o.get("document_id"),o.get("item_uid")))
+        if not occurrences and (l.original_question_number or l.page_start or l.chapter):positions.add((s.id,l.original_question_number,l.page_start or "",l.page_end or "",l.chapter))
+        items.append({**{k:getattr(l,k) for k in SourceLink.model_fields},"source_title":s.title,"source_type":s.source_type,"cohort_year":s.cohort_year,"edition":s.edition,"exam_type":s.exam_type,"source_archived":s.archived,"occurrences":occurrences})
+    return {"revision":row.sources_revision,"items":items,"source_count":len(sources),"occurrence_count":len(positions)}
 
 @router.get("/{id}/sources")
 def list_sources(id:str,db:Session=Depends(get_db)): return link_view(db,existing(db,id))
@@ -522,6 +546,7 @@ def replace_sources(id:str,body:SourceLinks,db:Session=Depends(get_db),user:User
             if primary: raise HTTPException(422,"只能选择一个主要来源")
             primary=item.source_id
         keys.add(key)
+    before=link_view(db,row)
     previous={(l.source_id,l.provenance_role):l.occurrences or [] for l in links(db,row)}
     by_source={}
     for (source_id,_),occurrences in previous.items():by_source.setdefault(source_id,[]).extend(occurrences)
@@ -529,6 +554,8 @@ def replace_sources(id:str,body:SourceLinks,db:Session=Depends(get_db),user:User
     db.flush()
     for item in body.items: db.add(ResourceSourceLink(resource_id=row.id,**item.model_dump(),occurrences=previous.get((item.source_id,item.provenance_role),by_source.get(item.source_id,[]))))
     row.source_id=primary;row.sources_revision+=1;row.revision+=1;row.updated_at=now()
+    db.flush()
+    record_bank_history(db,row.id,"sources",before,link_view(db,row),user.id,row.revision)
     audit(db,"resource.sources.update",user.id);db.commit()
     return link_view(db,row)
 
