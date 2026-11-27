@@ -40,3 +40,25 @@ def test_vision_calls_real_attachment_endpoint(monkeypatch):
     assert calls[1][1]=="/vision/start"
     assert calls[1][2]["attachment"]=={"media_type":"image/png","base64":"dGVzdA=="}
     assert calls[1][2]["model"]=="DeepSeek-Flash"
+
+def test_pdf_vision_precedes_text_and_uses_text_fallback(monkeypatch):
+    from types import SimpleNamespace
+    f=SimpleNamespace(media_type="application/pdf")
+    calls=[]
+    def extract(*args):
+        calls.append("vision")
+        raise HTTPException(422,"vision failed")
+    def local(file,mode,start,end):
+        calls.append(mode)
+        return {"text":"pdf text","method":"pdf_text","warnings":[]}
+    monkeypatch.setattr(v,"extract",extract)
+    monkeypatch.setattr(v.imp,"extract",local)
+    result=v.recognize(f,2,"DeepSeek-Flash")
+    assert calls==["vision","text"]
+    assert result["method"]=="pdf_text" and "vision failed" in result["warnings"][0]
+
+def test_pdf_vision_success_does_not_extract_text(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(v,"extract",lambda *a:{"text":"$x^2$","method":"qoder_vision","warnings":[]})
+    monkeypatch.setattr(v.imp,"extract",lambda *a:pytest.fail("text layer must not override vision"))
+    assert v.recognize(SimpleNamespace(media_type="application/pdf"),1,"Auto")["method"]=="qoder_vision"
