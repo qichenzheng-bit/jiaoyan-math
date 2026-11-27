@@ -450,7 +450,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})
         assert related.status_code==200,related.text
         assert related.json()["blocking"] is False
-        assert any(x["resource"]["id"]==related_seed["id"] and "共同方法名称" in x["reason"] and "共同知识点" in x["reason"] for x in related.json()["items"])
+        assert any(x["resource"]["id"]==related_seed["id"] and "共同方法名称" in x["reason"] and "共同知识标签" in x["reason"] for x in related.json()["items"])
         from app.api import qoder as chat_qoder
         worker_calls=[]
         def fake_worker(method,path,body=None):
