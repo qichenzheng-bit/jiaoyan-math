@@ -1152,6 +1152,8 @@ with sync_playwright() as p:
             print('UI case: phone work record rename and permanent deletion',flush=True)
             work_rows=[{"id":"agent-work-demo","title":"把题目录取","updated_at":1795656773}]
             removed_work=[]
+            def child_jobs(route):
+                route.fulfill(json=[{"id":"linked-intake","title":"Camera_long_file.jpg · 1–1","state":"running","updated_at":1795656790,"provenance":{"workspace_id":"agent-work-demo","work_batch_id":"agent-batch"}}] if work_rows else [])
             def work_nav(route):
                 route.fulfill(json=work_rows)
             def work_record(route):
@@ -1164,6 +1166,7 @@ with sync_playwright() as p:
                     route.fulfill(json={"deleted":True,"id":"agent-work-demo","removed_job_ids":[]})
                 else:answer(route)
             page.route("**/api/workspaces",work_nav)
+            page.route("**/api/intelligence/jobs",child_jobs)
             page.route("**/api/workspaces/agent-work-demo",work_record)
             try:
                 page.set_viewport_size({"width":393,"height":873})
@@ -1171,6 +1174,11 @@ with sync_playwright() as p:
                 page.get_by_role("button",name="打开导航",exact=True).click()
                 nav=page.locator("#workspace-navigation")
                 record=nav.get_by_role("link",name="把题目录取",exact=True)
+                expect(record).to_have_attribute("href","/work?workspace=agent-work-demo")
+                expect(nav.get_by_role("link",name="Camera_long_file.jpg · 1–1",exact=True)).to_have_count(0)
+                nav.locator(".nav-combined-history").get_by_role("button",name="全部",exact=True).click()
+                expect(nav.get_by_role("link",name="Camera_long_file.jpg · 1–1",exact=True)).to_have_count(0)
+                nav.locator(".nav-combined-history").get_by_role("button",name="收起",exact=True).click()
                 record.dispatch_event("pointerdown",{"pointerType":"touch","clientX":100,"clientY":300})
                 sheet=page.get_by_role("dialog",name="记录操作")
                 expect(sheet).to_be_visible()
@@ -1195,6 +1203,7 @@ with sync_playwright() as p:
                 nav.get_by_role("button",name="关闭导航",exact=True).click()
             finally:
                 page.unroute("**/api/workspaces",work_nav)
+                page.unroute("**/api/intelligence/jobs",child_jobs)
                 page.unroute("**/api/workspaces/agent-work-demo",work_record)
             print('UI case: mobile Word layout preview before and after upload',flush=True)
             import io, zipfile

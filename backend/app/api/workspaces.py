@@ -68,7 +68,16 @@ def unit_count(f):
     if f.media_type==imp.DOCX:return len(imp.docx_blocks(storage.file_path(f))[0])
     if f.media_type in imp.TEXT or f.media_type in storage.IMAGE_TYPES:return 1
     raise HTTPException(415,"仅支持PDF、DOCX、文本与图片")
-def session_view(s):return {"id":s.id,"title":s.title,"created_at":s.created_at,"updated_at":s.updated_at}
+def session_view(s):
+    # Include agent-started intake children even for legacy jobs without provenance.
+    ids=set()
+    for record in s.agent_history or []:
+        child=record.get("child") or {}
+        if child.get("kind")=="intake" and child.get("id"):ids.add(child["id"])
+        for step in record.get("steps") or []:
+            result=step.get("result") or {}
+            if step.get("tool")=="intake_text" and isinstance(result,dict) and result.get("id"):ids.add(result["id"])
+    return {"id":s.id,"title":s.title,"created_at":s.created_at,"updated_at":s.updated_at,"intake_job_ids":sorted(ids)}
 def latest_job(db,b):
     j=db.get(IntakeJob,b.job_id) if b.job_id else None
     seen=set()

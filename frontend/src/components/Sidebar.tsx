@@ -9,8 +9,8 @@ import {api} from '../auth'
 import {workspaceGroups,activeWorkspaceGroup,type WorkspaceGroup} from '../navigation'
 type Props={user:string;displayName:string;open:boolean;phone:boolean;collapsed:boolean;onClose:()=>void;onToggle:()=>void;onLogout:()=>void}
 type Session={id:string;title:string;project?:string;pinned:boolean;archived:boolean;updated_at?:number;created_at?:number}
-type Job={id:string;title:string;state:string;updated_at?:number;created_at?:number}
-type PersistentSession={id:string;title:string;updated_at:number}
+type Job={id:string;title:string;state:string;updated_at?:number;created_at?:number;provenance?:{workspace_id?:string;work_batch_id?:string}}
+type PersistentSession={id:string;title:string;updated_at:number;intake_job_ids?:string[]}
 type Doc={id:string;title:string}
 type RecordItem={id:string;title:string;kind:'chat'|'work';path:string;time:number;pinned:boolean;session?:Session}
 const tools=[{path:'/checkin',name:'签到助手',icon:'calendar'},{path:'/qoder',name:'AI 账号与模型',icon:'spark'},{path:'/settings',name:'系统设置',icon:'settings'}]
@@ -64,9 +64,12 @@ export default function Sidebar({user,displayName,open,phone,collapsed,onClose,o
  useEffect(()=>{if(phone&&recordMenu&&sheet.current&&!sheet.current.open)sheet.current.showModal()},[phone,recordMenu])
  useEffect(()=>()=>{if(press.current)clearTimeout(press.current.timer)},[])
  useEffect(()=>{const c=new AbortController();api<PersistentSession[]>('/workspaces',{signal:c.signal}).then(r=>{if(!c.signal.aborted&&Array.isArray(r))setWorkspaces(r)}).catch(()=>{});return()=>c.abort()},[location.pathname,location.search,refresh])
- const records:RecordItem[]=[...((historyKind==='chat')?[]:workspaces.filter(w=>!allHistory||!historyQuery||w.title.toLowerCase().includes(historyQuery.toLowerCase())).map(w=>({id:'workspace:'+w.id,title:w.title,kind:'work' as const,path:'/work?workspace='+encodeURIComponent(w.id),time:w.updated_at,pinned:false}))),...((historyKind==='work')?[]:sessions.map(s=>({id:'chat:'+s.id,title:s.title,kind:'chat' as const,path:'/chat?session='+encodeURIComponent(s.id),time:s.updated_at??s.created_at??0,pinned:s.pinned,session:s}))),...((historyKind==='chat')?[]:jobs.filter(j=>!allHistory||!historyQuery||j.title.toLowerCase().includes(historyQuery.toLowerCase())).map(j=>({id:'work:'+j.id,title:j.title,kind:'work' as const,path:'/work?job='+encodeURIComponent(j.id),time:j.updated_at??j.created_at??0,pinned:false})))].sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.time-a.time||a.id.localeCompare(b.id))
+ // A recognition/organization job is a child of its conversation, not another history record.
+ const jobParents=new Map<string,string>();for(const w of workspaces)for(const id of w.intake_job_ids??[])jobParents.set(id,w.id);for(const j of jobs)if(j.provenance?.workspace_id)jobParents.set(j.id,j.provenance.workspace_id)
+ const activeWorkspace=params.get('workspace')||params.get('fromWorkspace')||(activeJob?jobParents.get(activeJob):undefined)
+ const records:RecordItem[]=[...((historyKind==='chat')?[]:workspaces.filter(w=>!allHistory||!historyQuery||w.title.toLowerCase().includes(historyQuery.toLowerCase())).map(w=>({id:'workspace:'+w.id,title:w.title,kind:'work' as const,path:'/work?workspace='+encodeURIComponent(w.id),time:Math.max(w.updated_at,...jobs.filter(j=>jobParents.get(j.id)===w.id).map(j=>j.updated_at??j.created_at??0)),pinned:false}))),...((historyKind==='work')?[]:sessions.map(s=>({id:'chat:'+s.id,title:s.title,kind:'chat' as const,path:'/chat?session='+encodeURIComponent(s.id),time:s.updated_at??s.created_at??0,pinned:s.pinned,session:s}))),...((historyKind==='chat')?[]:jobs.filter(j=>!jobParents.has(j.id)&&!j.provenance?.work_batch_id&&(!allHistory||!historyQuery||j.title.toLowerCase().includes(historyQuery.toLowerCase()))).map(j=>({id:'work:'+j.id,title:j.title,kind:'work' as const,path:'/work?job='+encodeURIComponent(j.id),time:j.updated_at??j.created_at??0,pinned:false})))].sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.time-a.time||a.id.localeCompare(b.id))
  const recent=allHistory?records:records.slice(0,12),dateGroups=['置顶','今天','昨天','较早']
- const active=(r:RecordItem)=>r.kind==='chat'?chat&&r.session?.id===activeSession:r.id==='work:'+activeJob||location.pathname==='/work'&&r.id==='workspace:'+params.get('workspace')
+ const active=(r:RecordItem)=>r.kind==='chat'?chat&&r.session?.id===activeSession:r.id==='work:'+activeJob||location.pathname==='/work'&&r.id==='workspace:'+activeWorkspace
  function clearPress(){if(press.current){clearTimeout(press.current.timer);press.current=undefined}}
  function openRecord(r:RecordItem){if(historyBusy)return;setRecordMenu(r.id);setRecordError('');setRenaming(undefined)}
  function beginPress(e:ReactPointerEvent,r:RecordItem){longPressed.current=false;if(!phone||e.pointerType==='mouse'||(e.target as HTMLElement).closest('button'))return;clearPress();press.current={x:e.clientX,y:e.clientY,timer:window.setTimeout(()=>{longPressed.current=true;openRecord(r)},500)}}

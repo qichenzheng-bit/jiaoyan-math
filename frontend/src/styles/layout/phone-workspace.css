@@ -236,3 +236,9 @@
 .print-block .answer-solution-field{border:0;padding:0;margin:0 0 3mm}
 .print-block .answer-solution-heading{display:block;margin-bottom:1mm}
 .print-block .answer-solution-field .katex-display{overflow:visible}
+
+@media(max-width:760px){
+ .shell.clean-workspace .nav .nav-history-main>a>.nav-text{flex:1;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .shell.clean-workspace .nav .nav-history-main>a>.nav-text .math-text-inline{display:inline;white-space:nowrap}
+ .shell.clean-workspace .nav .nav-history-main>a>.nav-text .math-text-inline span{white-space:nowrap}
+}
