@@ -302,6 +302,23 @@ with sync_playwright() as p:
             page.get_by_role("button",name="展开侧边栏",exact=True).click()
             page.wait_for_function("Math.abs(document.querySelector('.shell > .nav').getBoundingClientRect().width-210)<1")
         if GROUP in {'all','desktop'}:
+            print('UI case: responsive work composer and menus',flush=True)
+            visit(page,"/work",".work-chat")
+            for width,height in ((320,568),(390,844),(760,420),(873,393),(1024,768)):
+                page.set_viewport_size({"width":width,"height":height})
+                page.get_by_role("button",name="打开模型选择",exact=True).click()
+                panel=page.locator(".composer-inference-panel")
+                expect(panel).to_be_visible()
+                assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1&&r.top>=-1&&r.bottom<=innerHeight+1}")
+                page.keyboard.press("Escape")
+                page.get_by_role("button",name="添加录入资料").click()
+                menu=page.get_by_role("dialog",name="添加资料")
+                expect(menu).to_be_visible()
+                assert menu.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1&&r.top>=-1&&r.bottom<=innerHeight+1}")
+                page.keyboard.press("Escape")
+                assert page.locator(".compact-composer").evaluate("(el)=>{const r=el.getBoundingClientRect(),h=document.querySelector('.topbar').getBoundingClientRect();return r.top>=h.bottom-1&&r.bottom<=innerHeight+1&&r.left>=-1&&r.right<=innerWidth+1}")
+            page.set_viewport_size({"width":1600,"height":900})
+        if GROUP in {'all','desktop'}:
             print('UI case: combined work and chat history',flush=True)
             def nav_job_fixture(route):
                 route.fulfill(json=[{"id":"review-demo","title":"导航工作记录测试","state":"review","updated_at":2}])

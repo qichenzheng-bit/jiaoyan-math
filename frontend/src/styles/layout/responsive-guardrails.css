@@ -1,0 +1,56 @@
+/* Screen-only collision fixes. No print/layout geometry changes. */
+@media screen{
+ .composer-inference-panel.wg-viewport-menu{position:fixed;box-sizing:border-box;z-index:60;max-width:calc(100vw - 20px);overscroll-behavior:contain}
+ .composer-inference-panel.wg-viewport-menu .composer-model-list{min-height:36px}
+ .shell.legacy-shell.clean-workspace .topbar .mode-left,.shell.legacy-shell.clean-workspace .topbar .topbar-actions{min-width:0}
+ .shell.legacy-shell.clean-workspace .topbar .mode-switch{min-width:0;max-width:100%}
+ .shell.legacy-shell.clean-workspace .topbar .breadcrumb strong{white-space:nowrap;max-width:100%;display:block}
+ .mode-more-panel{max-height:calc(100dvh - 74px);overflow-y:auto;overscroll-behavior:contain}
+ .shell.legacy-shell.clean-workspace .nav .clean-group-toggle .nav-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+ .shell.legacy-shell.clean-workspace .nav .nav-fixed-tools a{min-width:0}
+ .shell.legacy-shell.clean-workspace .nav .nav-fixed-tools .nav-text{overflow:hidden;text-overflow:ellipsis}
+ .compact-composer,.agent-composer{box-sizing:border-box;min-width:0;max-width:100%}
+ .compact-composer>textarea,.agent-composer>textarea{min-width:0;max-width:100%}
+ .compact-composer>.chat-attachments,.compact-composer>.chat-reference-picker,.agent-composer .wg-attachment-strip{max-width:100%;min-width:0}
+ .compact-composer>.chat-reference-picker{max-height:min(32dvh,250px);overflow:auto;overscroll-behavior:contain}
+ .chat-compose-tools.compact-tools{min-width:0;max-width:100%}
+ .chat-compose-tools.compact-tools>.composer-plus,.chat-compose-tools.compact-tools>.composer-send,.chat-compose-tools.compact-tools>.chat-stop{flex:none}
+ .shell.legacy-shell.clean-workspace .chat-conversation .chat-message-body .wg-attachment-strip{width:100%;box-sizing:border-box}
+ .wg-review-header,.wg-panel-head,.wg-review-footer,.manual-word-toolbar,.persistent-head,.persistent-range,.production-heading{flex-wrap:wrap}
+ .wg-review-header>*,.wg-panel-head>*,.manual-word-toolbar>*,.persistent-head>*,.production-heading>*{min-width:0}
+ .wg-review-editor,.wg-review-side,.wg-review-list,.manual-word-canvas,.assembly-library,.assembly-cart,.video-panel-title{min-width:0}
+ .wg-review-editor input:not([type=checkbox]):not([type=radio]),.wg-review-editor select,.manual-word-canvas input:not([type=checkbox]):not([type=radio]),.manual-word-canvas select,.assembly-library select{max-width:100%;min-width:0}
+ .wg-review-editor .katex-display,.manual-word-canvas .katex-display,.assembly-library .katex-display,.bank-detail .katex-display{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+ .wg-review-header h2,.wg-panel-head h2,.production-info strong,.production-recent-item strong,.agent-conversation-head h1{overflow-wrap:anywhere}
+ @media(min-width:761px) and (max-width:1000px){
+  .legacy-shell .composition-work .assembly-grid{grid-template-columns:minmax(0,1fr)}
+  .legacy-shell .composition-work .assembly-cart{position:static;max-height:none;min-height:0}
+  .legacy-shell .composition-editing .manual-word-layout.has-matches,.legacy-shell .composition-editing .manual-word-layout.no-matches{grid-template-columns:minmax(0,1fr)}
+  .legacy-shell .composition-editing .manual-word-outline,.legacy-shell .composition-editing .manual-word-matches{position:static;max-height:30dvh;overflow:auto}
+ }
+ @media(max-width:760px){
+  .shell.legacy-shell.clean-workspace .topbar .mode-left{gap:2px}
+  .shell.legacy-shell.clean-workspace .topbar .topbar-actions{justify-self:end}
+  .compact-composer>textarea,.agent-composer>textarea{font-size:16px}
+  .wg-attachment-strip{max-height:96px}
+  .wg-review-grid .wg-item-actions,.wg-review-footer>div,.manual-word-toolbar,.persistent-range,.video-panel-title{flex-wrap:wrap}
+  .wg-review-header>h2{flex:1 1 130px}
+  .agent-conversation-head h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .agent-conversation-head>button{max-width:48%;white-space:normal}
+  html[data-composer-keyboard=true] .compact-composer .wg-attachment-strip,html[data-composer-keyboard=true] .agent-composer .wg-attachment-strip{max-height:64px;padding-block:2px}
+  html[data-composer-keyboard=true] .wg-attachment-tile{height:56px;flex-basis:60px}
+  html[data-composer-keyboard=true] .compact-composer>textarea,html[data-composer-keyboard=true] .agent-composer>textarea{max-height:min(110px,22dvh)}
+  html[data-composer-keyboard=true] .work-manual-config{max-height:12dvh}
+ }
+ @media(max-width:360px){
+  .shell.legacy-shell.clean-workspace.mode-home>.workspace>.mode-topbar{padding-inline:7px;gap:3px}
+  .shell.legacy-shell.clean-workspace .topbar .workspace-back{min-width:26px;padding:2px}
+  .shell.legacy-shell.clean-workspace .topbar .mode-switch a{min-width:0;padding-inline:12px}
+  .shell.legacy-shell.clean-workspace .topbar .mode-more-trigger{width:34px;min-width:34px;height:34px;min-height:34px}
+ }
+ @media(max-height:480px){
+  .shell.legacy-shell.clean-workspace .work-chat.ai-home[data-chat-layout="v3"]{gap:5px}
+  .compact-composer>.chat-reference-picker{max-height:24dvh}
+  .wg-attachment-picker{max-height:calc(100dvh - 24px)}
+ }
+}

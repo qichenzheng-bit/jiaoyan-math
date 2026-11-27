@@ -1,4 +1,4 @@
-import {useEffect,useId,useRef,useState,useCallback} from 'react'
+import {useEffect,useLayoutEffect,useId,useRef,useState,useCallback} from 'react'
 import {getModelCatalog} from './modelCatalog'
 import {Icon} from './Icon'
 import {WorkspaceLink as Link} from './WorkspaceNavigation'
@@ -6,7 +6,7 @@ import {effortOptions,effortLabel,type ModelCatalog} from './ReasoningEffort'
 type Props={models:ModelCatalog['models'];catalog?:ModelCatalog;model:string;effort:string;onModel:(model:string)=>void;onEffort:(effort:string)=>void;onCatalog:(catalog:ModelCatalog)=>void;disabled?:boolean;effortDisabled?:boolean;onOpen?:()=>void}
 export default function ComposerInference({models,catalog,model,effort,onModel,onEffort,onCatalog,disabled=false,effortDisabled=false,onOpen}:Props){
  const [open,setOpen]=useState(false),[query,setQuery]=useState(''),[syncing,setSyncing]=useState(false),[warning,setWarning]=useState('')
- const root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),id=useId(),request=useRef<object|null>(null),listener=useRef(onCatalog)
+ const root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLElement>(null),id=useId(),request=useRef<object|null>(null),listener=useRef(onCatalog)
  useEffect(()=>{listener.current=onCatalog},[onCatalog])
  const sync=useCallback(async(force=false)=>{
   if(request.current)return
@@ -23,12 +23,20 @@ export default function ComposerInference({models,catalog,model,effort,onModel,o
  useEffect(()=>{const refresh=()=>{if(document.visibilityState==='visible')void sync()};const timer=window.setInterval(refresh,60000);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);request.current=null}},[sync])
  useEffect(()=>{if(!open)return;const outside=(e:PointerEvent)=>{if(!root.current?.contains(e.target as Node))setOpen(false)};const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){setOpen(false);trigger.current?.focus()}};document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape)}},[open])
  useEffect(()=>{if(disabled)setOpen(false)},[disabled])
+ useLayoutEffect(()=>{if(!open)return;const el=panel.current,anchor=trigger.current;if(!el||!anchor)return
+  function place(){if(!el||!anchor)return;const v=window.visualViewport,r=anchor.getBoundingClientRect(),left=v?.offsetLeft??0,top=v?.offsetTop??0,width=v?.width??window.innerWidth,height=v?.height??window.innerHeight,margin=10,gap=8;
+   const w=Math.min(300,Math.max(0,width-2*margin)),above=r.top-top-gap-margin,below=top+height-r.bottom-gap-margin,useAbove=above>=below,available=Math.max(0,useAbove?above:below);
+   el.style.width=w+'px';el.style.left=Math.max(left+margin,Math.min(r.right-w,left+width-w-margin))+'px';el.style.right='auto';el.style.maxHeight=Math.min(430,available)+'px';
+   el.style.top=useAbove?'auto':Math.max(top+margin,r.bottom+gap)+'px';el.style.bottom=useAbove?Math.max(window.innerHeight-r.top+gap,window.innerHeight-top-height+margin)+'px':'auto';
+  }
+  place();const observer=new ResizeObserver(place);observer.observe(anchor);window.addEventListener('resize',place);window.addEventListener('scroll',place,true);window.visualViewport?.addEventListener('resize',place);window.visualViewport?.addEventListener('scroll',place);return()=>{observer.disconnect();window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);window.visualViewport?.removeEventListener('resize',place);window.visualViewport?.removeEventListener('scroll',place)}
+ },[open])
  const official=catalog?.source==='cli',available=official?models:[],selected=available.find(m=>m.id===model),label=selected?.label??model,choices=effortOptions(catalog,model),filtered=available.filter(m=>(m.label+' '+m.id).toLowerCase().includes(query.trim().toLowerCase()))
  function close(){setOpen(false);trigger.current?.focus()}
  function chooseModel(next:string){onModel(next);if(effortOptions(catalog,next).length===1){if(next===model)onEffort('default');close()}}
  return <div className="composer-inference" ref={root}>
   <button ref={trigger} type="button" className="chat-model-shortcut" title={label+' · '+effortLabel(effort)+' · 选择模型及推理强度'} aria-label="打开模型选择" aria-expanded={open} aria-controls={open?id:undefined} disabled={disabled} onClick={()=>{if(!open){onOpen?.();setQuery('');void sync()}setOpen(v=>!v)}}><span className="composer-model-label">{label}{effort!=='default'?' · '+effortLabel(effort):''}</span><Icon name="chevron-down" size={14}/></button>
-  {open&&<section className="composer-inference-panel" id={id} aria-label="模型及推理强度">
+  {open&&<section ref={panel} className="composer-inference-panel wg-viewport-menu" id={id} aria-label="模型及推理强度">
    <div className="composer-inference-heading"><strong>Qoder CN · 模型</strong><button type="button" aria-label="刷新模型" title="从 Qoder CN 重新拉取" disabled={syncing||disabled} onClick={()=>void sync(true)}><Icon name="refresh" size={16}/></button></div>
    {available.length>6&&<div className="composer-model-search"><Icon name="search" size={15}/><input type="search" aria-label="搜索模型" placeholder="搜索模型" value={query} onChange={e=>setQuery(e.target.value)}/></div>}
    {syncing&&<small className="composer-catalog-status" role="status">正在同步模型…</small>}{warning&&<small className="composer-catalog-status" role="status">{warning}</small>}

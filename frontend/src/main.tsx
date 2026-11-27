@@ -46,6 +46,7 @@ import './styles/layout/sidebar-navigation.css'
 import './styles/layout/ai-home.css'
 import './styles/layout/chat-conversation.css'
 import './styles/layout/persistent-work.css'
+import './styles/layout/responsive-guardrails.css'
 
 // Remove obsolete recovery caches from earlier V1 builds; no draft JSON export.
 try{for(const key of Object.keys(sessionStorage))if(key.startsWith('wg-doc-recovery:'))sessionStorage.removeItem(key)}catch{}
