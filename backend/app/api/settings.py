@@ -174,6 +174,8 @@ class DocumentLayout(BaseModel):
     answerSpace: float=Field(default=0,ge=0,le=180)
     header: str=Field(default="",max_length=200)
     footer: str=Field(default="第 {{当前页码}} 页，共 {{总页数}} 页",max_length=200)
+    coverFileId: str=Field(default="",pattern=r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$")
+    backCoverFileId: str=Field(default="",pattern=r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$")
     knowledgeIndex: bool=False
     toc: bool=False
     tocDepth: Literal[1,2,3,4,5,6]=2
@@ -233,7 +235,7 @@ class TemplateUpdate(BaseModel):
         default_kinds=[t.kind for t in self.value if t.isDefault]
         if len(set(default_kinds))!=len(default_kinds):
             raise ValueError("同类模板只能设置一个默认项")
-        if any(t.layout.blockStyles or t.layout.chapterStyles or t.layout.sectionPages for t in self.value):
+        if any(t.layout.blockStyles or t.layout.chapterStyles or t.layout.sectionPages or t.layout.coverFileId or t.layout.backCoverFileId for t in self.value):
             raise ValueError("模板不能携带特定文档的局部样式")
         if any(not t.name.strip() for t in self.value):
             raise ValueError("模板名称不能为空")
