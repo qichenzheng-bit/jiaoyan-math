@@ -76,9 +76,10 @@ def chapter_index(db,d,include_archived=False):
     stmt=select(Doc.id,Doc.title,Doc.revision,Doc.archived,Doc.chapter_order,Doc.updated_at,func.json_array_length(Doc.blocks).label("blocks_count")).where(Doc.parent_document_id==d.id)
     if not include_archived:stmt=stmt.where(Doc.archived==False)
     return [dict(r._mapping) for r in db.execute(stmt.order_by(Doc.chapter_order,Doc.id))]
-def book_parent(db,d):
+def book_parent(db,d,lock=True):
     if not d.parent_document_id:return None
-    parent=row(db,d.parent_document_id)
+    parent=row(db,d.parent_document_id) if lock else db.get(Doc,d.parent_document_id)
+    if not parent:raise HTTPException(404,"所属教材不存在")
     if not parent.chaptered or parent.archived:raise HTTPException(409,"所属教材已归档或不可编辑")
     return parent
 def begin_chapter_edit(db,d):
@@ -107,7 +108,11 @@ def record_version(db,d):
     for b in d.blocks:
         if b.get("kind")=="image" and b.get("file_id"):files.add(b["file_id"])
         files.update(image_ids(b));files.update(image_ids(b.get("snapshot") or {}))
-    for fid in files:storage.link_file(db,fid,"document_version",owner)
+    for fid in files:
+        # Existing archived images still need protection; already purged legacy images cannot be recovered.
+        file=db.scalar(select(StoredFile).where(StoredFile.id==fid).with_for_update())
+        if file and file.purged_at is None and not db.get(FileReference,(fid,"document_version",owner)):
+            db.add(FileReference(file_id=fid,owner_type="document_version",owner_id=owner))
     db.add(TeachingDocumentVersion(document_id=d.id,revision=d.revision,snapshot=snapshot,created_at=d.updated_at))
     db.flush()
     stale=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==d.id).order_by(TeachingDocumentVersion.revision.desc()).offset(30)))
@@ -367,7 +372,7 @@ def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),
 def export_document(id:str,db:Session=Depends(get_db)):
     d=row(db,id)
     if d.kind=="intake":raise HTTPException(409,"录入文档不支持直接导出，请入库后从来源库导出")
-    if d.parent_document_id:book_parent(db,d)
+    if d.parent_document_id:book_parent(db,d,False)
     if d.chaptered:
         if d.archived:raise HTTPException(409,"教材已归档")
         result=public(d);blocks=[];size=0
@@ -384,8 +389,9 @@ def export_document(id:str,db:Session=Depends(get_db)):
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):
-    d=row(db,id)
-    if d.parent_document_id:book_parent(db,d)
+    d=db.get(Doc,id)
+    if not d:raise HTTPException(404,"文档不存在")
+    if d.parent_document_id:book_parent(db,d,False)
     return public(d)
 
 @router.get("/{id}/origin")
@@ -421,7 +427,8 @@ def document_versions(id:str,db:Session=Depends(get_db)):
     rows=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==id).order_by(TeachingDocumentVersion.revision.desc()).limit(30)))
     items=[{"revision":v.revision,"created_at":v.created_at,"title":v.snapshot.get("title",d.title),"blocks_count":sum(x["blocks_count"] for x in v.snapshot["chapters"]) if "chapters" in v.snapshot else len(v.snapshot.get("blocks",[])),"chapter_count":len(v.snapshot["chapters"]) if "chapters" in v.snapshot else None,"current":v.revision==d.revision} for v in rows]
     if not any(v["revision"]==d.revision for v in items):
-        items.insert(0,{"revision":d.revision,"created_at":d.updated_at,"title":d.title,"blocks_count":len(d.blocks),"current":True})
+        chapters=chapter_index(db,d) if d.chaptered else []
+        items.insert(0,{"revision":d.revision,"created_at":d.updated_at,"title":d.title,"blocks_count":sum(x["blocks_count"] for x in chapters) if d.chaptered else len(d.blocks),"chapter_count":len(chapters) if d.chaptered else None,"current":True})
     return {"current_revision":d.revision,"items":items}
 
 @router.post("/{id}/versions/{version}/restore",dependencies=[Depends(require_origin)])

@@ -925,6 +925,56 @@ with sync_playwright() as p:
                 page.get_by_role("button",name="按计划开始参考匹配",exact=True).click()
             assert matched.value.post_data_json["source_batch_id"]=="reference-batch"
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+        if GROUP in {'all','desktop','mobile'}:
+            print('UI case: chaptered textbook on desktop and mobile',flush=True)
+            page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
+            book={**doc,"id":"book-preview","title":"分章教材测试","kind":"textbook","chaptered":True,"source_id":None,"blocks":[],"revision":3}
+            chapter={**doc,"id":"chapter-preview","title":"第一章 极限","kind":"textbook","chaptered":False,"parent_document_id":book["id"],"source_id":None,"blocks":[{**doc["blocks"][0],"uid":"chapter-question"}],"revision":1}
+            directory=[{"id":chapter["id"],"title":chapter["title"],"revision":1,"chapter_order":1,"archived":False,"updated_at":1,"blocks_count":1}]
+            book_requests=[]
+            def book_api(route):
+                endpoint=route.request.url.split("/api/documents/",1)[1].split("?",1)[0]
+                book_requests.append((route.request.method,endpoint))
+                if endpoint=="book-preview/chapters":
+                    if route.request.method=="POST":
+                        body=route.request.post_data_json
+                        assert body["revision"]==book["revision"]
+                        book["revision"]+=1
+                        directory.append({"id":"second-chapter","title":body["title"],"revision":1,"chapter_order":2,"archived":False,"updated_at":1,"blocks_count":0})
+                    result={"document":{k:v for k,v in book.items() if k!="blocks"},"items":directory}
+                elif endpoint=="book-preview/versions":
+                    result={"items":[{"revision":book["revision"],"title":book["title"],"created_at":1,"blocks_count":1,"chapter_count":len(directory),"current":True}]}
+                elif endpoint=="book-preview":result=book
+                elif endpoint=="chapter-preview":
+                    if route.request.method=="PUT":
+                        body=route.request.post_data_json
+                        assert body["parent_document_id"]==book["id"]
+                        chapter.update(body,revision=chapter["revision"]+1)
+                        directory[0].update(blocks_count=len(chapter["blocks"]),revision=chapter["revision"])
+                        book["revision"]+=1
+                    result=chapter
+                elif endpoint=="chapter-preview/export":result=chapter
+                else:raise AssertionError(endpoint)
+                route.fulfill(json=result)
+            book_route=re.compile(r".*/api/documents/(?:book-preview|chapter-preview)(?:/[^?]*)?(?:[?].*)?$")
+            page.route(book_route,book_api)
+            visit(page,"/textbooks?doc=book-preview",".chaptered-book")
+            expect(page.locator(".book-chapter-row")).to_have_count(1)
+            assert ("GET","chapter-preview") not in book_requests
+            page.get_by_label("新章节名称").fill("第二章 导数")
+            page.get_by_role("button",name="＋ 新增章节",exact=True).click()
+            expect(page.locator(".book-chapter-row")).to_have_count(2)
+            page.get_by_role("button",name="编辑本章",exact=True).first.click()
+            page.locator(".manual-intake-cards").wait_for()
+            assert ("GET","chapter-preview") in book_requests
+            expect(page.get_by_role("button",name="＋ 章",exact=True)).to_have_count(0)
+            page.get_by_role("link",name="返回全书目录",exact=False).click()
+            expect(page.locator(".book-chapter-row")).to_have_count(2)
+            page.get_by_role("button",name="全书版本历史",exact=True).click()
+            expect(page.locator(".book-version-list")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+2")
+            capture(page,path=str(OUT/("f44-book-"+GROUP+".png")),full_page=False)
+            page.unroute(book_route,book_api)
         if GROUP in {'all','editors'}:
             print('UI case: document assembly',flush=True)
             # Compose from the question bank, preserve original resources, and save layout only.

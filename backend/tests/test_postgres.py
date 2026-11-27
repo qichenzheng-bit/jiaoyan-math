@@ -229,6 +229,34 @@ def test_migration_and_login(tmp_path, monkeypatch):
         restored_index=client.get(bpath+"/chapters").json()
         assert [v["id"] for v in restored_index["items"]]==[cid,cid2]
         assert client.get("/api/documents/"+cid).json()["blocks"]==[]
+        # Exercise the 5000-block boundary through the actual API, not a raised JSON limit.
+        import time
+        scale_book=client.post("/api/documents/books",headers=origin,json={"title":"5000项教材容量测试"}).json()
+        scale_path="/api/documents/"+scale_book["id"]
+        started=time.monotonic()
+        for chapter_no in range(25):
+            cresult=client.post(scale_path+"/chapters",headers=origin,json={"revision":scale_book["revision"],"title":f"章节 {chapter_no+1}"})
+            assert cresult.status_code==200,cresult.text
+            cresult=cresult.json();chapter_id=cresult["chapter"]["id"]
+            chapter_doc=client.get("/api/documents/"+chapter_id).json()
+            payload=[{"uid":f"b-{n}","kind":"text","content":f"第 {chapter_no+1} 章第 {n+1} 项 $x^2$"} for n in range(200)]
+            written=client.put("/api/documents/"+chapter_id,headers=origin,json={**chapter_doc,"blocks":payload})
+            assert written.status_code==200,written.text
+            scale_book=client.get(scale_path).json()
+            assert scale_book["blocks"]==[]
+        scale_directory=client.get(scale_path+"/chapters").json()
+        assert len(scale_directory["items"])==25 and sum(x["blocks_count"] for x in scale_directory["items"])==5000
+        assert all("blocks" not in x for x in scale_directory["items"])
+        assert len(json.dumps(scale_directory,ensure_ascii=False).encode())<20000
+        scale_export=client.get(scale_path+"/export")
+        assert scale_export.status_code==200,scale_export.text[:500]
+        assert len(scale_export.json()["blocks"])==5025
+        extra=client.post(scale_path+"/chapters",headers=origin,json={"revision":scale_book["revision"],"title":"容量边界章节"}).json()
+        extra_path="/api/documents/"+extra["chapter"]["id"]
+        extra_doc=client.get(extra_path).json()
+        assert client.put(extra_path,headers=origin,json={**extra_doc,"blocks":[{"uid":"overflow","kind":"text","content":"超容量"}]}).status_code==422
+        assert client.get(extra_path).json()["blocks"]==[]
+        print("TEXTBOOK_5000 seconds=",round(time.monotonic()-started,2),"directory_bytes=",len(json.dumps(scale_directory,ensure_ascii=False).encode()),"export_bytes=",len(scale_export.content))
         # Full-library stem matching and transactional registration.
         batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[
             {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法","question_type":"综合题"},
