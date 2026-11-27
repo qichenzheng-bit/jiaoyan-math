@@ -90,3 +90,34 @@ def test_video_logical_paths_are_opaque_and_bounded():
     assert backup.logical_allowed("production/video-engine/files/"+"a"*64)
     assert not backup.logical_allowed("production/video-engine/files/../../secret")
     assert not backup.logical_allowed("production/video-engine/engine.env")
+
+
+def test_large_backup_staging_keeps_main_atomic(tmp_path):
+    import os
+    import subprocess
+    remote=tmp_path/"remote.git"
+    work=tmp_path/"work"
+    work.mkdir()
+    def git(*args,cwd=work):
+        return subprocess.check_output(["git",*args],cwd=cwd)
+    git("init","--bare",str(remote),cwd=tmp_path)
+    git("init","-b","main")
+    git("config","user.name","Test")
+    git("config","user.email","test@example.invalid")
+    (work/"README").write_text("initial")
+    git("add",".")
+    git("commit","-m","initial")
+    git("remote","add","origin",str(remote))
+    git("push","origin","main")
+    old=git("rev-parse","HEAD").strip()
+    for i in range(3):
+        (work/("part"+str(i))).write_bytes(b"encrypted payload")
+    manifest=work/backup.MANIFEST
+    manifest.parent.mkdir()
+    manifest.write_text('{"test":true}')
+    backup.publish_snapshot_commits(work,dict(os.environ),batch_bytes=20)
+    head=git("rev-parse","HEAD").strip()
+    assert head!=old
+    assert git("ls-remote","origin","refs/heads/main").split()[0]==head
+    assert not git("ls-remote","origin","refs/heads/wg-backup-stage-*").strip()
+    assert git("show","HEAD:"+backup.MANIFEST).strip()==b'{"test":true}'

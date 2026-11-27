@@ -104,11 +104,12 @@ def test_planning_does_not_count_as_business_result(monkeypatch):
     s=SimpleNamespace(agent_history=[],id="w")
     r={"id":"r","model":"Auto","effort":"default","model_job":"m","phase":"model","phase_at":ai_work.now(),"state":"running","instruction":"选题","steps":[]}
     s.agent_history=[r]
-    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"plan","outline":["检索题库","生成试卷"]})})
+    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"plan","outline":["检索题库","生成试卷"],"expected_tools":["question_search","selection_create"]})})
     ai_work.run_model(Mock(),s,r,SimpleNamespace(id=1))
     planned=s.agent_history[-1]
     assert planned["outline"]==["检索题库","生成试卷"] and planned["phase"]=="pending"
     planned["phase"]="model"
     monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"finish","explanation":"完成"})})
     ai_work.run_model(Mock(),s,planned,SimpleNamespace(id=1))
-    assert s.agent_history[-1]["state"]=="failed"
+    assert s.agent_history[-1]["state"]=="running"
+    assert s.agent_history[-1]["steps"][-1]["state"]=="failed"

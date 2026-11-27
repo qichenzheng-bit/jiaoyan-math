@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
+from uuid import uuid4
 
 REMOTE = "git@github.com:qichenzheng-bit/jiaoyan-data.git"
 BASE = Path.home() / "jiaoyan-app"
@@ -333,6 +334,54 @@ def video_entries():
         for name,p,sha in files:
             yield VIDEO_PREFIX+name,p,sha
 
+def publish_snapshot_commits(repo, env, batch_bytes=256*1024*1024):
+    """Upload large encrypted deltas in bounded staging pushes; only publish main last."""
+    def git(*args):
+        return run(["git",*args],cwd=repo,env=env)
+    def commit(message):
+        git("-c","user.name=微光数学备份","-c","user.email=backup@localhost",
+            "-c","commit.gpgsign=false","commit","-m",message)
+    paths=set()
+    for args in (("diff","--name-only","--no-renames","-z","HEAD"),("ls-files","--others","--exclude-standard","-z")):
+        paths.update(p.decode("utf-8") for p in git(*args).split(b"\0") if p)
+    if MANIFEST not in paths:raise ValueError("backup manifest not changed")
+    sizes={name:(safe_path(repo,name).stat().st_size if safe_path(repo,name).exists() else 0) for name in paths}
+    if sum(sizes.values())<=batch_bytes and len(paths)<=256:
+        git("add","-A")
+        commit("Encrypted business backup "+now())
+        git("push","origin","HEAD:refs/heads/main")
+        return
+    stage="refs/heads/wg-backup-stage-"+uuid4().hex
+    group=[];size=0;number=0
+    def push_group(items):
+        nonlocal number
+        git("add","-A","--",*items)
+        number+=1
+        commit("Encrypted backup staging "+str(number))
+        git("push","origin","HEAD:"+stage)
+    try:
+        for name in sorted(paths-{MANIFEST}):
+            if group and (size+sizes[name]>batch_bytes or len(group)>=256):
+                push_group(group);group=[];size=0
+            group.append(name);size+=sizes[name]
+        if group:push_group(group)
+        git("add","--",MANIFEST)
+        commit("Encrypted business backup "+now())
+        git("push","origin","HEAD:"+stage)
+        # The remote already has every encrypted blob through the staging branch.
+        # A normal fast-forward push rejects concurrent changes instead of overwriting them.
+        git("push","origin","HEAD:refs/heads/main")
+    finally:
+        # This uniquely named branch belongs only to the current attempt. If cleanup
+        # fails, leave the old/new verified main untouched and permit manual inspection.
+        try:
+            remote=git("ls-remote","origin",stage).decode().split()
+            if remote and remote[1]==stage:
+                git("push","--force-with-lease="+stage+":"+remote[0],"origin",":"+stage)
+        except (RuntimeError,subprocess.SubprocessError,IndexError):
+            pass
+
+
 def backup():
     recipient, key, hosts = config()
     env = git_env(key, hosts)
@@ -396,10 +445,7 @@ def backup():
             manifest = {"format": 2, "created_at": now(), "entries": entries}
             write_json(safe_path(repo, MANIFEST), manifest)
             check_manifest(repo, manifest)
-            run(["git", "add", "-A"], cwd=repo, env=env)
-            run(["git", "-c", "user.name=微光数学备份", "-c", "user.email=backup@localhost",
-                 "-c", "commit.gpgsign=false", "commit", "-m", "Encrypted business backup " + now()], cwd=repo, env=env)
-            run(["git", "push", "origin", "HEAD:refs/heads/main"], cwd=repo, env=env)
+            publish_snapshot_commits(repo,env)
         head = run(["git", "rev-parse", "HEAD"], cwd=repo, env=env).decode().strip()
         remote = run(["git", "ls-remote", "origin", "refs/heads/main"], cwd=repo, env=env).decode().split()
         if not remote or remote[0] != head:

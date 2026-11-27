@@ -287,7 +287,7 @@ def run_model(db,s,r,user):
         if decision.action=="plan":
             if not decision.outline or any(not x.strip() or len(x)>180 for x in decision.outline) or r.get("outline") and not r.get("outline_stale"):
                 raise ValueError("任务安排为空、过长或重复")
-            if decision.expected_tools and (len(decision.expected_tools)!=len(decision.outline) or any(x not in TOOLS for x in decision.expected_tools)):
+            if len(decision.expected_tools)!=len(decision.outline) or any(x not in TOOLS for x in decision.expected_tools):
                 raise ValueError("预期成果工具必须逐项对应真实工具")
             r["outline"]=[x.strip() for x in decision.outline]
             r["expected_tools"]=decision.expected_tools
@@ -298,7 +298,8 @@ def run_model(db,s,r,user):
             # A narrative response cannot substitute for a completed business action.
             problem=completion_problem(r)
             if problem:
-                fail(db,s,r,problem+"；保留已有成果，可继续工作");return
+                r["steps"]=[*r.get("steps",[]),step_result("decision",{},"failed",detail=problem+"；请继续完成未完成事项")]
+                next_model(db,s,r);return
             r.update(state="done",detail=decision.explanation or "已完成工具执行")
             wa.save(db,s,r);db.commit();return
         if decision.action!="tool":raise ValueError("不支持的操作")
@@ -310,6 +311,7 @@ def run_model(db,s,r,user):
             next_model(db,s,r);return
         tool=TOOLS.get(name)
         if not tool:raise ValueError("未知工具")
+        if tool.write and not r.get("outline"):raise ValueError("写入业务前必须建立任务安排与预期成果工具")
         if r.get("outline") and (decision.step_index is None or decision.step_index>=len(r["outline"])):
             raise ValueError("已有任务安排，必须指定有效 step_index")
         if decision.retry_of:
