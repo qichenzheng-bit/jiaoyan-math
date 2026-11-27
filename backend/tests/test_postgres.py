@@ -805,19 +805,29 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
         assert pdf_upload.status_code==200,pdf_upload.text
         fid=pdf_upload.json()["id"]
         monkeypatch.setattr(ws,"pdf_pages",lambda f:2)
-        real_extract=material_import.extract
-        def fake_page(f,mode,start,end):
-            if f.id!=fid:return real_extract(f,mode,start,end)
-            return {"text":"独立测试题第"+str(start)+"页","method":"pdf_text","warnings":[]}
+        from app.services import material_vision
+        import base64
+        vision_jobs={}
+        def fake_attachment(f,page):
+            assert f.id==fid and page in (1,2)
+            return "image/png", ("CI fixture page "+str(page)).encode()
         def page_worker(method,path,body=None):
-            if path=="/status":return {"chat_available":True}
+            if path=="/status":return {"chat_available":True,"vision_attachment":True}
+            if path=="/vision/start":
+                assert body["model"]=="Auto" and body["attachment"]["media_type"]=="image/png"
+                raw=base64.b64decode(body["attachment"]["base64"])
+                vision_jobs[body["id"]]=int(raw[-1:])
+                return {"state":"running"}
+            if path.startswith("/chat/") and path.split("/")[-1] in vision_jobs:
+                page=vision_jobs[path.split("/")[-1]]
+                return {"state":"done","answer":json.dumps({"text":"独立测试题第"+str(page)+"页"},ensure_ascii=False)}
             if path=="/chat/start":
                 worker_calls.append(body)
                 return {"state":"running"}
             page=2 if "【原文位置 2】" in worker_calls[-1]["prompt"] else 1
-            return {"state":"done","answer":json.dumps([{"kind":"question","title":"独立测试题"+str(page),"content":"测试页"+str(page)+"的独立数学题","source_pages":{"content":page}}],ensure_ascii=False)}
+            return {"state":"done","answer":json.dumps([{"kind":"question","title":"独立测试题"+str(page),"content":"测试页"+str(page)+"的独立数学题","source_pages":{"content":page},"knowledge_tags":["函数极限","极限运算"],"primary_knowledge_tag":"函数极限"}],ensure_ascii=False)}
         with monkeypatch.context() as patch:
-            patch.setattr(material_import,"extract",fake_page)
+            patch.setattr(material_vision,"attachment",fake_attachment)
             patch.setattr(qoder,"request",page_worker)
             w=client.post("/api/workspaces",headers=origin,json={"title":"分批追加测试"}).json()
             wb="/api/workspaces/"+w["id"]
@@ -915,7 +925,11 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
                 assert batch.status_code==200,batch.text
                 bb=wb+"/batches/"+batch.json()["id"]
-                assert client.post(bb+"/step",headers=origin).json()["units"][0]["state"]=="done"
+                recognized=client.post(bb+"/step",headers=origin).json()["units"][0]
+                assert recognized["state"]=="done",recognized
+                assert recognized["method"]=="qoder_vision"
+                assert recognized["text"]=="独立测试题第"+str(page)+"页"
+                assert list(vision_jobs.values())==list(range(1,page+1))
                 assert client.post(bb+"/verify",headers=origin,json={"text":"【原文位置 "+str(page)+"】\n独立测试题第"+str(page)+"页"}).json()["verified"]
                 if page==1:
                     state=client.get(agent_url).json()["workflow"]
