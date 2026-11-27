@@ -1195,6 +1195,26 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert direct["total"]==1 and nested["total"]==2
         assert {r["chapter"] for r in nested["items"]}=={"目录专项/极限","目录专项/极限/方法"}
 
+        dirs="/api/resources/knowledge-directories"
+        dir_state=client.get(dirs).json()
+        created_dir=client.post(dirs,headers=origin,json={"subject":"高等数学","path":"目录专项/极限/空目录","revision":dir_state["revision"]})
+        assert created_dir.status_code==200,created_dir.text
+        assert any(x["chapter"]=="目录专项/极限/空目录" and x["count"]==0 for x in client.get("/api/resources/chapters").json())
+        assert client.post(dirs,headers=origin,json={"subject":"高等数学","path":"旧版本创建","revision":dir_state["revision"]}).status_code==409
+        move={"subject":"高等数学","path":"目录专项/极限","target":"新目录/极限"}
+        move_preview=client.post(dirs+"/move-preview",headers=origin,json=move)
+        assert move_preview.status_code==200,move_preview.text
+        assert move_preview.json()["total"]==2 and move_preview.json()["directories"]==1
+        assert client.post(dirs+"/move",headers=origin,json=move).status_code==409
+        moved=client.post(dirs+"/move",headers=origin,json={**move,"preview_token":move_preview.json()["preview_token"]})
+        assert moved.status_code==200,moved.text
+        for old in nested["items"]:
+            saved_unit=client.get("/api/resources/"+old["id"]).json()
+            assert saved_unit["chapter"]=="新目录/极限"+old["chapter"][len("目录专项/极限"):]
+            assert saved_unit["tags"]==old["tags"]
+        assert any(x["chapter"]=="新目录/极限/空目录" and x["count"]==0 for x in client.get("/api/resources/chapters").json())
+        assert client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限外"}).json()["total"]==1
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

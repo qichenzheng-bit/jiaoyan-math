@@ -26,7 +26,7 @@ CHUNK = 32 * 1024 * 1024
 PURGE_LOCK = 824650219
 MANIFEST = "manifests/latest.json"
 SAFE_SETTINGS = ("display_name", "theme", "ai.qoder.model", "ai.qoder.video_model",
-                 "ai.qoder.effort", "ai.qoder.video_effort", "qiandao.qoder_cn.v1")
+                 "ai.qoder.effort", "ai.qoder.video_effort", "qiandao.qoder_cn.v1", "knowledge.library.directories.v1")
 # Logical directory, table, fixed SQL predicate, deterministic ordering.
 EXPORTS = [
     ("database/alembic_version", "alembic_version", "true", "version_num"),

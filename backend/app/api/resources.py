@@ -170,6 +170,7 @@ def subjects(db:Session=Depends(get_db)):
     known=set(MATH_SUBJECTS)
     known.update(db.scalars(select(KnowledgePointCatalog.subject).where(KnowledgePointCatalog.subject!="").distinct()))
     known.update(db.scalars(select(TeachingResource.subject).where(TeachingResource.subject!="").distinct()))
+    known.update(x["subject"] for x in directory_state(db)["items"])
     return list(MATH_SUBJECTS)+sorted(known-set(MATH_SUBJECTS))
 
 def question_list_summaries(db,rows,data):
@@ -357,7 +358,104 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
 def chapters(kind:Literal["question","knowledge"]="knowledge",subject:str="",db:Session=Depends(get_db)):
     stmt=select(TeachingResource.subject,TeachingResource.chapter,func.count().label("count")).where(TeachingResource.kind==kind,TeachingResource.archived==False)
     if subject:stmt=stmt.where(TeachingResource.subject==normalize_subject(subject))
-    return [{"subject":r.subject,"chapter":r.chapter,"count":r.count} for r in db.execute(stmt.group_by(TeachingResource.subject,TeachingResource.chapter).order_by(TeachingResource.subject,TeachingResource.chapter))]
+    rows={(r.subject,r.chapter):r.count for r in db.execute(stmt.group_by(TeachingResource.subject,TeachingResource.chapter))}
+    if kind=="knowledge":
+        for item in directory_state(db)["items"]:
+            if not subject or item["subject"]==normalize_subject(subject):
+                rows.setdefault((item["subject"],item["path"]),0)
+    return [{"subject":s,"chapter":p,"count":count} for (s,p),count in sorted(rows.items())]
+
+DIRECTORY_KEY="knowledge.library.directories.v1"
+
+def directory_state(db):
+    row=db.get(Setting,DIRECTORY_KEY)
+    return json.loads(row.value) if row else {"revision":0,"items":[]}
+
+def store_directories(db,state):
+    row=db.get(Setting,DIRECTORY_KEY)
+    if row is None:
+        row=Setting(key=DIRECTORY_KEY,value="{}");db.add(row)
+    row.value=json.dumps(state,ensure_ascii=False)
+
+def directory_path(raw):
+    parts=[p.strip() for p in raw.split("/")]
+    path="/".join(parts)
+    if not path or len(path)>120 or len(parts)>12 or any(not p or p in (".","..") for p in parts):
+        raise HTTPException(422,"目录名称无效，最多12级、120字")
+    return path
+
+def within(path,root):
+    return path==root or path.startswith(root+"/")
+
+class DirectoryCreate(BaseModel):
+    subject:str=Field(min_length=1,max_length=40)
+    path:str=Field(min_length=1,max_length=120)
+    revision:int=Field(ge=0)
+
+class DirectoryMove(BaseModel):
+    subject:str=Field(min_length=1,max_length=40)
+    path:str=Field(min_length=1,max_length=120)
+    target:str=Field(min_length=1,max_length=120)
+    preview_token:str|None=Field(default=None,max_length=64)
+
+@router.get("/knowledge-directories")
+def get_directories(db:Session=Depends(get_db)):
+    return directory_state(db)
+
+def directory_exists(db,state,subject,path):
+    return any(x["subject"]==subject and within(x["path"],path) for x in state["items"]) or bool(db.scalar(
+        select(TeachingResource.id).where(TeachingResource.kind=="knowledge",TeachingResource.subject==subject,
+            or_(TeachingResource.chapter==path,TeachingResource.chapter.startswith(path+"/",autoescape=True))).limit(1)))
+
+@router.post("/knowledge-directories",dependencies=[Depends(require_origin)])
+def create_directory(body:DirectoryCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    state=directory_state(db);subject=normalize_subject(body.subject);path=directory_path(body.path)
+    if not subject:raise HTTPException(422,"请输入学科")
+    if state["revision"]!=body.revision:raise HTTPException(409,"目录已变化，请重新读取")
+    if directory_exists(db,state,subject,path):raise HTTPException(409,"目录已存在")
+    if len(state["items"])>=1000:raise HTTPException(422,"独立目录最多1000个")
+    state["items"].append({"id":str(uuid4()),"subject":subject,"path":path})
+    state["revision"]+=1
+    store_directories(db,state);audit(db,"knowledge_directory.create",user.id);db.commit()
+    return state
+
+def directory_move_plan(db,body,lock=False):
+    subject=normalize_subject(body.subject);path=directory_path(body.path);target=directory_path(body.target)
+    if not subject or within(target,path) or within(path,target):
+        raise HTTPException(422,"目标不能与原目录相同，或位于原目录上下级")
+    state=directory_state(db)
+    if directory_exists(db,state,subject,target):raise HTTPException(409,"目标目录已存在，请先选择其他名称")
+    stmt=select(TeachingResource).where(TeachingResource.kind=="knowledge",TeachingResource.subject==subject,
+        or_(TeachingResource.chapter==path,TeachingResource.chapter.startswith(path+"/",autoescape=True))).order_by(TeachingResource.id).limit(2001)
+    if lock:stmt=stmt.with_for_update()
+    rows=list(db.scalars(stmt))
+    if len(rows)>2000:raise HTTPException(422,"本次迁移影响超过2000个知识单元，请分子目录操作")
+    changes=[{"id":r.id,"revision":r.revision,"before":r.chapter,"after":target+r.chapter[len(path):],"archived":r.archived} for r in rows]
+    items=[{**x,"path":target+x["path"][len(path):]} if x["subject"]==subject and within(x["path"],path) else x for x in state["items"]]
+    changed_dirs=sum(a!=b for a,b in zip(state["items"],items))
+    if not rows and not changed_dirs:raise HTTPException(404,"原目录不存在")
+    if any(len(x["after"])>120 for x in changes) or any(len(x["path"])>120 for x in items):
+        raise HTTPException(422,"迁移后目录路径超过120字")
+    digest=hashlib.sha256(json.dumps([subject,path,target,state,changes],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+    return state,items,rows,changes,changed_dirs,digest
+
+@router.post("/knowledge-directories/move-preview",dependencies=[Depends(require_origin)])
+def preview_directory_move(body:DirectoryMove,db:Session=Depends(get_db)):
+    _,_,rows,changes,n,digest=directory_move_plan(db,body)
+    return {"total":len(rows),"archived":sum(r.archived for r in rows),"directories":n,"sample":changes[:10],"preview_token":digest}
+
+@router.post("/knowledge-directories/move",dependencies=[Depends(require_origin)])
+def move_directory(body:DirectoryMove,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    state,items,rows,changes,n,digest=directory_move_plan(db,body,True)
+    if digest!=body.preview_token:raise HTTPException(409,"迁移预览已失效，请重新确认")
+    for row,change in zip(rows,changes):
+        row.chapter=change["after"];row.revision+=1;row.updated_at=now()
+        record_bank_history(db,row.id,"knowledge_directory_move",{"chapter":change["before"]},{"chapter":change["after"]},user.id,row.revision)
+    store_directories(db,{"revision":state["revision"]+1,"items":items})
+    audit(db,"knowledge_directory.move",user.id);db.commit()
+    return {"updated":len(rows),"directories":n}
 
 class RecordedKnowledgeMerge(BaseModel):
     subject:str=Field(min_length=1,max_length=40)
