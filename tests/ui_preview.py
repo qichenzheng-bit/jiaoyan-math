@@ -1034,6 +1034,19 @@ with sync_playwright() as p:
             assert [b["resource_id"] for b in saved.value.post_data_json["blocks"][:2]]==[items[1]["id"],items[0]["id"]]
             page.get_by_text("编排已保存到服务器",exact=True).wait_for()
             capture(page,path=str(OUT/"30-assembly-paper.png"),full_page=False)
+            page.get_by_role("button",name="批量编排",exact=True).click()
+            batch_panel=page.locator(".composition-batch")
+            batch_panel.get_by_role("button",name="选择当前结果",exact=True).click()
+            batch_panel.get_by_label("批量分值").fill("6")
+            batch_panel.get_by_role("button",name="设置分值",exact=True).click()
+            page.get_by_role("button",name="撤销",exact=True).click()
+            page.get_by_role("button",name="重做",exact=True).click()
+            with page.expect_request(lambda req:req.url.endswith("/documents/assembly-demo") and req.method=="PUT",timeout=10000) as auto_saved:
+                batch_panel.get_by_role("button",name="隐藏答案解析",exact=True).click()
+            auto_blocks=auto_saved.value.post_data_json["blocks"]
+            assert [b["score"] for b in auto_blocks if b["kind"]=="reference"]==[6,6]
+            assert all(b["hidden_fields"]==["answer","solution","analysis","proof"] for b in auto_blocks if b["kind"]=="reference")
+            expect(page.get_by_role("button",name="保存编排",exact=True)).to_be_disabled()
             for route in ("handouts","textbooks"):
                 visit(page,"/"+route,".assembly-picker")
                 page.locator(".assembly-picker").wait_for()
