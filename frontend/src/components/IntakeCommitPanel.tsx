@@ -7,7 +7,7 @@ import {ReviewProgress} from './ReviewShared'
 import type {Doc} from '../pages/DocWork'
 export type Counts={question_create:number;question_reuse:number;knowledge_create:number;knowledge_reuse:number;updated:number;methods_added:number;source_occurrences:number;evaluation_queued:number}
 export type PreviewRow={uid:string;number:number;kind:'question'|'knowledge';title:string;action:'create'|'reuse'|'update'|'append'|'batch_reuse';approved:boolean;errors:string[];warnings:string[];code?:string;original_question_number:string;source_page_start?:number|null;source_page_end?:number|null}
-export type IntakePreview={revision:number;source:{id:string;title:string;revision:number};rows:PreviewRow[];total:number;batch_size:number;batches:number}
+export type IntakePreview={preview_token:string;revision:number;source:{id:string;title:string;revision:number};rows:PreviewRow[];total:number;batch_size:number;batches:number}
 export type IntakeRun={id:string;document_id:string;base_revision:number;revision:number;source:IntakePreview['source'];state:'ready'|'failed'|'completed'|'cancelled';total:number;completed:number;next_batch:number;batches:{index:number;uids:string[];state:'pending'|'failed'|'completed';record_id?:string;error?:string}[];counts:Counts;error:string;stale?:boolean}
 const actions={create:'新增资源',reuse:'复用原资源',append:'追加解法',batch_reuse:'同批复用并保留解法',update:'修订已有资源'}
 const countLabels:[keyof Counts,string][]=[['question_create','新增题目'],['question_reuse','复用原题'],['knowledge_create','新增知识单元'],['knowledge_reuse','复用知识单元'],['updated','修订资源'],['methods_added','追加解法'],['source_occurrences','绑定来源位置'],['evaluation_queued','已排队评价题目']]

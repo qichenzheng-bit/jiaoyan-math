@@ -246,6 +246,7 @@ def origin(id:str,db:Session=Depends(get_db)):
 def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
     if d.archived or d.revision!=body.revision:raise HTTPException(409,"文档版本冲突或已归档，请重新加载")
+    if d.kind=="intake" and (body.kind!=d.kind or body.source_id!=d.source_id):raise HTTPException(409,"请通过来源绑定入口处理录入文档")
     d.blocks=validate(db,body,d.blocks);d.title=body.title.strip();d.subject=normalize_subject(body.subject);d.source_id=body.source_id;d.kind=body.kind
     d.revision+=1;d.updated_at=now();references(db,d);audit(db,"document.update",user.id);db.commit();return public(d)
 @router.post("/{id}/archive",dependencies=[Depends(require_origin)])
@@ -662,6 +663,7 @@ def attach_review_knowledge(db,r,ids):
 @router.post("/{id}/registration-commit",dependencies=[Depends(require_origin)])
 def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
+    ensure_no_active_run(db,d)
     if d.kind!="intake" or not d.source_id or not body.bind_source:raise HTTPException(422,"正式录入必须绑定来源")
     blocks=review_blocks(d,body.revision,[x.uid for x in body.items])
     mapped={};overrides={}
@@ -1044,6 +1046,7 @@ def manual_reviewed(d,state):
 def manual_review_progress(id:str,body:ManualProgress,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
     if d.kind!="intake" or d.archived or d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    ensure_no_active_run(db,d)
     checked=manual_review_data(db,d,body.uid)["rows"]
     if not checked:raise HTTPException(422,"待审核条目不存在")
     if body.approved and checked[0]["errors"]:raise HTTPException(422,"请先处理本条审核问题")
@@ -1069,6 +1072,7 @@ def manual_review(id:str,body:ManualRevision,db:Session=Depends(get_db)):
 def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
     if d.kind!="intake" or d.archived or d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    ensure_no_active_run(db,d)
     review=manual_review_data(db,d)
     if not review["rows"]:raise HTTPException(422,"没有待入库的资源")
     if any(r["errors"] for r in review["rows"]):raise HTTPException(422,"仍有必须处理的问题，请重新检查")
@@ -1088,6 +1092,7 @@ REGISTRATION_CHUNK=20
 
 class IntakeRunStart(BaseModel):
     revision:int=Field(ge=1)
+    preview_token:str=Field(min_length=64,max_length=64)
     accept_warnings:bool=False
 
 class IntakeRunStep(BaseModel):
@@ -1106,6 +1111,10 @@ def read_run(db,id,ident=None):
     try:data=json.loads(record.value)
     except (ValueError,TypeError):return None
     return data if isinstance(data,dict) and data.get("document_id")==id else None
+
+def ensure_no_active_run(db,d):
+    run=read_run(db,d.id)
+    if run and run["state"] in ("ready","failed") and run["revision"]==d.revision:raise HTTPException(409,"当前资料已有入库任务，请继续或取消剩余批次")
 
 def store_run(db,data):
     db.merge(Setting(key=run_key(data["id"]),value=json.dumps(data,ensure_ascii=False)))
@@ -1142,7 +1151,9 @@ def intake_preview(db,d):
     for r in review["rows"]:
         b=blocks[r["uid"]];target=b.get("reuse_resource_id") or b.get("resource_id")
         rows.append({**r,"approved":r["uid"] in approved and not r["errors"],"code":b.get("reuse_code") or (b.get("snapshot") or {}).get("code"),"original_question_number":b.get("original_question_number",""),"source_page_start":b.get("source_page_start"),"source_page_end":b.get("source_page_end"),"target_id":target})
-    return {"revision":d.revision,"source":{"id":source.id,"title":source.title,"revision":source.revision},"rows":rows,"total":len(rows),"batch_size":REGISTRATION_CHUNK,"batches":(len(rows)+REGISTRATION_CHUNK-1)//REGISTRATION_CHUNK}
+    result={"revision":d.revision,"source":{"id":source.id,"title":source.title,"revision":source.revision},"rows":rows,"total":len(rows),"batch_size":REGISTRATION_CHUNK,"batches":(len(rows)+REGISTRATION_CHUNK-1)//REGISTRATION_CHUNK}
+    result["preview_token"]=hashlib.sha256(json.dumps([d.id,result,[manual_item_digest(d,blocks[r["uid"]]) for r in rows]],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    return result
 
 @router.post("/{id}/intake-preview",dependencies=[Depends(require_origin)])
 def preview_intake(id:str,body:ManualRevision,db:Session=Depends(get_db)):
@@ -1170,15 +1181,16 @@ def historical_intake_run(id:str,ident:str,db:Session=Depends(get_db)):
 def start_intake_run(id:str,body:IntakeRunStart,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
     old=read_run(db,id)
-    if old and old["state"]!="cancelled" and body.revision==old["base_revision"] and old["revision"]==d.revision:return run_view(old)
+    if old and old["state"]!="cancelled" and body.revision==old["base_revision"] and body.preview_token==old.get("preview_token") and old["revision"]==d.revision:return run_view(old)
     if old and old["state"] in ("ready","failed") and old["revision"]==d.revision:raise HTTPException(409,"已有未完成的入库任务，请继续或取消")
     if body.revision!=d.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
     preview=intake_preview(db,d);rows=preview["rows"]
+    if body.preview_token!=preview["preview_token"]:raise HTTPException(409,"入库预览已变化，请重新检查")
     if not rows or any(r["errors"] or not r["approved"] for r in rows):raise HTTPException(409,"请先逐条完成审核")
     if any(r["warnings"] for r in rows) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
     if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):raise HTTPException(409,"请先处理AI编辑建议")
     ids=[r["uid"] for r in rows]
-    run={"id":str(uuid4()),"document_id":id,"base_revision":d.revision,"revision":d.revision,"source":preview["source"],"state":"ready","created_at":now(),"updated_at":now(),"total":len(ids),"completed":0,"next_batch":0,"batches":[{"index":i//REGISTRATION_CHUNK,"uids":ids[i:i+REGISTRATION_CHUNK],"state":"pending"} for i in range(0,len(ids),REGISTRATION_CHUNK)],"counts":registration_counts(),"prior":{},"evaluation_ids":[],"error":""}
+    run={"id":str(uuid4()),"document_id":id,"base_revision":d.revision,"revision":d.revision,"preview_token":preview["preview_token"],"source":preview["source"],"state":"ready","created_at":now(),"updated_at":now(),"total":len(ids),"completed":0,"next_batch":0,"batches":[{"index":i//REGISTRATION_CHUNK,"uids":ids[i:i+REGISTRATION_CHUNK],"state":"pending"} for i in range(0,len(ids),REGISTRATION_CHUNK)],"counts":registration_counts(),"prior":{},"evaluation_ids":[],"error":""}
     store_run(db,run);audit(db,"document.intake.run.start",user.id);db.commit()
     return run_view(run)
 
@@ -1203,6 +1215,11 @@ def step_intake_run(id:str,body:IntakeRunStep,db:Session=Depends(get_db),user:Us
             if not selected<={b["uid"] for b in d.blocks if b["kind"] in ("question","knowledge") or b.get("edit_reference_revision")}:raise HTTPException(409,"待入库条目已变化")
             saved,record=write_registration(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user,selected=selected,commit=False,return_record=True,prior=run["prior"])
             counts,evaluations=actual_counts(db,record.entries)
+            # Refresh earlier receipts of this run only when this chunk intentionally changed the same resource.
+            completed_uids={uid for prior_batch in run["batches"] if prior_batch["state"]=="completed" for uid in prior_batch["uids"]}
+            changed_ids={e["after"]["id"] for e in record.entries}
+            d.blocks=[{**b,"snapshot":bank.view(db.get(Resource,b["resource_id"]))} if b["uid"] in completed_uids and b["kind"]=="reference" and b["resource_id"] in changed_ids else b for b in d.blocks]
+            references(db,d);saved=public(d)
             record_id=record.id
             prior=dict(run["prior"])
             for e in record.entries:
@@ -1232,3 +1249,44 @@ def cancel_intake_run(id:str,body:IntakeRunStep,db:Session=Depends(get_db),user:
     if not run or run["id"]!=body.run_id or run["state"] not in ("ready","failed"):raise HTTPException(409,"任务不能取消")
     run["state"]="cancelled";run["updated_at"]=now();store_run(db,run);audit(db,"document.intake.run.cancel",user.id);db.commit()
     return run_view(run)
+
+
+class IntakeSourceBind(BaseModel):
+    revision:int=Field(ge=1)
+    source_id:str|None=Field(default=None,max_length=36)
+    title:str=Field(default="",max_length=200)
+    source_type:Literal["exam","textbook","handout","other"]="other"
+    exam_type:str=Field(default="",max_length=80)
+    year:str=Field(default="",max_length=12)
+    edition:str=Field(default="",max_length=60)
+
+@router.post("/{id}/intake-source",dependencies=[Depends(require_origin)])
+def bind_intake_source(id:str,body:IntakeSourceBind,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.kind!="intake" or d.archived or d.revision!=body.revision or d.source_id:raise HTTPException(409,"仅未绑定来源的录入草稿可使用此入口")
+    if any(b["kind"]=="reference" for b in d.blocks):raise HTTPException(409,"已有关联资源，需先核对历史来源")
+    if body.source_id:
+        source=bank.active_source(db,body.source_id,True)
+    else:
+        if not body.title.strip():raise HTTPException(422,"请填写实际来源资料名称")
+        data=bank.clean(bank.Draft(kind="source",title=body.title,content=body.title,subject="" if body.source_type=="exam" else d.subject,source_type=body.source_type,cohort_year=body.year,edition=body.edition,exam_type=body.exam_type),db)
+        bank.guard_source_identity(db,data)
+        source=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+        db.add(source);db.flush();bank.snapshot(db,source)
+    d.source_id=source.id;d.revision+=1;d.updated_at=now()
+    state={}
+    # Carry only AI-approved blocks that are still byte-for-byte equivalent to their approved content.
+    for j in db.scalars(select(IntakeJob).where(IntakeJob.document_id==d.id)):
+        approved=set((j.provenance or {}).get("reviewed_uids",[]))
+        by_uid={b["uid"]:b for b in j.items if b["uid"] in approved}
+        for b in d.blocks:
+            original=by_uid.get(b["uid"])
+            if not original:continue
+            expected=Block.model_validate(original).model_dump()
+            current=Block.model_validate(b).model_dump()
+            if expected!=current:continue
+            checked=manual_review_data(db,d,b["uid"])["rows"]
+            if checked and not checked[0]["errors"]:state[b["uid"]]=manual_item_digest(d,b)
+    db.merge(Setting(key=manual_review_key(d),value=json.dumps(state)))
+    references(db,d);audit(db,"document.intake.source.bind",user.id);db.commit()
+    return public(d)

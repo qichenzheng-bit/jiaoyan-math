@@ -142,7 +142,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
             assert checked.status_code==200,checked.text
             for item in checked.json()["rows"]:
                 approval=client.post(path+"/manual-review-progress",headers=origin,json={"revision":doc["revision"],"uid":item["uid"],"approved":True})
-                assert approval.status_code==200,approval.text
+                assert approval.status_code==200,(approval.text,item,checked.text)
             return client.post(path+"/manual-commit",headers=origin,json={"revision":doc["revision"],"accept_warnings":True})
         registered=approve_and_commit("/api/documents/"+d["id"],d)
         assert registered.status_code==200,registered.text
@@ -187,8 +187,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         manual_path="/api/documents/"+manual["id"]
         draft_blocks=[
             {"uid":"manual-heading","kind":"heading","title":"一、选择题"},
-            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"选择题","difficulty":"中等","chapter":"矩阵","knowledge_tags":["矩阵运算","矩阵运算"],"content":"选择正确项\\nA. 1\\nB. 2","answer":"AB","solution":"已知解析"},
-            {"uid":"manual-b","kind":"question","subject":"高等数学","question_type":"解答题","content":"已知函数\\n(1) 求导数","answer":"(1) 2x","solution":"(1) 直接计算"},
+            {"uid":"manual-a","kind":"question","subject":"线性代数","question_type":"选择题","difficulty":"中等","chapter":"矩阵","knowledge_tags":["矩阵运算","矩阵运算"],"content":"选择正确项\nA. 1\nB. 2","answer":"AB","solution":"已知解析"},
+            {"uid":"manual-b","kind":"question","subject":"高等数学","question_type":"解答题","content":"已知函数\n(1) 求导数","dedup_reason":"独立测试小问题","answer":"(1) 2x","solution":"(1) 直接计算"},
         ]
         before_count=client.get("/api/resources?kind=question").json()["total"]
         bad=client.post(manual_path+"/manual-save",headers=origin,json={**manual,"blocks":[*draft_blocks,{"uid":"bad","kind":"question","content":""}]})
@@ -935,20 +935,35 @@ def test_migration_and_login(tmp_path, monkeypatch):
         draft=client.put(many_path+"/manual-draft",headers=origin,json={**many,"blocks":blocks})
         assert draft.status_code==200,draft.text
         revision=draft.json()["revision"]
-        assert client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"accept_warnings":True}).status_code==409
+        initial_preview=client.post(many_path+"/intake-preview",headers=origin,json={"revision":revision}).json()
+        assert client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"preview_token":initial_preview["preview_token"],"accept_warnings":True}).status_code==409
         for b in blocks:
             approve=client.post(many_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":b["uid"],"approved":True})
             assert approve.status_code==200,approve.text
         preview=client.post(many_path+"/intake-preview",headers=origin,json={"revision":revision}).json()
         assert preview["total"]==21 and preview["batches"]==2 and all(r["approved"] for r in preview["rows"])
-        run=client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"accept_warnings":True}).json()
+        run=client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"preview_token":preview["preview_token"],"accept_warnings":True}).json()
         assert run["state"]=="ready" and run["completed"]==0
+        assert client.post(many_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"root","approved":False}).status_code==409
         payload={"run_id":run["id"],"batch":0}
         first=client.post(many_path+"/intake-run/step",headers=origin,json=payload)
         assert first.status_code==200,first.text
         assert first.json()["run"]["completed"]==20,first.text
         assert client.post(many_path+"/intake-run/step",headers=origin,json=payload).json()["run"]["completed"]==20
         assert client.get(many_path+"/intake-run").json()["next_batch"]==1
+        from app.api import documents as intake_docs
+        from fastapi import HTTPException
+        original_attach=intake_docs.attach_review_knowledge
+        def transient_error(*args,**kwargs):raise HTTPException(422,"模拟本批失败")
+        with monkeypatch.context() as patch:
+            patch.setattr(intake_docs,"attach_review_knowledge",transient_error)
+            failed=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1})
+            assert failed.status_code==200,failed.text
+            assert failed.json()["run"]["state"]=="failed" and failed.json()["run"]["completed"]==20
+            assert failed.json()["document"]["blocks"][-1]["kind"]=="question"
+            rid_first=first.json()["document"]["blocks"][0]["resource_id"]
+            assert "另一种方法" not in client.get("/api/resources/"+rid_first).json()["solution"]
+            assert len(client.get(many_path+"/registration-history").json())==1
         final=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1})
         assert final.status_code==200,final.text
         finished=final.json()
@@ -960,6 +975,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert finished["run"]["counts"]["methods_added"]==1
         assert client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1}).json()["run"]["completed"]==21
         assert len(client.get(many_path+"/registration-history").json())==2
+        assert finished["document"]["blocks"][0]["snapshot"]["solution"]==finished["document"]["blocks"][-1]["snapshot"]["solution"]
+        unbound=client.post("/api/documents",headers=origin,json={"title":"未绑定资料测试","blocks":[]}).json()
+        bound=client.post("/api/documents/"+unbound["id"]+"/intake-source",headers=origin,json={"revision":unbound["revision"],"source_id":created_doc["source_id"]})
+        assert bound.status_code==200,bound.text
+        assert bound.json()["source_id"]==created_doc["source_id"]
 
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200

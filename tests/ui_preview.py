@@ -108,7 +108,7 @@ def answer(route):
     if p.endswith("/intake-preview") and route.request.method=="POST":
         ident=p.split("/")[2];body=manual_saved.get(ident,ai_doc)
         rows=[{"uid":b["uid"],"number":i+1,"kind":b["kind"],"title":b.get("title") or b["content"][:80],"action":"create","errors":[],"warnings":["答案未填写"] if not b.get("answer") else [],"approved":b["uid"] in manual_approved.get(ident,[]),"original_question_number":""} for i,b in enumerate(body["blocks"]) if b["kind"] in ("question","knowledge")]
-        result={"revision":body["revision"],"source":{"id":body.get("source_id") or "src","title":body["title"],"revision":1},"rows":rows,"total":len(rows),"batch_size":20,"batches":1}
+        result={"preview_token":"a"*64,"revision":body["revision"],"source":{"id":body.get("source_id") or "src","title":body["title"],"revision":1},"rows":rows,"total":len(rows),"batch_size":20,"batches":1}
     if p.endswith("/intake-run"):
         ident=p.split("/")[2]
         if route.request.method=="GET":result=manual_runs.get(ident)
