@@ -1,0 +1,105 @@
+/* Mobile-only layout ownership. Keep desktop and print rules untouched. */
+@media screen and (max-width:760px){
+ .shell.legacy-shell.clean-workspace{--shell-gutter:16px;--shell-header:54px}
+ .shell.legacy-shell.clean-workspace>.workspace>.topbar{padding:0 12px;gap:8px;border-bottom:1px solid var(--line)}
+ .shell.legacy-shell.clean-workspace.mode-home>.workspace>.mode-topbar{--shell-header:54px;padding:4px 12px;gap:4px}
+ .shell.legacy-shell.clean-workspace .topbar .mode-left,.shell.legacy-shell.clean-workspace .topbar .topbar-actions{min-width:0;gap:2px}
+ .shell.legacy-shell.clean-workspace .topbar .icon-button{min-height:40px}
+ .shell.legacy-shell.clean-workspace .topbar .mode-switch a{min-height:36px;padding-inline:13px}
+ .shell.legacy-shell.clean-workspace>.nav{width:min(320px,86vw);padding:14px 12px max(10px,env(safe-area-inset-bottom))}
+ .shell.clean-workspace .nav .clean-nav-group-head>.clean-group-link,.shell.clean-workspace .nav .nav-fixed-tools a{min-height:42px;font-size:14px}
+ .shell.clean-workspace .nav .clean-nav-children .nav-child{min-height:38px;font-size:13px}
+ .shell.clean-workspace .nav .nav-history-main>a{min-height:42px;font-size:14px;gap:9px}
+ .shell.clean-workspace .nav .nav-record-more{opacity:1;min-width:40px;min-height:40px}
+ .shell.clean-workspace .nav .nav-record-actions{padding:6px;border-radius:10px;gap:2px}
+ .shell.clean-workspace .nav .nav-record-actions button{min-height:40px;font-size:14px;padding:8px 10px}
+ .shell.clean-workspace .nav .nav-record-actions .nav-delete-action{color:var(--danger)}
+ .shell.clean-workspace .nav .nav-history-date>small{font-size:12px;padding-top:12px}
+ .shell.clean-workspace .nav .side-foot{padding-bottom:env(safe-area-inset-bottom)}
+ .shell.legacy-shell.clean-workspace .content-inner{min-width:0}
+ .shell.legacy-shell.clean-workspace:not(.chat-route):not(.doc-route)>.workspace>.main-content>.content-inner{padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
+ .shell.legacy-shell.clean-workspace.chat-route .content-inner{padding-inline:12px}
+ .shell.legacy-shell.clean-workspace .chat-conversation>.chat-scroll{padding:12px 3px 14px}
+ .shell.legacy-shell.clean-workspace .chat-conversation .chat-message{margin-bottom:22px}
+ .shell.legacy-shell.clean-workspace .chat-conversation .chat-message.user .chat-message-body{padding:11px 13px;max-width:92%}
+ .chat-conversation .rich-reply,.agent-assistant-message{font-size:16px;line-height:1.75}
+ .chat-conversation .rich-reply h1,.chat-conversation .rich-reply h2,.chat-conversation .rich-reply h3{line-height:1.4;margin:1em 0 .45em}
+ .chat-conversation .chat-message-actions button{min-height:38px;min-width:38px}
+ .legacy-shell .wg-execution .wg-execution-toggle{font-size:13px;min-height:36px}
+ .wg-execution-detail{font-size:13px;line-height:1.6}
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]{justify-content:flex-end;gap:12px;min-height:0}
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.chat-scroll{flex:1;display:flex;align-items:center;justify-content:center}
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.ai-home-shortcuts{order:1;flex:none}
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.compact-composer{order:2;flex:none}
+ .shell.legacy-shell.clean-workspace [data-chat-layout="v3"]>.compact-composer,.shell.legacy-shell.clean-workspace .agent-composer{padding:10px 12px;border-radius:22px;gap:6px;background:var(--surface)}
+ .shell.legacy-shell.clean-workspace [data-chat-layout="v3"]>.compact-composer>textarea,.shell.legacy-shell.clean-workspace .agent-composer>textarea{font-size:16px;line-height:1.45;min-height:42px;max-height:112px;resize:none}
+ .shell.legacy-shell.clean-workspace .compact-tools .composer-plus,.shell.legacy-shell.clean-workspace .compact-tools .composer-send,.shell.legacy-shell.clean-workspace .compact-tools .chat-stop{width:42px;height:42px;min-width:42px;min-height:42px}
+ .shell.legacy-shell.clean-workspace .compact-tools .chat-model-shortcut{min-height:38px;min-width:0}
+ .shell.legacy-shell.clean-workspace .content-inner:has(>.agent-conversation){padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
+ .agent-conversation-head{padding:3px 0 9px}
+ .agent-conversation-head>button{min-height:40px}
+ .agent-chat-column .agent-conversation-scroll{padding:12px 2px}
+ .agent-conversation-thread{gap:20px}
+ .agent-workflow{padding:12px;gap:10px}
+ .agent-workflow li{gap:8px;line-height:1.5}
+ .phone-material-summary{min-width:0;margin:0;padding:0 2px}
+ .phone-material-summary>summary{display:flex;align-items:center;gap:8px;min-height:36px;color:var(--muted);font-size:13px;cursor:pointer;list-style:none}
+ .phone-material-summary>summary::-webkit-details-marker{display:none}
+ .phone-material-summary>summary span{flex:1}
+ .phone-material-summary[open]>summary svg:last-child{transform:rotate(90deg)}
+ .wg-attachment-strip{gap:8px;padding:4px 2px;max-height:86px}
+ .wg-attachment-strip .wg-attachment-tile{height:70px;flex-basis:90px}
+ .wg-attachment-strip .wg-attachment-tile.image{flex-basis:70px}
+ .wg-attachment-tile .wg-attachment-open img{object-fit:contain;background:var(--subtle)}
+ .wg-attachment-tile .wg-attachment-remove{width:26px;height:26px}
+ .wg-attachment-menu .wg-attachment-actions>button{min-height:76px}
+ .wg-attachment-menu .wg-attachment-choice{min-height:52px;font-size:15px;padding:10px 4px}
+ .wg-attachment-menu header button,.wg-attachment-picker header button{min-height:42px;min-width:42px}
+ .wg-attachment-preview header{padding-top:max(12px,env(safe-area-inset-top))}
+ .wg-attachment-preview button,.wg-attachment-preview a{min-height:40px;box-sizing:border-box}
+ .wg-document-preview{align-self:flex-start;width:100%;min-width:0;min-height:100%;background:var(--surface);color:var(--ink)}
+ .wg-document-preview nav{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;background:var(--surface);z-index:1;border-bottom:1px solid var(--line)}
+ .wg-document-preview>p,.wg-document-preview>div{padding:16px}
+ .wg-document-preview .wg-document-pdf-page{width:100%;max-width:100%;height:auto}
+ .wg-document-word{padding:16px;display:grid;gap:12px;line-height:1.7;overflow-wrap:anywhere}
+ .wg-document-word>img{max-width:100%;height:auto}
+ .wg-document-word>small{color:var(--muted)}
+ .workspace-confirm{width:min(340px,calc(100vw - 32px));padding:18px 18px 16px;border-radius:16px}
+ .workspace-confirm h2{font-size:17px}
+ .workspace-confirm p{font-size:14px;line-height:1.6;margin:8px 0 16px}
+ .workspace-confirm-actions{gap:8px}
+ .workspace-confirm-actions button{min-height:44px;padding:8px 16px;font-size:14px}
+ .agent-workspace-panel{padding:12px}
+ .agent-workspace-panel .persistent-page{height:clamp(180px,35dvh,360px)}
+ .agent-workspace-panel .persistent-editor textarea{min-height:180px;max-height:36dvh}
+ .wg-review-workbench,.wg-work-conversation{gap:12px}
+ .wg-review-grid .wg-review-editor,.wg-review-grid .wg-review-source,.wg-review-grid .wg-review-matches{box-sizing:border-box;min-width:0;padding:12px;border-radius:12px}
+ .wg-review-mobile-tabs button,.wg-review-mobile-tabs select,.wg-review-footer button{min-height:42px}
+ .wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source{max-height:42dvh}
+ .wg-review-grid .wg-review-editor textarea,.manual-word-work textarea{font-size:16px;line-height:1.6}
+ .project-hub{padding:10px 0 22px}
+ .project-hub-heading{gap:8px;margin-bottom:20px}
+ .project-hub-heading h1{font-size:24px}
+ .project-link{min-width:0;min-height:58px;overflow-wrap:anywhere}
+ .intake-index .intake-entry{min-height:46px}
+ .intake-index-filters{gap:8px}
+ .intake-index-filters select,.intake-index-filters input,.intake-index-filters button{min-height:40px;min-width:0}
+ .intake-record{padding-block:12px}
+ .original-row{padding-block:12px;min-height:44px}
+ .bank-list,.bank-detail,.resource-toolbar,.manual-word-layout,.assembly-grid,.production-info,.production-recent-item,.video-layout{min-width:0;max-width:100%}
+ .resource-toolbar,.manual-word-toolbar,.persistent-range,.original-picker-actions{gap:8px;flex-wrap:wrap}
+ .bank-detail .katex-display,.manual-word-paper .katex-display,.wg-review-editor .katex-display{max-width:100%;overflow-x:auto}
+ html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.chat-scroll,html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.ai-home-shortcuts{display:none}
+ html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace [data-chat-layout="v3"]>.compact-composer>textarea,html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .agent-composer>textarea{max-height:min(100px,22dvh)}
+ html[data-composer-keyboard=true] .wg-attachment-strip .wg-attachment-tile{height:54px;flex-basis:62px}
+}
+@media screen and (max-width:360px){
+ .shell.legacy-shell.clean-workspace.mode-home>.workspace>.mode-topbar{padding-inline:6px;gap:2px}
+ .shell.legacy-shell.clean-workspace .topbar .mode-switch a{padding-inline:10px}
+ .shell.legacy-shell.clean-workspace .topbar .workspace-back span{display:none}
+}
+@media screen and (max-width:760px) and (max-height:480px){
+ .shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]>.ai-home-shortcuts{display:none}
+ .shell.legacy-shell.clean-workspace .topbar .icon-button{min-height:36px}
+ .shell.legacy-shell.clean-workspace .nav .nav-fixed-tools a{min-height:36px}
+}

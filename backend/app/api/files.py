@@ -1,5 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+import shutil
+import tempfile
+from pathlib import Path
+from app.services import material_import as imp, word_images
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -65,6 +69,60 @@ def preview(file_id: str, db: Session = Depends(get_db)):
         raise HTTPException(415, "此文件仅支持下载")
     return FileResponse(storage.file_path(item), media_type=item.media_type,
         headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'"})
+
+def document_file(file_id: str, db: Session):
+    item = find_file(file_id, db)
+    if item.archived or item.purged_at is not None:
+        raise HTTPException(404, "原始文件不可用")
+    return item
+
+@router.get("/{file_id}/document-preview")
+def document_preview(file_id: str, unit: int = Query(1, ge=1, le=10000), db: Session = Depends(get_db)):
+    item = document_file(file_id, db)
+    if item.media_type == "application/pdf":
+        from app.api.workspaces import pdf_pages
+        total = pdf_pages(item)
+        if total is not None and unit > total:
+            raise HTTPException(422, "页码超出范围")
+        return {"total_units": total}
+    if item.media_type != imp.DOCX:
+        raise HTTPException(415, "不支持的文档预览格式")
+    images = []
+    def marker(index, media, loader):
+        if media:
+            images.append({"index": index})
+        return f"[Word原图{index}]" if media else f"[Word图片{index}待核对]"
+    result = word_images.scan(storage.file_path(item), unit, marker)
+    return {**result, "images": images}
+
+@router.get("/{file_id}/document-preview/page")
+def document_preview_page(file_id: str, unit: int = Query(1, ge=1, le=10000), db: Session = Depends(get_db)):
+    item = document_file(file_id, db)
+    if item.media_type != "application/pdf":
+        raise HTTPException(415, "仅支持PDF物理页")
+    with tempfile.TemporaryDirectory(prefix="file-preview-") as tmp:
+        prefix = str(Path(tmp) / "page")
+        imp.bounded_command([shutil.which("pdftoppm"), "-f", str(unit), "-l", str(unit), "-singlefile", "-scale-to", "1800", "-png", str(storage.file_path(item)), prefix], 12)
+        path = Path(prefix + ".png")
+        if not path.is_file() or path.stat().st_size > 10_000_000:
+            raise HTTPException(422, "原页预览不可用")
+        return Response(path.read_bytes(), media_type="image/png", headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'", "Cache-Control": "private, no-store"})
+
+@router.get("/{file_id}/document-preview/image")
+def document_preview_image(file_id: str, unit: int = Query(1, ge=1, le=10000), index: int = Query(ge=1), db: Session = Depends(get_db)):
+    item = document_file(file_id, db)
+    if item.media_type != imp.DOCX:
+        raise HTTPException(415, "仅支持Word图片")
+    selected = None
+    def marker(i, media, loader):
+        nonlocal selected
+        if i == index and media:
+            selected = loader()
+        return f"[Word原图{i}]"
+    word_images.scan(storage.file_path(item), unit, marker)
+    if selected is None:
+        raise HTTPException(404, "原图不可用")
+    return Response(selected[1], media_type=selected[0], headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'", "Cache-Control": "private, no-store"})
 
 @router.post("/{file_id}/archive", dependencies=[Depends(require_origin)])
 def archive(file_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
