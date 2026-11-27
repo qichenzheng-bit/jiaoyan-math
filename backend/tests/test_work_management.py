@@ -7,16 +7,16 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from app.models import (User, StoredFile, FileReference, AuditLog, TeachingWork,
-    TeachingWorkVersion, TeachingWorkAsset, TeachingWorkPendingCover, WorkHandoff)
+    TeachingWorkVersion, TeachingWorkAsset, TeachingWorkPendingCover)
 from app.api import teaching_works as api
 from app.services import teaching_works, storage
 
 
-def test_pin_old_revision_and_release_then_delete(tmp_path,monkeypatch):
+def test_shared_file_reference_survives_version_trim_and_work_delete(tmp_path,monkeypatch):
     monkeypatch.setattr(storage,"settings",replace(storage.settings,storage_root=str(tmp_path)))
     engine=create_engine("sqlite://")
     for model in (User,StoredFile,FileReference,AuditLog,TeachingWork,TeachingWorkVersion,
-                  TeachingWorkAsset,TeachingWorkPendingCover,WorkHandoff):
+                  TeachingWorkAsset,TeachingWorkPendingCover):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add(User(id=1,username="test",password_hash="test",created_at=1));db.commit()
@@ -31,18 +31,17 @@ def test_pin_old_revision_and_release_then_delete(tmp_path,monkeypatch):
             return result
         wid,_=register("old")
         file_id=db.get(TeachingWorkAsset,(wid,1,"body")).file_id
-        draft=api.create_handoff(api.HandoffRequest(purpose="product",items=[api.WorkChoice(id=wid,version=1)]),db,user)
-        assert draft["items"][0]["assets"][0]["file_id"]==file_id
+        storage.link_file(db,file_id,"studio_item","shared-file")
+        db.commit()
         register("new")
         register("latest")
         assert db.get(TeachingWorkVersion,(wid,1)) is None
-        assert db.get(FileReference,(file_id,api.HANDOFF_OWNER,draft["id"])) is not None
+        assert db.get(FileReference,(file_id,"studio_item","shared-file")) is not None
         teaching_works.retire_files(db)
         assert db.get(StoredFile,file_id).work_retired_at is None
-        response=api.handoff_file(draft["id"],wid,"body",db,user)
-        assert Path(response.path).read_bytes()==b"%PDF-1.7\nold"
+        assert storage.file_path(db.get(StoredFile,file_id)).read_bytes()==b"%PDF-1.7\nold"
         body=api.Choices(items=[api.WorkChoice(id=wid,version=3)])
-        with pytest.raises(HTTPException) as exc:api.delete_works(body,db,user)
+        with pytest.raises(HTTPException) as exc:api.delete_works(api.Choices(items=[api.WorkChoice(id=wid,version=2)]),db,user)
         assert exc.value.status_code==409
         db.rollback()
         work=db.get(TeachingWork,wid)
@@ -54,8 +53,12 @@ def test_pin_old_revision_and_release_then_delete(tmp_path,monkeypatch):
             assert archive.read(archive.namelist()[0])==b"%PDF-1.7\nlatest"
         response.background.func(*response.background.args,**response.background.kwargs)
         assert not Path(response.path).exists()
-        api.remove_handoff(draft["id"],db,user)
         assert api.delete_works(body,db,user)["removed"]==1
         assert db.get(TeachingWork,wid) is None
+        assert db.get(FileReference,(file_id,"studio_item","shared-file")) is not None
+        teaching_works.retire_files(db)
+        assert storage.file_path(db.get(StoredFile,file_id)).exists()
+        db.delete(db.get(FileReference,(file_id,"studio_item","shared-file")))
+        db.commit()
         assert not list(db.scalars(select(FileReference)))
         assert (tmp_path/"old.pdf").exists()
