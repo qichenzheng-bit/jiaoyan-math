@@ -12,7 +12,8 @@ type Work={id:string;title:string;kind:string;subject:string;origin_scope:string
 type Asset={role:string;filename:string;pages:number;size_bytes:number;media_type:string}
 type Version={number:number;created_at:number;files:Asset[]}
 type EditContext={origin_scope:string;origin_id:string;kind:string;version:number;edition:{chapter?:string|null;stem?:boolean;answerOnly?:boolean}}
-type Detail=Work&{versions:Version[];pending_cover:{filename:string;created_at:number}|null;video?:{project_id:string;cover_file_id:string|null;resource_id:string}}
+type Facets={subjects?:string[];knowledge_points?:string[];knowledge_tags?:string[];sources?:{id:string;title:string;type:string;year:string;institution:string}[]}
+type Detail=Work&{facets?:Facets;versions:Version[];pending_cover:{filename:string;created_at:number}|null;video?:{project_id:string;cover_file_id:string|null;resource_id:string}}
 type Question={uid:string;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string}
 type Related={items:Question[];total:number;question_count:number;knowledge_points:string[];knowledge_tags:string[];source_count:number;partial_pages:boolean}
 const kinds=[['','全部'],['paper','试卷'],['handout','讲义'],['textbook','教材'],['video','视频'],['source','来源文档']]
@@ -27,6 +28,7 @@ const pageSize=20
 export default function TeachingWorks(){
  const [params,setParams]=useSearchParams(),location=useLocation(),id=params.get('work')??''
  const [q,setQ]=useState(params.get('q')??''),[kind,setKind]=useState(params.get('kind')??''),[subject,setSubject]=useState(''),[scope,setScope]=useState(''),[sort,setSort]=useState('recent')
+ const [advancedTerms,setAdvancedTerms]=useState({source_type:'',institution:'',year:'',knowledge_point:'',knowledge_tag:'',subjects_all:''})
  const [from,setFrom]=useState(''),[to,setTo]=useState(''),[advanced,setAdvanced]=useState(false),[page,setPage]=useState(0)
  const [rows,setRows]=useState<Work[]>([]),[total,setTotal]=useState(0),[subjects,setSubjects]=useState<string[]>([]),[busy,setBusy]=useState(true),[error,setError]=useState(''),[reload,setReload]=useState(0)
  const [detail,setDetail]=useState<Detail>(),[detailError,setDetailError]=useState(''),[version,setVersion]=useState<number>(),[tab,setTab]=useState('files')
@@ -40,12 +42,12 @@ export default function TeachingWorks(){
  useEffect(()=>{
   if(id)return
   const c=new AbortController();setBusy(true);setError('')
-  const filters=new URLSearchParams({q,kind,subject,scope,sort,offset:String(page*pageSize),limit:String(pageSize)})
+  const filters=new URLSearchParams({q,kind,subject,scope,sort,...advancedTerms,offset:String(page*pageSize),limit:String(pageSize)})
   if(from)filters.set('created_from',String(Math.floor(new Date(from+'T00:00:00').getTime()/1000)))
   if(to){const d=new Date(to+'T00:00:00');d.setDate(d.getDate()+1);filters.set('created_to',String(Math.floor(d.getTime()/1000)))}
   const timer=window.setTimeout(()=>api<{items:Work[];total:number}>('/teaching-works?'+filters,{signal:c.signal}).then(v=>{if(!c.signal.aborted){setRows(v.items);setTotal(v.total);setBusy(false)}}).catch(e=>{if(!c.signal.aborted){setError(errorText(e));setBusy(false)}}),180)
   return()=>{c.abort();window.clearTimeout(timer)}
- },[id,q,kind,subject,scope,sort,from,to,page,reload])
+ },[id,q,kind,subject,scope,sort,from,to,page,reload,advancedTerms])
  useEffect(()=>{
   if(id||busy||!returnScroll.current)return
   returnScroll.current=false;requestAnimationFrame(()=>document.querySelector('.main-content')?.scrollTo(0,scroll.current))
@@ -69,7 +71,7 @@ export default function TeachingWorks(){
  function closeWork(){returnScroll.current=true;const p=new URLSearchParams(location.search);p.delete('work');setParams(p)}
  useWorkspaceBack(()=>{if(preview){setPreview(undefined);return true}if(id){closeWork();return true}return false},20)
  function filter(fn:()=>void){fn();setPage(0);setMenu('')}
- function clear(){filter(()=>{setQ('');setKind('');setSubject('');setScope('');setSort('recent');setFrom('');setTo('')})}
+ function clear(){filter(()=>{setQ('');setKind('');setSubject('');setScope('');setSort('recent');setFrom('');setTo('');setAdvancedTerms({source_type:'',institution:'',year:'',knowledge_point:'',knowledge_tag:'',subjects_all:''})})}
  function openFile(f:Asset,v:Version){if(detail){const url=fileUrl(detail.id,v.number,f.role);setPreview({url,name:f.filename,pages:f.pages,pageUrl:url+'/pages'})}}
  async function restore(v:Version){if(!detail||!detail.current_version||actionBusy)return;if(!await confirmAction('将 V'+v.number+' 恢复为新的正式版本？原制作草稿与已发布内容不变。','恢复历史版本','确认恢复'))return;setActionBusy(true);setActionMessage('');try{await api('/teaching-works/'+encodeURIComponent(detail.id)+'/versions/'+v.number+'/restore',{method:'POST',body:JSON.stringify({expected_version:detail.current_version})});setReload(n=>n+1)}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
  async function openEdit(){if(!detail||actionBusy)return;setActionBusy(true);setActionMessage('');try{setEdit(await api<EditContext>('/teaching-works/'+encodeURIComponent(detail.id)+'/edit-context'))}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
@@ -83,7 +85,7 @@ export default function TeachingWorks(){
    {preview?<FinishedMediaPreview key={preview.url} file={preview} onClose={()=>setPreview(undefined)}/>:<>
     {detail.video?<section className="panel finished-video">
       {detail.video.cover_file_id&&<img src={'/api/files/'+encodeURIComponent(detail.video.cover_file_id)+'/preview'} alt="视频封面" loading="lazy"/>}
-      <div className="finished-actions"><button className="primary" onClick={()=>setPreview({url:'/api/video/projects/'+encodeURIComponent(detail.video!.project_id)+'/media',name:detail.title,video:true})}>播放视频</button><a className="button-link" href={'/api/video/projects/'+encodeURIComponent(detail.video.project_id)+'/media?download=true'}>下载视频</a><Link className="button-link" to={'/videos?project='+encodeURIComponent(detail.video.project_id)}>原视频项目</Link></div><p className="muted">视频文件及成片版本由原视频引擎管理。</p>
+      <div className="finished-actions"><button className="primary" onClick={()=>setPreview({url:'/api/video/projects/'+encodeURIComponent(detail.video!.project_id)+'/media',name:detail.title,video:true})}>播放视频</button><a className="button-link" href={'/api/video/projects/'+encodeURIComponent(detail.video.project_id)+'/media?download=true'}>下载视频</a><Link className="button-link" to={'/videos?project='+encodeURIComponent(detail.video.project_id)}>原视频项目</Link></div><p className="muted">视频文件及成片版本由原视频引擎管理。</p>{detail.facets&&<details><summary>关联知识及来源</summary><p>知识点：<MathText compact content={detail.facets.knowledge_points?.join("、")||"未记录"}/></p><p>知识标签：<MathText compact content={detail.facets.knowledge_tags?.join("、")||"未记录"}/></p>{detail.facets.sources?.map(s=><p key={s.id}><MathText compact content={s.title}/> · {s.institution} {s.year}</p>)}</details>}
     </section>:<>
      <div className="finished-actions"><button className="primary" disabled={actionBusy||!detail.current_version} onClick={()=>void openEdit()}>修改作品</button></div>{edit&&<section className="panel finished-info"><h2>返回原工作台</h2><p className="muted">正式成品不变。可在原排版工作台主动应用 V{edit.version} 的配置，不覆盖当前草稿内容。</p><div className="finished-actions"><Link className="button-link" to={(edit.origin_scope==='source'?'/source-print/':'/print/')+encodeURIComponent(edit.origin_id)+'?'+editQuery}>修改排版</Link>{edit.origin_scope==='doc'&&['paper','handout','textbook'].includes(edit.kind)&&<Link className="button-link" to={(edit.kind==='paper'?'/papers':edit.kind==='handout'?'/handouts':'/textbooks')+'?doc='+encodeURIComponent(edit.origin_id)}>修改内容</Link>}<button onClick={()=>setEdit(undefined)}>取消</button></div></section>}
      <div className="finished-detail-tabs" role="group" aria-label="作品详情分类">{[['files','作品文件'],['info','基本信息'],['related','关联信息'],['versions','历史版本']].map(([v,n])=><button key={v} aria-pressed={tab===v} onClick={()=>setTab(v)}>{n}</button>)}</div>
@@ -108,7 +110,7 @@ export default function TeachingWorks(){
   <header className="finished-heading"><div><h1>教学作品</h1><p className="muted">管理已导出文档及已归档视频</p></div><button type="button" onClick={()=>setReload(x=>x+1)}><Icon name="refresh" size={16}/> 刷新</button></header>
   <div className="finished-search"><div className="finished-search-field"><Icon name="search"/><input aria-label="搜索作品名称" placeholder="搜索作品名称" value={q} maxLength={200} onChange={e=>filter(()=>setQ(e.target.value))}/></div><button type="button" aria-expanded={advanced} onClick={()=>setAdvanced(x=>!x)}>筛选 <Icon name="chevron-down" size={15}/></button></div>
   <div className="finished-tabs" role="group" aria-label="作品类型">{kinds.map(([v,n])=><button key={v} aria-pressed={kind===v} onClick={()=>filter(()=>setKind(v))}>{n}</button>)}</div>
-  {advanced&&<section className="panel finished-filters"><label>科目<select value={subject} onChange={e=>filter(()=>setSubject(e.target.value))}><option value="">全部科目</option>{subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>制作来源<select value={scope} onChange={e=>filter(()=>setScope(e.target.value))}><option value="">全部</option><option value="doc">自编教学资料</option><option value="source">来源库</option><option value="video">视频引擎</option></select></label><label>创建起始<input type="date" value={from} onChange={e=>filter(()=>setFrom(e.target.value))}/></label><label>创建截止<input type="date" value={to} onChange={e=>filter(()=>setTo(e.target.value))}/></label><button onClick={clear}>重置筛选</button></section>}
+  {advanced&&<section className="panel finished-filters"><label>科目<select value={subject} onChange={e=>filter(()=>setSubject(e.target.value))}><option value="">全部科目</option>{subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>制作来源<select value={scope} onChange={e=>filter(()=>setScope(e.target.value))}><option value="">全部</option><option value="doc">自编教学资料</option><option value="source">来源库</option><option value="video">视频引擎</option></select></label><label>创建起始<input type="date" value={from} onChange={e=>filter(()=>setFrom(e.target.value))}/></label><label>创建截止<input type="date" value={to} onChange={e=>filter(()=>setTo(e.target.value))}/></label>{([["source_type","来源类型代码","如 exam、textbook"],["institution","来源院校","如 郑州大学"],["year","来源年份","如 2026"],["knowledge_point","知识点","录入的知识点名称"],["knowledge_tag","知识标签","知识图谱标签名称"],["subjects_all","同时包含科目","多个名称用逗号分隔"]] as const).map(([k,n,h])=><label key={k}>{n}<input maxLength={500} placeholder={h} value={advancedTerms[k]} onChange={e=>filter(()=>setAdvancedTerms(v=>({...v,[k]:e.target.value})))}/></label>)}<button onClick={clear}>重置筛选</button></section>}
   <div className="finished-meta"><small>{busy?'正在读取…':'共 '+total+' 个作品'}</small><select aria-label="作品排序" value={sort} onChange={e=>filter(()=>setSort(e.target.value))}><option value="recent">最近更新</option><option value="old">最早创建</option><option value="name">名称排序</option></select></div>
   {error?<p className="inline-error" role="alert">{error}</p>:<section className="panel finished-list" aria-busy={busy}>
    {!busy&&!rows.length&&<p className="muted finished-empty">没有符合条件的作品。正式导出的 PDF 或已归档视频将在这里显示。</p>}

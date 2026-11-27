@@ -9,7 +9,8 @@ from app.core.db import get_db
 from app.core.method_recommendation import video_solution
 from app.core.security import current_user, require_origin, audit, now
 from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile
-from app.api.resources import admin_lock
+from app.api.resources import admin_lock, view as resource_view
+from app.services import work_facets
 from app.api.studio import save_version
 from app.services import video_engine as engine, storage
 from app.api import qoder
@@ -110,7 +111,8 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
         return view(old)
     data = snapshot(r)
     # Save mapping before contacting the independent service; if response is lost, do not retry create blindly.
-    row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot=data, created_at=now())
+    facets = work_facets.capture(db, {"subject":r.subject,"blocks":[{"resource_id":r.id,"snapshot":resource_view(r)}]})
+    row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot=data, work_facets=facets, created_at=now())
     db.add(row)
     audit(db, "video.create", user.id)
     db.commit()

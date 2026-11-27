@@ -4,7 +4,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, literal, cast, Integer
+from sqlalchemy import select, func, literal, cast, Integer, or_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -44,6 +45,17 @@ def video_records(user):
         VideoProject.engine_id.is_not(None), literal(user.id == 1))
 
 
+def split_terms(value):
+    return list(dict.fromkeys(t.strip() for t in value.replace("，",",").split(",") if t.strip()))
+
+
+def has_fact(db, column, field, value):
+    if db.bind.dialect.name == "postgresql":
+        return cast(column,JSONB).contains({field:[value]})
+    values = func.json_each(column, "$."+field).table_valued("key","value").alias()
+    return select(literal(1)).select_from(values).where(values.c.value==value).exists()
+
+
 @router.get("")
 def listing(q: str = Query("", max_length=200), kind: str = Query("", max_length=20),
             subject: str = Query("", max_length=40),
@@ -52,10 +64,30 @@ def listing(q: str = Query("", max_length=200), kind: str = Query("", max_length
             created_from: int | None = Query(None, ge=0),
             created_to: int | None = Query(None, ge=0),
             offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
-            db: Session = Depends(get_db), user: User = Depends(current_user)):
+            db: Session = Depends(get_db), user: User = Depends(current_user),
+            source_type: str = "", institution: str = "", year: str = "",
+            knowledge_point: str = "", knowledge_tag: str = "", subjects_all: str = ""):
+    filters = {"source_types":source_type,"institutions":institution,"years":year,
+               "knowledge_points":knowledge_point,"knowledge_tags":knowledge_tag,"subjects":subjects_all}
+    if any(len(value)>500 for value in filters.values()):
+        raise HTTPException(422,"筛选内容过长")
+    terms = {field:split_terms(value) for field,value in filters.items() if value.strip()}
     docs = select(*(getattr(TeachingWork, key).label(key) for key in FIELDS)).where(
         TeachingWork.user_id == user.id)
-    combined = docs.union_all(video_records(user)).subquery()
+    videos = video_records(user)
+    if terms:
+        docs = docs.join(TeachingWorkVersion, (TeachingWorkVersion.work_id == TeachingWork.id) &
+                         (TeachingWorkVersion.number == TeachingWork.current_version))
+        for field,values in terms.items():
+            for value in values:
+                if field == "subjects":
+                    docs = docs.where(or_(TeachingWork.subject==value,has_fact(db,TeachingWorkVersion.facets,field,value)))
+                    videos = videos.where(or_(VideoProject.source_snapshot["subject"].as_string()==value,
+                                              has_fact(db,VideoProject.work_facets,field,value)))
+                else:
+                    docs = docs.where(has_fact(db,TeachingWorkVersion.facets,field,value))
+                    videos = videos.where(has_fact(db,VideoProject.work_facets,field,value))
+    combined = docs.union_all(videos).subquery()
     stmt = select(combined)
     if q.strip():
         stmt = stmt.where(combined.c.title.contains(q.strip(), autoescape=True))
@@ -97,17 +129,17 @@ def detail(ident: str, db: Session = Depends(get_db), user: User = Depends(curre
         item = db.get(StudioItem, ident)
         project = db.get(VideoProject, found["origin_id"])
         cover = item.data.get("cover_file_id")
-        return {**dict(found), "versions": [], "pending_cover": None,
+        return {**dict(found), "versions": [], "pending_cover": None, "facets": project.work_facets,
                 "video": {"project_id": project.id, "resource_id": project.resource_id,
                           "cover_file_id": cover, "revision_managed_by_engine": True}}
     # Do not load complete document snapshots in the file/detail request.
-    versions = db.execute(select(TeachingWorkVersion.number, TeachingWorkVersion.created_at).where(
+    versions = db.execute(select(TeachingWorkVersion.number, TeachingWorkVersion.created_at, TeachingWorkVersion.facets).where(
         TeachingWorkVersion.work_id == work.id).order_by(TeachingWorkVersion.number.desc())).all()
     assets = list(db.execute(select(TeachingWorkAsset, StoredFile).join(
         StoredFile, StoredFile.id == TeachingWorkAsset.file_id).where(TeachingWorkAsset.work_id == work.id)))
     pending = db.execute(select(TeachingWorkPendingCover.filename, TeachingWorkPendingCover.created_at).where(
         TeachingWorkPendingCover.work_id == work.id)).first()
-    return {**summary(work), "pending_cover": {"filename":pending.filename,"created_at":pending.created_at} if pending else None,
+    return {**summary(work), "facets": next((v.facets for v in versions if v.number==work.current_version),{}), "pending_cover": {"filename":pending.filename,"created_at":pending.created_at} if pending else None,
             "versions": [{"number": v.number, "created_at": v.created_at, "files": [
                 {"role": a.role, "filename": a.filename, "pages": a.pages,
                  "size_bytes": f.size_bytes, "media_type": f.media_type}
@@ -163,7 +195,7 @@ def questions(ident: str, number: int, q: str = Query("", max_length=200),
         items = [item for item in items if needle in (str(item["title"])+" "+str(item["content"])).casefold()]
     return {"items": items[offset:offset+limit], "total": len(items), "question_count": count,
             "knowledge_points": points, "knowledge_tags": tags, "source_count": len(sources),
-            "partial_pages": bool(version.snapshot.get("edition", {}).get("page_ranges"))}
+            "partial_pages": bool(version.snapshot.get("edition", {}).get("page_ranges")), "sources":version.facets.get("sources",[])}
 
 
 @router.get("/{ident}/pending-cover/file")

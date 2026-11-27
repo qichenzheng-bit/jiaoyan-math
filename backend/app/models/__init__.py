@@ -314,6 +314,7 @@ class StudioRevision(Base):
 
 class VideoProject(Base):
     __tablename__ = "video_projects"
+    work_facets: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), default=dict, server_default="{}")
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     resource_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"))
     resource_revision: Mapped[int] = mapped_column(Integer)
@@ -390,6 +391,7 @@ class TeachingWork(Base):
 
 class TeachingWorkVersion(Base):
     __tablename__ = "teaching_work_versions"
+    facets: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), default=dict, server_default="{}")
     work_id: Mapped[str] = mapped_column(ForeignKey("teaching_works.id", ondelete="CASCADE"), primary_key=True)
     number: Mapped[int] = mapped_column(Integer, primary_key=True)
     fingerprint: Mapped[str] = mapped_column(String(64))

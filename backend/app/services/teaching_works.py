@@ -97,7 +97,7 @@ def remove_pending(db, pending):
 def append_version(db, work, fingerprint, snapshot, assets):
     number = work.current_version + 1
     db.add(TeachingWorkVersion(work_id=work.id, number=number, fingerprint=fingerprint,
-                               snapshot=snapshot, created_at=now()))
+                               snapshot=snapshot, facets=snapshot.get("facets", {}), created_at=now()))
     db.flush()
     for role, fid, filename, pages in assets:
         db.add(TeachingWorkAsset(work_id=work.id, version=number, role=role,
@@ -177,7 +177,8 @@ def register_pdf(db: Session, *, user_id: int, scope: str, identity: str,
     edition = ctx["edition"]
     snapshot = {"doc": doc, "layout": payload["layout"], "edition": edition,
                 "stem": bool(payload.get("stem")), "answerOnly": bool(payload.get("answerOnly")),
-                "overrides": payload.get("overrides", {}), "image_ids": payload.get("snapshot_image_ids", [])}
+                "overrides": payload.get("overrides", {}), "image_ids": payload.get("snapshot_image_ids", []),
+                "facets": payload.get("work_facets", {})}
     work = db.scalar(select(TeachingWork).where(
         TeachingWork.user_id == user_id, TeachingWork.origin_scope == scope,
         TeachingWork.origin_id == identity, TeachingWork.variant == variant

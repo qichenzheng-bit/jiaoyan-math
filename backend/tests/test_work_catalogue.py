@@ -2,18 +2,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.api import teaching_works as api
-from app.models import User, TeachingWork, StudioItem, VideoProject
+from app.models import User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject
 
 
 def test_catalogue_combines_real_video_records_and_documents():
     engine = create_engine("sqlite://")
-    for model in (User, TeachingWork, StudioItem, VideoProject):
+    for model in (User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add(User(id=1, username="test", password_hash="test", created_at=1))
         db.add(TeachingWork(id="w", user_id=1, origin_scope="doc", origin_id="d", variant="v",
                             kind="paper", title="数学试卷", subject="高等数学", current_version=1,
                             created_at=10, updated_at=20))
+        db.add(TeachingWorkVersion(work_id="w",number=1,fingerprint="x",snapshot={},facets={"knowledge_points":["极限"],"knowledge_tags":["数列"],"institutions":["郑州大学"],"years":["2026"],"subjects":["高等数学","线性代数"]},created_at=10))
         db.add(StudioItem(id="s",kind="work",title="数学视频",data={"category":"video"},
                           revision=1,archived=False,created_at=5,updated_at=30))
         db.add(StudioItem(id="old",kind="work",title="未归档引擎视频",data={"category":"video"},
@@ -32,6 +33,9 @@ def test_catalogue_combines_real_video_records_and_documents():
         assert query(scope="doc")["items"][0]["id"]=="w"
         assert query(sort="old",limit=1,offset=1)["items"][0]["id"]=="w"
         assert api.subjects(db=db,user=user)==["高等数学"]
+        assert query(institution="郑州大学",year="2026",knowledge_point="极限")["total"]==1
+        assert query(knowledge_tag="极限")["total"]==0
+        assert query(subjects_all="高等数学,线性代数")["total"]==1
         detail=api.detail("s",db=db,user=user)
         assert detail["video"]["project_id"]=="p" and detail["current_version"] is None
 

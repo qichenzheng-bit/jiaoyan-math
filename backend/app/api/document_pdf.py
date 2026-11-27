@@ -24,7 +24,7 @@ from app.core.db import get_db, session_factory
 from app.core.config import settings
 from app.core.security import current_user, require_origin
 from app.models import User, StoredFile
-from app.services import storage, teaching_works
+from app.services import storage, teaching_works, work_facets
 from app.services.document_pdf import render_pdf, selected_pages
 from app.services.inline_images import image_ids
 
@@ -331,6 +331,7 @@ def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
     payload["chapter_uid"] = body.chapter_uid
     payload["selected_uids"] = body.selected_uids
     payload["work_context"] = teaching_works.context(payload)
+    payload["work_facets"] = work_facets.capture(db, data, identity if scope == "source" else None)
     if body.wrap:payload["doc"]={**data,"blocks":[]}
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
     check_complete_export_size(len(raw))
