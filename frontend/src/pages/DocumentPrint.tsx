@@ -97,7 +97,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   const next=templateLayout(sanitizeLayout(selected.layout))
   if(source)next.originalNumbers=layout.originalNumbers
   if(applyMode==='partial'){
-   const groups:Record<string,(keyof Layout)[]>={page:['paper','width','height','landscape','top','bottom','left','right','columns','gap','mirrorMargins','chapterNewPage'],body:['font','size','lineHeight','paragraphGap','titleSize','headingSize','keepQuestions','equationNumbering'],special:['subtitle','examTime','showScore','typeHeadings','numbering','optionColumns','blankWidth','answerSpace','originalNumbers'],header:['header','footer','toc','tocDepth'],types:['typeStyles']}
+   const groups:Record<string,(keyof Layout)[]>={page:['paper','width','height','landscape','top','bottom','left','right','columns','gap','mirrorMargins','chapterNewPage'],body:['font','size','lineHeight','paragraphGap','titleSize','headingSize','keepQuestions','equationNumbering'],special:['subtitle','examTime','showScore','typeHeadings','numbering','optionColumns','blankWidth','answerSpace','originalNumbers'],header:['header','footer','toc','tocDepth','knowledgeIndex'],types:['typeStyles']}
    const chosen=new Set(applyParts.flatMap(part=>groups[part]??[]))
    for(const key of Object.keys(next) as (keyof Layout)[])if(!chosen.has(key))Object.assign(next,{[key]:layout[key]})
   }
@@ -254,6 +254,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
      <label>页眉<input maxLength={200} value={layout.header} onChange={e=>patch({header:e.target.value})}/></label>
      <label>页脚<input maxLength={200} value={layout.footer} onChange={e=>patch({footer:e.target.value})}/></label>
      <small>支持文档名称、科目、当前章名、当前页码、总页数占位符。</small>
+     {doc.kind!=='paper'&&<label className="layout-check"><input type="checkbox" checked={layout.knowledgeIndex} onChange={e=>patch({knowledgeIndex:e.target.checked})}/>生成知识点索引（只索引正式知识点）</label>}
      <label className="layout-check"><input type="checkbox" checked={layout.toc} onChange={e=>patch({toc:e.target.checked})}/>生成目录</label>
      {layout.toc&&<label>目录层级<select value={layout.tocDepth} onChange={e=>patch({tocDepth:Number(e.target.value) as Layout['tocDepth']})}>{[1,2,3,4,5,6].map(n=><option key={n}>{n}</option>)}</select></label>}
      <label className="layout-check"><input type="checkbox" checked={layout.chapterNewPage} onChange={e=>patch({chapterNewPage:e.target.checked})}/>章标题另起一页</label>
@@ -337,7 +338,8 @@ export function PrintableDocument({doc,stem=false,answerOnly=false,source=false,
    if(answerOnly&&!question)return null
    return <Fragment key={b.uid}>
     {section&&<section className="print-block layout-type-heading" data-layout-level="2" data-layout-uid={'type-'+group}><h2>{chinese[group]??group}、{qtype}</h2><small>共 {groups.get(group)?.count??0} 题{(groups.get(group)?.score??0)>0&&layout?.showScore!==false?'，共 '+groups.get(group)?.score+' 分':''}</small></section>}
-    <section className={"print-block"+(question&&layout?.keepQuestions?" layout-keep":"")+frame} {...common}>
+    <section className={"print-block"+(question&&layout?.keepQuestions?" layout-keep":"")+frame} {...common} data-layout-knowledge={v.kind==='knowledge'&&v.title?v.title:undefined}>
+     {v.kind==='knowledge'&&v.title&&layout?.knowledgeIndex&&<span className="layout-index-label" hidden><MathText compact content={v.title}/></span>}
      {source&&sourceId&&b.resource_id&&<Link className="print-controls source-edit-link" to={'/resource-edit/'+encodeURIComponent(b.resource_id)+'?return_source='+encodeURIComponent(sourceId)}>编辑{question?'题目':'知识单元'}</Link>}
      {question?<p className="print-question-number">{role!=='normal'?roleNames[role]+' '+roleNumber:number+'.'} {b.score&&layout?.showScore!==false?'（本题满分 '+b.score+' 分）':''}</p>:role!=='normal'||v.title?<h2>{role!=='normal'&&roleNames[role]+(role==='proof'||role==='warning'||role==='summary'?'：':' '+roleNumber+'　')}<MathText compact content={v.title}/></h2>:null}
      {!answerOnly&&(canUseOptions?<><RichPrint content={structured?.stem??''} labels={labels}/><div className="layout-options" data-option-layout={String(rule.optionColumns??layout?.optionColumns??'auto')}>{options.map(o=><div className="layout-option" key={o.label}><span>{o.label}. </span><MathText compact content={o.content}/></div>)}</div></>:<RichPrint content={v.content} labels={labels} blankWidth={layout?.blankWidth}/>)}
