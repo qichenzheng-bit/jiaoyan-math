@@ -865,7 +865,8 @@ with sync_playwright() as p:
                     assert endpoint==""
                     result={"source_count":2,"confirmed_complete_sources":0,"question_count":2,"source_question_count":3,"questions_with_knowledge":2,"knowledge_count":1,"limit":50,"offset":0,"items":[{"subject":"高等数学","name":"重要极限","question_count":1,"source_question_count":2}]}
                 route.fulfill(json=result)
-            page.route("**/api/source-catalog/statistics**",stats_api)
+            statistics_route=re.compile(r".*/api/source-catalog/statistics(?:/[^?]*)?(?:\?.*)?$")
+            page.route(statistics_route,stats_api)
             visit(page,"/source-catalog/statistics",".source-statistics")
             page.get_by_placeholder("2026，2025",exact=True).fill("2026")
             page.get_by_placeholder("郑州大学",exact=True).fill("郑州大学")
@@ -885,7 +886,7 @@ with sync_playwright() as p:
             assert [x[0] for x in stats_requests]==["","/questions","/distribution","/distribution","/distribution"]
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
             capture(page,path=str(OUT/("f43-statistics-"+GROUP+".png")),full_page=False)
-            page.unroute("**/api/source-catalog/statistics**",stats_api)
+            page.unroute(statistics_route,stats_api)
         if GROUP in {'all','desktop','mobile'}:
             print('UI case: persisted agent workflow and confirmed advance',flush=True)
             page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
