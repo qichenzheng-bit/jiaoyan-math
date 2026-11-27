@@ -117,6 +117,7 @@ class ResourceSourceLink(Base):
     source_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
     provenance_role: Mapped[str] = mapped_column(String(16),primary_key=True)
     original_question_number: Mapped[str] = mapped_column(String(40))
+    occurrences: Mapped[list] = mapped_column(JSON,default=list,server_default="[]")
     page_start: Mapped[int | None] = mapped_column(Integer,nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer,nullable=True)
     chapter: Mapped[str] = mapped_column(String(120))

@@ -37,6 +37,10 @@ class Block(BaseModel):
     edit_reference_revision:int|None=Field(default=None,ge=1)
     reuse_resource_id:str|None=Field(default=None,max_length=36)
     reuse_revision:int|None=Field(default=None,ge=1)
+    reuse_mode:Literal["reuse","append"]="reuse"
+    original_question_number:str=Field(default="",max_length=40)
+    source_page_start:int|None=Field(default=None,ge=1)
+    source_page_end:int|None=Field(default=None,ge=1)
     reuse_code:str|None=Field(default=None,max_length=16)
     fork_from_id:str|None=Field(default=None,max_length=36)
     question_type:str=Field(default="",max_length=20)
@@ -86,6 +90,8 @@ def validate(db,body,previous,*,allow_reference_edits=False):
     result=[]
     for b in body.blocks:
         data=b.model_dump()
+        if b.source_page_end and b.source_page_start and b.source_page_end<b.source_page_start:raise HTTPException(422,"结束页不能小于起始页")
+        if b.reuse_mode=="append" and (b.kind!="question" or not b.reuse_resource_id):raise HTTPException(422,"追加解法必须指定原题")
         if b.edit_reference_revision is not None:
             prior=old.get(b.uid,{})
             if not allow_reference_edits or b.kind!="reference" or prior.get("kind")!="reference" or prior.get("resource_id")!=b.resource_id or (prior.get("snapshot") or {}).get("revision")!=b.edit_reference_revision:
@@ -571,15 +577,89 @@ def append_methods(old,new):
     if len(result)>50000:raise HTTPException(422,"合并后解析过长")
     return result
 
-def attach_review_source(db,r,source):
-    if not source:return False
-    if any(l.source_id==source for l in bank.links(db,r)):return False
-    if not r.source_id:
-        bank.change_primary(db,r,source)
+def validate_append(r,b,subject):
+    if r.archived or r.kind!="question" or b["kind"]!="question" or not matching.same_question(r.content,b["content"]):
+        raise HTTPException(422,"只有题干完全一致的有效题目才能追加解法")
+    if matching.answer_conflict(r.answer,b.get("answer","")):raise HTTPException(422,"答案存在冲突，请先核对")
+    if r.subject!=normalize_subject(subject):raise HTTPException(422,"科目不同，请先核对")
+    old=resolve(r.content,r.answer,r.solution,r.question_type,r.question_data)
+    new=resolve(b["content"],b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data"))
+    if old.warnings or new.warnings:raise HTTPException(422,"题目结构存在歧义，请先核对小问和答案")
+    if old.subquestions or new.subquestions:
+        if len(old.subquestions)!=len(new.subquestions) or any(x.content!=y.content or matching.answer_conflict(x.answer,y.answer) for x,y in zip(old.subquestions,new.subquestions)):
+            raise HTTPException(422,"小问内容或答案不一致，请核对")
+    return old,new
+
+def merge_question_methods(r,b,subject):
+    from app.core.question_structure import Method, project, digest
+    old,new=validate_append(r,b,subject)
+    def merge(a,c):
+        known={matching.strict_text((m.name+"\n" if m.name else "")+m.body) for m in a}
+        out=list(a)
+        for m in c:
+            key=matching.strict_text((m.name+"\n" if m.name else "")+m.body)
+            if m.body.strip() and key not in known:
+                out.append(m.model_copy(update={"recommended":False}));known.add(key)
+        if len(out)>30:raise HTTPException(422,"解法超过30种，请整理后重试")
+        selected=next((i for i,m in enumerate(out) if m.recommended),0)
+        return [m.model_copy(update={"recommended":i==selected}) for i,m in enumerate(out)]
+    if old.subquestions:
+        parts=[x.model_copy(update={"answer":x.answer or y.answer,"methods":merge(x.methods,y.methods)}) for x,y in zip(old.subquestions,new.subquestions)]
+        merged=old.model_copy(update={"subquestions":parts})
     else:
-        db.add(ResourceSourceLink(resource_id=r.id,source_id=source,provenance_role="reproduced",original_question_number="",chapter="",note="文档审核入库关联，来源角色待核实",is_primary=False,role_verified=False,page_start=None,page_end=None))
-        r.sources_revision+=1
+        merged=old.model_copy(update={"answer":old.answer or new.answer,"methods":merge(old.methods,new.methods)})
+        if old.blanks and new.blanks:
+            merged=merged.model_copy(update={"blanks":[x.model_copy(update={"answer":x.answer or y.answer}) for x,y in zip(old.blanks,new.blanks)]})
+        if old.options and not old.correct_options and not old.answer and new.correct_options:
+            merged=merged.model_copy(update={"correct_options":new.correct_options})
+    projected=project(merged)
+    # Keep the existing exact question stem; source-specific layout is not overwritten.
+    answer=r.answer or projected["answer"]
+    solution=projected["solution"]
+    if len(solution)>50000:raise HTTPException(422,"合并后解析过长")
+    if solution==r.solution and answer==r.answer:return False
+    r.answer=answer;r.solution=solution
+    r.question_data=merged.model_copy(update={"legacy_digest":digest(r.content,answer,solution,r.question_type)}).model_dump()
+    r.fingerprint=question_fingerprint(r.content,r.solution,r.answer)
     return True
+
+def source_occurrence(db,d,b,source):
+    # Do not infer actual question numbers from document position. Only explicit numbers
+    # and confirmed original page provenance are treated as facts.
+    start=b.get("source_page_start");end=b.get("source_page_end")
+    if start is None:
+        for j in db.scalars(select(IntakeJob).where(IntakeJob.document_id==d.id)):
+            if not any(x["uid"]==b["uid"] for x in j.items):continue
+            loc=(j.provenance or {}).get("confirmed_pages",{}).get(b["uid"],{})
+            start=loc.get("content");end=start
+            break
+    return {"document_id":d.id,"item_uid":b["uid"],"original_question_number":b.get("original_question_number",""),"page_start":start,"page_end":end or start,"chapter":b.get("chapter","")}
+
+def attach_review_source(db,r,source,occurrence=None):
+    if not source:return False
+    existing=next((l for l in bank.links(db,r) if l.source_id==source),None)
+    changed=False
+    if existing is None:
+        if not r.source_id:
+            bank.change_primary(db,r,source);db.flush()
+            existing=next(l for l in bank.links(db,r) if l.source_id==source)
+        else:
+            existing=ResourceSourceLink(resource_id=r.id,source_id=source,provenance_role="reproduced",original_question_number="",chapter="",note="文档审核入库关联，来源角色待核实",is_primary=False,role_verified=False,page_start=None,page_end=None)
+            db.add(existing);r.sources_revision+=1
+        changed=True
+    if occurrence:
+        occurrences=list(existing.occurrences or [])
+        # Repeated registration of the same document item is idempotent.
+        found=next((o for o in occurrences if o.get("document_id")==occurrence["document_id"] and o.get("item_uid")==occurrence["item_uid"]),None)
+        if found is None:
+            occurrences.append(occurrence)
+            existing.occurrences=occurrences
+            if not existing.original_question_number:existing.original_question_number=occurrence["original_question_number"]
+            if existing.page_start is None:existing.page_start=occurrence["page_start"];existing.page_end=occurrence["page_end"]
+            if not existing.chapter:existing.chapter=occurrence["chapter"]
+            if not changed:r.sources_revision+=1
+            changed=True
+    return changed
 
 def attach_review_knowledge(db,r,ids):
     if len(set(ids))!=len(ids):raise HTTPException(422,"知识点重复")
@@ -606,32 +686,29 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
         before=None
         if decision.action=="create":
             if decision.resource_id:raise HTTPException(422,"新建操作不能指定已有资源")
+            if b["kind"]=="question" and any(matching.same_question(r.content,b["content"]) for r in strict_candidates(db,values) if not r.archived):raise HTTPException(409,"相同题干已存在，请复用原题或追加解法")
             if strict_candidates(db,values) and not decision.reason.strip():
                 raise HTTPException(409,"发现完全重复或同题候选，选择复用、追加解法或填写保留原因")
             bank.guard_duplicate(db,values)
             r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**values,source_id=None,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
             db.add(r);db.flush()
-            attach_review_source(db,r,source);attach_review_knowledge(db,r,decision.knowledge_ids)
+            attach_review_source(db,r,source,source_occurrence(db,d,b,source));attach_review_knowledge(db,r,decision.knowledge_ids)
             audit(db,"resource.create",user.id)
         else:
             if not decision.resource_id or decision.resource_revision is None:raise HTTPException(422,"请选择已有资源及版本")
             r=bank.existing(db,decision.resource_id,True)
             if r.archived or r.kind!=b["kind"] or r.revision!=decision.resource_revision:
                 raise HTTPException(409,"候选资源已修改或归档，请重新审核")
-            if match_kind(r,values)=="similar":raise HTTPException(422,"疑似相似题不能直接合并，请核对后单独保留")
+            if match_kind(r,values)=="similar" or r.kind=="question" and not matching.same_question(r.content,b["content"]):raise HTTPException(422,"疑似相似题不能直接合并，请核对后单独保留")
             before=bank.view(r);changed=False
             if decision.action=="append":
                 if r.kind!="question" or answer_conflict(r,b):raise HTTPException(422,"答案冲突或不是题目，不能追加解法")
-                updated=append_methods(r.solution,b.get("solution",""))
-                if not updated or updated==r.solution:raise HTTPException(422,"没有可追加的新解法")
-                if r.subject!=values["subject"]:raise HTTPException(422,"学科不同，不能追加解法")
-                r.solution=updated
-                if not r.answer.strip():r.answer=b.get("answer","")
-                r.fingerprint=question_fingerprint(r.content,r.solution,r.answer);r.question_data=resolve(r.content,r.answer,r.solution,r.question_type).model_dump();changed=True
+                changed=merge_question_methods(r,b,values["subject"])
+                if not changed:raise HTTPException(422,"没有可追加的新解法")
                 audit(db,"resource.methods.append",user.id)
             elif (match_kind(r,values)!="exact" or r.subject!=values["subject"] or answer_conflict(r,b) or canonical_text(r.analysis)!=canonical_text(b.get("analysis","")) or canonical_text(r.proof)!=canonical_text(b.get("proof",""))) and not decision.reason.strip():
                 raise HTTPException(422,"复用会保留已有资源内容，请填写确认原因；草稿保存在入库历史")
-            changed=attach_review_source(db,r,source) or changed
+            changed=attach_review_source(db,r,source,source_occurrence(db,d,b,source)) or changed
             changed=attach_review_knowledge(db,r,decision.knowledge_ids) or changed
             if changed:r.revision+=1;r.updated_at=now()
         db.flush();protect_resource_images(db,r)
@@ -762,19 +839,23 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             r=bank.existing(db,b["reuse_resource_id"],True)
             if r.archived or r.kind!=b["kind"] or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
-            # Prevent an edited draft from silently reusing a different question.
-            if any(data[k]!=getattr(r,k) for k in (("kind","content","answer","solution","subject","chapter","question_type","difficulty") if b["kind"]=="question" else ("kind","title","content","proof","subject","chapter","unit_type"))):
-                raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
             before=bank.view(r)
-            changed=attach_review_source(db,r,primary)
+            appended=b.get("reuse_mode")=="append"
+            changed=merge_question_methods(r,b,item_subject) if appended else False
+            # Prevent an edited draft from silently reusing a different question.
+            if not appended and any(data[k]!=getattr(r,k) for k in (("kind","content","answer","solution","subject","chapter","question_type","difficulty") if b["kind"]=="question" else ("kind","title","content","proof","subject","chapter","unit_type"))):
+                raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
+            changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
             merged=list(dict.fromkeys([*bank.view(r)["tags"],*tags]))
             if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
             if merged!=r.tags:r.tags=merged;changed=True
             if changed:r.revision+=1;r.updated_at=now()
-            action="reuse"
+            action="append" if appended else "reuse"
         else:
-            # Never mutate a candidate when the user edits a similar question.
+            # Recheck under the existing transaction lock, including earlier blocks in the same batch.
+            if b["kind"]=="question" and any(matching.same_question(r.content,b["content"]) for r in db.scalars(select(Resource).where(Resource.kind=="question",Resource.archived==False,Resource.stem_key==data["stem_key"]))):
+                raise HTTPException(409,"相同题干已存在，请先复用原题或追加解法")
             if db.scalar(bank.exact(db,data).limit(1)):
                 data["dedup_override"]=True
                 data["dedup_reason"]=b.get("dedup_reason","").strip() or "手动录入：保留独立条目及其来源"
@@ -782,7 +863,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             r=Resource(id=str(uuid4()),code=bank.new_code(db,b["kind"]),**data,source_id=None,
                 revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
             db.add(r);db.flush()
-            if primary:bank.change_primary(db,r,primary)
+            if primary:attach_review_source(db,r,primary,source_occurrence(db,d,b,primary))
             attach_review_knowledge(db,r,knowledge_ids)
             audit(db,"resource.create",user.id)
             action="create"
@@ -853,7 +934,7 @@ def manual_review_data(db,d,only_uid=None):
         kind=b["kind"]
         if kind not in ("question","knowledge") and not b.get("edit_reference_revision"):continue
         actual_kind=(b.get("snapshot") or {}).get("kind") if kind=="reference" else kind
-        errors=[];warnings=[];action="update" if kind=="reference" else "reuse" if b.get("reuse_resource_id") else "create"
+        errors=[];warnings=[];action="update" if kind=="reference" else b.get("reuse_mode","reuse") if b.get("reuse_resource_id") else "create"
         if not b.get("content","").strip():errors.append("正文不能为空")
         if actual_kind=="knowledge" and not b.get("title","").strip():errors.append("知识单元名称不能为空")
         if not normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject):errors.append("请选择科目")
@@ -869,9 +950,14 @@ def manual_review_data(db,d,only_uid=None):
             if not b.get("solution","").strip():warnings.append("解析未填写")
         if actual_kind=="knowledge" and not b.get("unit_type","").strip():warnings.append("知识类型未填写")
         if actual_kind=="question" and not b.get("knowledge_tags"):warnings.append("未关联知识点")
-        if action=="reuse":
+        if action in ("reuse","append"):
             resource=db.get(Resource,b["reuse_resource_id"])
             if not resource or resource.archived or resource.kind!=actual_kind or resource.revision!=b.get("reuse_revision"):errors.append("引用资源已变化，请重新查重")
+            elif action=="append":
+                try:validate_append(resource,b,b.get("subject") if b.get("subject") is not None else d.subject)
+                except HTTPException as e:errors.append(e.detail)
+        elif action=="create" and actual_kind=="question" and any(x["uid"]!=b["uid"] and x["kind"]=="question" and matching.same_question(x["content"],b["content"]) for x in d.blocks[:n-1]):
+            errors.append("与本资料前面的题干重复，请先保留一条并整理全部解法")
         elif action=="create" and not errors and not b.get("dedup_reason","").strip():
             matches=manual_matches(ManualSearch(kind=actual_kind,title=b.get("title",""),content=b["content"],answer=b.get("answer",""),solution=b.get("solution","")),db)
             if matches["total"]:errors.append("存在重复候选，请返回条目选择使用已有资源或说明独立保留原因")
@@ -933,6 +1019,6 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     saved=manual_save(id,Draft.model_validate(public(d)),db,user)
     counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0}
     for item in review["rows"]:
-        key="updated" if item["action"]=="update" else item["kind"]+"_"+item["action"]
+        key="updated" if item["action"] in ("update","append") else item["kind"]+"_"+item["action"]
         counts[key]+=1
     return {"document":saved,"counts":counts}

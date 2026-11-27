@@ -238,6 +238,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         same=reused_saved.json()["blocks"][0]["snapshot"]
         assert same["id"]==original["id"] and same["code"]==original["code"]
         assert same["content"]==original["content"]
+        src_links=client.get("/api/resources/"+original["id"]+"/sources").json()["items"]
+        assert any(l["source_id"]==new_source["source_id"] and l["occurrences"] for l in src_links)
         assert {"矩阵运算","矩阵乘法"}==set(same["tags"])
         assert new_source["source_id"] in {x["source_id"] for x in client.get("/api/resources/"+same["id"]+"/sources").json()["items"]}
         fork={**reused_block,"uid":"fork-question","content":"另一个矩阵选择题","reuse_resource_id":None,"reuse_revision":None,"fork_from_id":same["id"]}

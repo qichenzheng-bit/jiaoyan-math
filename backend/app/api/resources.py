@@ -305,7 +305,7 @@ class SourceLinks(BaseModel):
     revision:int=Field(ge=1)
     items:list[SourceLink]=Field(max_length=100)
 def link_view(db,row):
-    return {"revision":row.sources_revision,"items":[{**{k:getattr(l,k) for k in SourceLink.model_fields},"source_title":db.get(TeachingResource,l.source_id).title} for l in links(db,row)]}
+    return {"revision":row.sources_revision,"items":[{**{k:getattr(l,k) for k in SourceLink.model_fields},"source_title":db.get(TeachingResource,l.source_id).title,"occurrences":l.occurrences or []} for l in links(db,row)]}
 
 @router.get("/{id}/sources")
 def list_sources(id:str,db:Session=Depends(get_db)): return link_view(db,existing(db,id))
@@ -324,9 +324,10 @@ def replace_sources(id:str,body:SourceLinks,db:Session=Depends(get_db),user:User
             if primary: raise HTTPException(422,"只能选择一个主要来源")
             primary=item.source_id
         keys.add(key)
+    previous={(l.source_id,l.provenance_role):l.occurrences or [] for l in links(db,row)}
     db.execute(delete(ResourceSourceLink).where(ResourceSourceLink.resource_id==row.id))
     db.flush()
-    for item in body.items: db.add(ResourceSourceLink(resource_id=row.id,**item.model_dump()))
+    for item in body.items: db.add(ResourceSourceLink(resource_id=row.id,**item.model_dump(),occurrences=previous.get((item.source_id,item.provenance_role),[])))
     row.source_id=primary;row.sources_revision+=1;row.revision+=1;row.updated_at=now()
     audit(db,"resource.sources.update",user.id);db.commit()
     return link_view(db,row)
