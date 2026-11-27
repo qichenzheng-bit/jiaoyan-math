@@ -12,7 +12,7 @@ function field(text:string,title:string,subject:string,page:number,total:number,
 }
 // Build pages from the existing MathText DOM. No re-parsing or HTML injection.
 // Measure actual rendered heights at the selected column width, after fonts and images load.
-export function paginateDocument(source:HTMLElement,target:HTMLElement,layout:Layout,title:string,subject:string):PaginationResult{
+export async function paginateDocument(source:HTMLElement,target:HTMLElement,layout:Layout,title:string,subject:string,cancelled=()=>false):Promise<PaginationResult>{
  target.replaceChildren()
  const article=source.querySelector('.print-document'),body=article?.querySelector('.layout-body')
  if(!article||!body)return {pages:0,error:'文档内容尚未加载'}
@@ -35,7 +35,7 @@ export function paginateDocument(source:HTMLElement,target:HTMLElement,layout:La
  current=addPage(true)
  const active=()=>sheets[current].columns[col]
  const next=()=>{if(col+1<layout.columns)col++;else{current=addPage();col=0}}
- const newPage=()=>{if(sheets[current].columns.some(n=>n.childElementCount)||current===0){current=addPage();col=0}}
+ const newPage=()=>{if(sheets[current].columns.some(n=>n.childElementCount)){current=addPage();col=0}}
  function appendPart(part:HTMLElement,uid:string,attempt=0):boolean{
   let dest=active();dest.append(part)
   if(!overflow(dest))return true
@@ -43,7 +43,7 @@ export function paginateDocument(source:HTMLElement,target:HTMLElement,layout:La
   if(dest.childElementCount){next();return appendPart(part,uid,attempt+1)}
   // The first page also has a title. Try a full column before splitting.
   if(current===0&&attempt===0){next();return appendPart(part,uid,attempt+1)}
-  if(attempt>10000)return false
+  if(attempt>100||sheets.length>10000)return false
   // Split only at explicit semantic element boundaries; equations and images are atomic.
   if(part.matches('figure,.formula-block,.formula-inline,.katex,.katex-display,img,pre')||part.childElementCount<2||Array.from(part.childNodes).some(n=>n.nodeType===Node.TEXT_NODE&&n.textContent?.trim()))return false
   const children=Array.from(part.children)
@@ -56,10 +56,14 @@ export function paginateDocument(source:HTMLElement,target:HTMLElement,layout:La
   return true
  }
  for(let i=0;i<contents.length;i++){
+  if(i>0&&i%30===0)await new Promise<void>(resolve=>window.setTimeout(resolve,0))
+  if(cancelled())return {pages:0,error:''}
   const item=contents[i]
   if(item.classList.contains('print-break')){newPage();continue}
   const uid=(item as HTMLElement).dataset.layoutUid??String(i+1)
   const level=Number((item as HTMLElement).dataset.layoutLevel??0)
+  const pageBreak=(item as HTMLElement).dataset.layoutBreak
+  if(pageBreak==='before'||pageBreak==='alone')newPage()
   if(level===1){chapter=item.textContent?.trim()??'';if(layout.chapterNewPage&&sheets[current].columns.some(n=>n.childElementCount))newPage()}
   const node=copy(item)
   if(node.id)node.removeAttribute('id')
@@ -68,6 +72,7 @@ export function paginateDocument(source:HTMLElement,target:HTMLElement,layout:La
   if(!appendPart(node,uid)){error='内容 '+(i+1)+' 超过单栏页面且无法安全拆分，请在内容中插入换行或调整页面参数。';break}
   if(level)headings.push({id:'layout-heading-'+uid,title:item.querySelector('h2,h3,h4,h5,h6')?.textContent?.trim()||item.textContent?.trim()||'',level,page:current+1})
   if(level===1)sheets[current].chapter=chapter
+  if((pageBreak==='after'||pageBreak==='alone')&&i<contents.length-1)newPage()
  }
  // Drop only a truly empty trailing sheet, never a page holding the title.
  while(sheets.length>1&&!sheets[sheets.length-1].columns.some(n=>n.childElementCount)){sheets.pop()?.sheet.remove()}
