@@ -298,6 +298,9 @@ jobs:
           for i in $(seq 1 50); do curl -fsS http://127.0.0.1:4173/ >/dev/null 2>&1 && break; sleep 0.1; done
           curl -fsS http://127.0.0.1:4173/ >/dev/null
           python tests/ui_preview.py
+      - name: Verify generated PDF and physical page sizes
+        if: matrix.group == 'desktop'
+        run: python tests/pdf_preview.py
       - uses: actions/upload-artifact@v6
         if: failure() || github.event_name == 'workflow_dispatch' || (github.head_ref == 'refactor/f4-4-creation' || github.ref_name == 'refactor/f4-4-creation')
         continue-on-error: true
