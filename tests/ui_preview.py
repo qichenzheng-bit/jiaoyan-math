@@ -486,9 +486,9 @@ with sync_playwright() as p:
                     page.get_by_label("输入录入资料",exact=True).wait_for()
                     page.get_by_text("已带入聊天正文").wait_for()
                     assert page.get_by_label("输入录入资料",exact=True).input_value()==demo_chat["messages"][0]["content"]
-                    page.locator(".work-manual-config summary").click()
+                    page.locator(".work-manual-config > summary").click()
                     assert page.get_by_label("录入目标").input_value()=="question"
-                    page.locator(".work-manual-config summary").click()
+                    page.locator(".work-manual-config > summary").click()
                     capture(page,path=str(OUT/"20-intake-linked.png"),full_page=False)
                     continue
                 if name=="00-home":
