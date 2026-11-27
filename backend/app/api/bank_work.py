@@ -286,6 +286,12 @@ def bulk_cancel(id:str,db:Session=Depends(get_db),user:User=Depends(current_user
 class CartChange(BaseModel):
     revision:int=Field(ge=0)
     ids:list[str]=Field(max_length=200)
+def cart_resource(db,ident,revision=None,kind=None):
+    r=bank.existing(db,ident,revision is not None)
+    if r.archived or r.kind not in ("question","knowledge") or (kind=="paper" and r.kind!="question"):
+        raise HTTPException(422,"请选择适用于当前制作类型的有效资源")
+    if revision is not None and r.revision!=revision:raise HTTPException(409,"资源版本已变化")
+    return r
 def cart_key(user):return "bank.cart."+str(user.id)
 def cart(db,user):
     return read_setting(db,cart_key(user),{"revision":0,"ids":[]})
@@ -300,7 +306,7 @@ def update_cart(body:CartChange,db:Session=Depends(get_db),user:User=Depends(cur
     if old["revision"]!=body.revision:raise HTTPException(409,"选题清单已变化，请刷新")
     ids=list(dict.fromkeys(body.ids))
     for ident in ids:
-        if ident not in old["ids"]:question(db,ident)
+        if ident not in old["ids"]:cart_resource(db,ident)
     store(db,cart_key(user),{"revision":old["revision"]+1,"ids":ids});db.commit();return cart_view(db,user)
 class CartConfirm(BaseModel):
     revision:int=Field(ge=0)
@@ -316,8 +322,10 @@ def confirm_cart(body:CartConfirm,db:Session=Depends(get_db),user:User=Depends(c
         if old["input"]!=body.model_dump():raise HTTPException(409,"请求编号已使用")
         return {"document_id":old["document_id"]}
     state=cart(db,user)
-    if state["revision"]!=body.revision or state["ids"]!=[i.id for i in body.items]:raise HTTPException(409,"清单已变化，请刷新")
-    for i in body.items:question(db,i.id,i.revision)
+    selected=[i.id for i in body.items]
+    if state["revision"]!=body.revision or len(set(selected))!=len(selected) or [i for i in state["ids"] if i in set(selected)]!=selected:
+        raise HTTPException(409,"清单已变化或选中顺序不一致，请刷新")
+    for i in body.items:cart_resource(db,i.id,i.revision,body.kind)
     draft=docs.Draft(kind=body.kind,title=body.title,blocks=[docs.Block(uid=str(uuid4()),kind="reference",resource_id=i.id) for i in body.items])
     d=TeachingDocument(id=str(uuid4()),title=body.title.strip(),kind=body.kind,subject="",source_id=None,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(d);db.flush();docs.references(db,d)

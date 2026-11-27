@@ -75,7 +75,7 @@ FILE_KEY = re.compile(r"(original|generated)/([0-9a-f-]{36})\Z")
 
 
 def business_settings(cur):
-    cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
+    cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^bank[.]cart[.][0-9]+$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
     return dict(cur.fetchall())
 
 def digest(path):

@@ -500,6 +500,14 @@ def test_migration_and_login(tmp_path, monkeypatch):
         paper=client.get("/api/documents/"+handoff.json()["document_id"]).json()
         assert [b["resource_id"] for b in paper["blocks"]]==c["ids"]
         assert paper["blocks"][0]["snapshot"]["difficulty"]=="困难"
+        partial={**payload,"items":[payload["items"][1]],"request_id":"cart-partial-ci"}
+        partial_result=client.post("/api/bank/cart/confirm",headers=origin,json=partial)
+        assert partial_result.status_code==200,partial_result.text
+        partial_doc=client.get("/api/documents/"+partial_result.json()["document_id"]).json()
+        assert [b["resource_id"] for b in partial_doc["blocks"]]==[merged_id]
+        assert client.get("/api/bank/cart").json()["ids"]==c["ids"]
+        invalid={**partial,"items":[payload["items"][1],payload["items"][0]],"request_id":"cart-reordered-ci"}
+        assert client.post("/api/bank/cart/confirm",headers=origin,json=invalid).status_code==409
         assert client.get("/api/bank/sources/"+source_a["id"]+"/questions").json()["question_count"]==1
         loc=client.get("/api/resources/"+seed["id"]+"/sources").json()
         loc_body={"revision":loc["revision"],"source_id":source_a["id"],"role":"original","action":"add","original_question_number":"11","page_start":3,"page_end":3,"chapter":"例题"}
