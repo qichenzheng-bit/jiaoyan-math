@@ -83,3 +83,7 @@
 .layout-work .layout-sheet h4,.layout-work .layout-sheet h5,.layout-work .layout-sheet h6{font-size:inherit;margin:0 0 5pt}
 @media screen{.layout-pages[data-ready="1"] .layout-sheet{content-visibility:auto;contain-intrinsic-size:var(--layout-width) var(--layout-height)}}
 @media print{.layout-pages .layout-sheet{content-visibility:visible!important}.layout-frame-fill{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+
+.layout-sheet .layout-numbered-equation{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5pt;max-width:100%}
+.layout-sheet .layout-numbered-equation>.katex-display{min-width:0;margin:0}
+.layout-sheet .layout-equation-number{font-family:var(--layout-font);font-size:.9em;white-space:nowrap;text-align:right}
