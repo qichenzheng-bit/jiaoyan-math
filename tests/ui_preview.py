@@ -557,8 +557,10 @@ with sync_playwright() as p:
                     page.locator("#workspace-navigation").get_by_label("记录类型").select_option("work")
                     expect(page.locator("#workspace-navigation").get_by_text(demo_chat["title"],exact=True)).to_have_count(0)
                     page.locator("#workspace-navigation").get_by_label("记录类型").select_option("all")
-                    page.locator("#workspace-navigation").get_by_label("会话范围").select_option("archived")
-                    page.locator("#workspace-navigation").get_by_text("暂无已归档会话").wait_for()
+                    expect(page.locator("#workspace-navigation").get_by_label("会话范围")).to_have_count(0)
+                    page.locator("#workspace-navigation").get_by_role("button",name="管理会话 "+demo_chat["title"]).click()
+                    expect(page.locator("#workspace-navigation").get_by_role("button",name="删除",exact=True)).to_be_visible()
+                    expect(page.locator("#workspace-navigation").get_by_role("button",name="归档会话")).to_have_count(0)
                     assert page.locator(".chat-history").count()==0
                     page.locator(".clean-recent").first.get_by_role("button",name="收起",exact=True).click()
                 if name=="29-overview":
@@ -1474,11 +1476,7 @@ with sync_playwright() as p:
             page.get_by_role("button",name="返回作品列表",exact=True).click()
             expect(page.locator(".finished-list")).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-            visit(page,"/works?legacy=1",".studio-library")
-            page.get_by_role("button",name="新建",exact=True).click()
-            expect(page.locator(".clean-studio .resource-form")).to_be_visible()
-            expect(page.locator(".studio-library")).to_be_hidden()
-            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            expect(page.get_by_text("旧版作品记录",exact=True)).to_have_count(0)
             # Qoder login must visibly report unavailable services and expose a real
             # authorization link even if the browser blocks automatic popups.
             login_fixture={"available":False,"detail":"执行服务未连接"}

@@ -55,7 +55,7 @@ export function workspaceParent(path:string,search:string):string{
  if(path==='/intake-single')return '/intake'
  if(path==='/work'&&params.has('job')&&params.has('review'))return '/work?job='+encodeURIComponent(params.get('job')!)
  if(path==='/work'&&(params.has('job')||params.has('history')))return '/work'
- if(path==='/works')return params.has('work')||params.has('legacy')?'/works':'/project/publishing'
+ if(path==='/works')return params.has('work')?'/works':'/project/publishing'
  const group=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path===path)))
  return group?'/project/'+group.id:'/'
 }

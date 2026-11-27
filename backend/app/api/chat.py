@@ -3,11 +3,11 @@ from uuid import uuid4
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
-from app.models import ChatSession, ChatMessage, StoredFile, Setting, User
+from app.models import ChatSession, ChatMessage, StoredFile, FileReference, Setting, User
 from app.services import storage
 from app.api import qoder
 from app.core import resource_context
@@ -65,7 +65,6 @@ class Patch(BaseModel):
     title:str|None=Field(default=None,min_length=1,max_length=160)
     project:str|None=Field(default=None,max_length=100)
     pinned:bool|None=None
-    archived:bool|None=None
 class Turn(BaseModel):
     content:str=Field(min_length=1,max_length=12000)
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
@@ -75,8 +74,8 @@ class Turn(BaseModel):
     retrieval_query:str=Field(default="",max_length=200)
     rewind_id:str|None=Field(default=None,max_length=36)
 @router.get("/sessions")
-def listing(q:str=Query("",max_length=160),archived:bool=False,db:Session=Depends(get_db)):
-    stmt=select(ChatSession).where(ChatSession.archived==archived)
+def listing(q:str=Query("",max_length=160),db:Session=Depends(get_db)):
+    stmt=select(ChatSession)
     if q.strip(): stmt=stmt.where(ChatSession.title.contains(q.strip(),autoescape=True)|ChatSession.project.contains(q.strip(),autoescape=True))
     return [public(s) for s in db.scalars(stmt.order_by(ChatSession.pinned.desc(),ChatSession.updated_at.desc(),ChatSession.id).limit(100))]
 @router.post("/sessions",dependencies=[Depends(require_origin)])
@@ -90,13 +89,31 @@ def read(ident:str,db:Session=Depends(get_db)):
 @router.patch("/sessions/{ident}",dependencies=[Depends(require_origin)])
 def patch(ident:str,body:Patch,db:Session=Depends(get_db)):
     s=session(db,ident,True)
-    if body.archived and any(m.state=="running" for m in messages(db,s)):
-        raise HTTPException(409,"请先停止生成")
     for key,val in body.model_dump(exclude_none=True).items():
         setattr(s,key,val.strip() if isinstance(val,str) else val)
     if not s.title: raise HTTPException(422,"标题不能为空")
     s.updated_at=now();db.commit()
     return public(s)
+
+@router.delete("/sessions/{ident}",dependencies=[Depends(require_origin)])
+def remove_session(ident:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    s=session(db,ident,True)
+    rows=messages(db,s)
+    for m in rows:
+        sync(db,m)
+    if any(m.state=="running" for m in rows):
+        db.commit()
+        raise HTTPException(409,"请先停止生成，再删除会话")
+    ids=[m.id for m in rows]
+    if ids:
+        from app.core import ai_chat
+        db.execute(delete(FileReference).where(FileReference.owner_type=="chat_message",FileReference.owner_id.in_(ids)))
+        db.execute(delete(Setting).where(Setting.key.in_([ai_chat.key(mid) for mid in ids])))
+        db.execute(delete(ChatMessage).where(ChatMessage.session_id==s.id))
+    db.delete(s)
+    audit(db,"chat.delete",user.id)
+    db.commit()
+    return {"deleted":True,"id":ident}
 
 def attachments(db,ids):
     result=[]
@@ -117,7 +134,6 @@ def attachments(db,ids):
 @router.post("/sessions/{ident}/turn",dependencies=[Depends(require_origin)])
 def turn(ident:str,body:Turn,db:Session=Depends(get_db),user:User=Depends(current_user)):
     s=session(db,ident,True)
-    if s.archived: raise HTTPException(409,"会话已归档")
     rows=messages(db,s)
     for m in rows: sync(db,m)
     if any(m.state=="running" for m in rows):
