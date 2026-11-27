@@ -108,7 +108,7 @@ function LegacyQuestionFields({value,subject,subjects,locked,onChange,knowledge,
 }
 
 export type MatchResource={id:string;kind?:string;proof?:string;unit_type?:string;code:string;revision:number;subject:string;chapter:string;question_type:string;difficulty?:string;title:string;content:string;answer:string;solution:string;tags:string[];knowledge_tags?:string[]}
-type Match={resource:MatchResource;match_kind:'exact'|'same_stem'|'similar'|'same_title';similarity:number;reason?:string}
+type Match={resource:MatchResource;match_kind:'exact'|'same_stem'|'similar'|'same_title';similarity:number;reason?:string;category?:string;mergeable?:boolean;appendable?:boolean;answer_conflict?:boolean}
 type Point={id:string;name:string;chapter:string;child_count:number}
 type Chapter={chapter:string;count:number}
 type Browse={mode:'chapters';items:Chapter[];total:number}|{mode:'points';items:Point[];total:number}
@@ -147,7 +147,7 @@ export function DuplicateMatches({block,locked,onChoose,excludeId,onKeep}:{block
   const c=new AbortController();setMatches([]);setScanned(undefined);setStatus('');setFailed(false)
   if(!content.trim()||block.reuse_resource_id||locked)return
   setStatus('等待查重…')
-  const t=window.setTimeout(()=>{setStatus('正在查重…');api<{items:Match[];scanned:number}>('/documents/manual-matches',{method:'POST',body:JSON.stringify({kind:knowledge?'knowledge':'question',title:block.title,content,answer,solution}),signal:c.signal}).then(r=>{if(!c.signal.aborted){if(!Array.isArray(r.items))throw new Error('查重结果格式无效');const filtered=r.items.filter(m=>m.resource.id!==excludeId&&(m.similarity>=.8||m.match_kind==='same_title'));setMatches(filtered);setScanned(r.scanned);setStatus(filtered.length?'':'未发现重复候选')}}).catch(e=>{if(!c.signal.aborted){setFailed(true);setStatus(e.message||'查重失败，请重试')}})},attempt?400:900)
+  const t=window.setTimeout(()=>{setStatus('正在查重…');api<{items:Match[];scanned:number}>('/documents/manual-matches',{method:'POST',body:JSON.stringify({kind:knowledge?'knowledge':'question',title:block.title,content,answer,solution}),signal:c.signal}).then(r=>{if(!c.signal.aborted){if(!Array.isArray(r.items))throw new Error('查重结果格式无效');const filtered=r.items.filter(m=>m.resource.id!==excludeId&&(m.similarity>=.8||m.match_kind==='same_title'||m.category==='similar'));setMatches(filtered);setScanned(r.scanned);setStatus(filtered.length?'':'未发现重复候选')}}).catch(e=>{if(!c.signal.aborted){setFailed(true);setStatus(e.message||'查重失败，请重试')}})},attempt?400:900)
   return()=>{clearTimeout(t);c.abort()}
  },[content,answer,solution,block.kind,block.title,block.reuse_resource_id,locked,attempt,excludeId,knowledge])
  if(block.reuse_resource_id)return null

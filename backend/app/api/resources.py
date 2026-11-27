@@ -10,6 +10,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
 from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_methods, recommended_solution
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
+from app.core import question_matching as matching
 from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument, KnowledgeRelation, VideoProject
 from app.services import storage
 from app.services.inline_images import validate_images,protect_resource_images
@@ -211,16 +212,9 @@ def duplicates(body:Draft,db:Session=Depends(get_db)):
 @router.post("/similar",dependencies=[Depends(require_origin)])
 def similar(body:Draft,db:Session=Depends(get_db)):
     d=clean(body,db)
-    query=canonical_text(d["content"])[:3000]
-    rows=list(db.scalars(select(TeachingResource).where(TeachingResource.kind==body.kind,TeachingResource.fingerprint!=d["fingerprint"],TeachingResource.archived==False).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).limit(300)))
-    exact_stems=list(db.scalars(select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.stem_key==d["stem_key"],TeachingResource.fingerprint!=d["fingerprint"],TeachingResource.archived==False).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).limit(10))) if body.kind=="question" else []
-    items=[{"resource":view(r),"similarity":1.0,"reason":"规范化题干相同，答案或解析不同","match_kind":"same_stem"} for r in exact_stems]
-    seen={r.id for r in exact_stems}
-    for r in rows:
-        if r.id in seen:continue
-        score=SequenceMatcher(None,query,canonical_text(r.content)[:3000]).ratio()
-        if score>=.75: items.append({"resource":view(r),"similarity":round(score,3),"reason":"题干或正文相似，答案、解析或标题可能不同","match_kind":"similar"})
-    return {"items":sorted(items,key=lambda x:x["similarity"],reverse=True)[:10],"mode":"recent_python","scanned":len(rows),"scan_limit":300}
+    matches,scanned=matching.search(db,body.kind,d["content"],d["answer"],d["solution"],d["title"])
+    items=[{**m,"resource":view(m["resource"])} for m in matches]
+    return {"items":items,"mode":"full_library","scanned":scanned,"scan_limit":None,"total":len(items)}
 
 @router.post("",dependencies=[Depends(require_origin)])
 def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):

@@ -12,6 +12,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
 from app.core.solution_methods import normalize_subject, parse_methods, format_methods
 from app.core.content_normalization import canonical_text, question_fingerprint
+from app.core import question_matching as matching
 from difflib import SequenceMatcher
 from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink, Setting
 from app.services import storage
@@ -541,24 +542,22 @@ def catalog_suggestions(db,subject,block):
 def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
     d=row(db,id);blocks=review_blocks(d,body.revision,body.block_ids)
     data=[registration_values(db,d,b) for b in blocks]
-    recent={k:list(db.scalars(select(Resource).where(Resource.kind==k,Resource.archived==False).order_by(Resource.updated_at.desc(),Resource.id).limit(300))) for k in {b["kind"] for b in blocks}}
     results=[]
     for i,(b,v) in enumerate(zip(blocks,data)):
-        strict=strict_candidates(db,v);seen={r.id for r in strict}
-        query=canonical_text(v["content"])[:1200]
-        similar=[]
-        for r in recent[b["kind"]]:
-            if r.id in seen:continue
-            matcher=SequenceMatcher(None,query,canonical_text(r.content)[:1200])
-            if matcher.real_quick_ratio()<.75 or matcher.quick_ratio()<.75:continue
-            score=matcher.ratio()
-            if score>=.75:similar.append((score,r))
-        candidates=[candidate(r,v,b) for r in strict]+[candidate(r,v,b,round(s,3)) for s,r in sorted(similar,key=lambda x:-x[0])[:5]]
+        matches,_=matching.search(db,b["kind"],v["content"],v["answer"],v["solution"],v["title"],include_archived=True)
+        candidates=[]
+        for m in matches:
+            r=m["resource"]
+            c=candidate(r,v,b,m["similarity"])
+            c.update({k:m[k] for k in ("category","reason","mergeable","appendable","answer_conflict")})
+            # Do not offer merge operations for candidates found by approximate matching alone.
+            if r.kind=="question" and not m["mergeable"]:c["appendable"]=False
+            candidates.append(c)
         points,chapter=catalog_suggestions(db,v["subject"],b)
         peers=[blocks[j]["uid"] for j,w in enumerate(data) if j!=i and w["kind"]==v["kind"] and (w["fingerprint"]==v["fingerprint"] or v["kind"]=="question" and w["stem_key"]==v["stem_key"])]
         results.append({"uid":b["uid"],"candidates":candidates,"knowledge":points,"chapter_suggestion":chapter,"peer_ids":peers,
                         "missing":[k for k in ("answer","solution") if b["kind"]=="question" and not b.get(k,"").strip()]})
-    return {"revision":d.revision,"items":results,"similar_scan_limit":300,"exact_scope":"indexed_full_library"}
+    return {"revision":d.revision,"items":results,"similar_scan_limit":None,"exact_scope":"indexed_full_library","scope":"full_library"}
 
 def append_methods(old,new):
     existing=parse_methods(old);seen={canonical_text(m["body"]) for m in existing}
@@ -653,47 +652,14 @@ class ManualSearch(BaseModel):
 
 @router.post("/manual-matches",dependencies=[Depends(require_origin)])
 def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
-    """Full active library, exact/stem matches first; text similarity is not mathematical equivalence."""
-    if body.kind=="knowledge":
-        query=canonical_text(body.content)
-        title=canonical_text(body.title)
-        items=[];scanned=0
-        for resource in db.scalars(select(Resource).where(Resource.kind=="knowledge",Resource.archived==False).execution_options(yield_per=100)):
-            scanned+=1
-            same_title=bool(title and title==canonical_text(resource.title))
-            matcher=SequenceMatcher(None,query,canonical_text(resource.content))
-            score=matcher.ratio() if query and matcher.real_quick_ratio()>=.8 and matcher.quick_ratio()>=.8 else 0
-            if same_title or score>=.8:
-                items.append({"resource":bank.view(resource),"match_kind":"same_title" if same_title else "exact" if score==1 else "similar","similarity":round(score,3)})
-        items.sort(key=lambda x:(x["match_kind"]!="same_title",-x["similarity"],x["resource"]["id"]))
-        return {"items":items,"scanned":scanned,"threshold":.8,"total":len(items),"scope":"full_active_knowledge_bank"}
-    values=bank.clean(bank.Draft(kind="question",title="查重",content=body.content,answer=body.answer,solution=body.solution),db)
-    exact_rows=list(db.scalars(select(Resource).where(Resource.kind=="question",Resource.archived==False,
-        or_(Resource.fingerprint==values["fingerprint"],Resource.stem_key==values["stem_key"]))
-        .order_by((Resource.fingerprint==values["fingerprint"]).desc(),Resource.updated_at.desc(),Resource.id)))
-    seen={r.id for r in exact_rows}
-    query=canonical_text(body.content)
-    threshold=.80
-    best=[];scanned=0
-    # Stream the full active library. Keep every qualifying match, not only the top ten.
-    for ident,content in db.execute(select(Resource.id,Resource.content).where(Resource.kind=="question",Resource.archived==False)
-                .execution_options(yield_per=100)):
-        scanned+=1
-        if ident in seen or not query:continue
-        matcher=SequenceMatcher(None,query,canonical_text(content))
-        if matcher.real_quick_ratio()<threshold or matcher.quick_ratio()<threshold:continue
-        score=matcher.ratio()
-        if score>=threshold:
-            best.append((score,ident))
-    def result(r,kind,score):
-        tags=list(db.scalars(select(KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(
-            ResourceKnowledgeLink.resource_id==r.id,KnowledgePointCatalog.status=="active")))
-        return {"resource":{**bank.view(r),"knowledge_tags":list(dict.fromkeys([*bank.view(r)["tags"],*tags]))[:20]},"match_kind":kind,"similarity":round(score,3)}
-    items=[result(r,match_kind(r,values),1) for r in exact_rows]
-    for score,ident in sorted(best,key=lambda x:(-x[0],x[1])):
-        r=db.get(Resource,ident)
-        if r and not r.archived:items.append(result(r,"similar",score))
-    return {"items":items,"scanned":scanned,"threshold":threshold,"total":len(items),"scope":"full_active_question_bank"}
+    matches,scanned=matching.search(db,body.kind,body.content,body.answer,body.solution,body.title)
+    items=[]
+    for m in matches:
+        r=m["resource"];resource=bank.view(r)
+        resource["knowledge_tags"]=resource["tags"]
+        items.append({**m,"resource":resource})
+    return {"items":items,"scanned":scanned,"threshold":.8,"total":len(items),"scope":"full_active_question_bank" if body.kind=="question" else "full_active_knowledge_bank"}
+
 
 def manual_knowledge(db,subject,chapter,names):
     from app.api.knowledge import norm
