@@ -66,6 +66,8 @@ def remote(row):
     return engine.engine_id(row.engine_id)
 
 def snapshot(r):
+    if hasattr(r,'bank_facts') and (not (r.bank_facts or {}).get('answer_complete') or not (r.bank_facts or {}).get('solution_complete')):
+        raise HTTPException(422,'请先补齐答案和全部小问解析')
     try:solution=video_solution(r)
     except ValueError as e:raise HTTPException(422,str(e))
     result = { "title": r.title, "problem": r.content, "reference_solution": solution,

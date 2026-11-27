@@ -365,6 +365,18 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert confirmed.status_code==200,confirmed.text
         assert confirmed.json()["evaluation"]["reason"]=="连续性法更便于课堂讲解"
         assert bank_search(method_state="confirmed")==1
+        # Independent method edit and version conflict; existing recommendation is preserved until human confirmation.
+        m=client.post("/api/bank/questions/"+merged_id+"/methods",headers=origin,json={"revision":confirmed.json()["revision"],"group":"main","action":"add","name":"代数法","body":"第三种独立解法"})
+        assert m.status_code==200,m.text
+        assert len(m.json()["groups"][0]["methods"])==3
+        assert client.post("/api/bank/questions/"+merged_id+"/methods",headers=origin,json={"revision":confirmed.json()["revision"],"group":"main","action":"delete","index":1}).status_code==409
+        assert client.get("/api/bank/questions/"+merged_id+"/history").json()
+        assert client.get("/api/bank/questions/"+merged_id+"/video-preview").json()["ready"]
+        deleted=client.post("/api/bank/questions/"+merged_id+"/methods",headers=origin,json={"revision":m.json()["revision"],"group":"main","action":"delete","index":3})
+        assert deleted.status_code==200,deleted.text
+        assert len(deleted.json()["groups"][0]["methods"])==2
+        reconfirmed=client.post(rec_path+"/confirm",headers=origin,json={"revision":deleted.json()["revision"],"choices":{"main":2}})
+        assert reconfirmed.status_code==200,reconfirmed.text
         assert bank_search(method_state="pending")==0
         # Source filters may not combine the year from one source and exam from another.
         source_a=client.post("/api/resources",headers=origin,json={"kind":"source","title":"组合筛选真题A","content":"测试","source_type":"exam","cohort_year":"2018","exam_type":"数学一","authority_tier":"official_exam"}).json()
@@ -384,6 +396,25 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert seed_search(knowledge_ids=[p["id"] for p in seed["knowledge_points"]],knowledge_mode="all")==1
         assert seed_search(knowledge_ids=[seed["knowledge_points"][0]["id"],"missing"],knowledge_mode="all")==0
         assert seed_search(knowledge_ids=[seed["knowledge_points"][0]["id"],"missing"],knowledge_mode="any")==1
+        # Bulk plan is revision sealed and chunk replay is idempotent.
+        current_seed=client.get("/api/resources/"+seed["id"]).json()
+        plan=client.post("/api/bank/bulk/preview",headers=origin,json={"items":[{"id":seed["id"],"revision":current_seed["revision"]}],"action":"difficulty","value":"困难"}).json()
+        assert plan["rows"][0]["state"]=="ready",plan
+        step=client.post("/api/bank/bulk/"+plan["id"]+"/step",headers=origin,json={"offset":0}).json()
+        assert step["state"]=="completed" and step["rows"][0]["state"]=="done",step
+        assert client.post("/api/bank/bulk/"+plan["id"]+"/step",headers=origin,json={"offset":0}).json()==step
+        assert client.get("/api/resources/"+seed["id"]).json()["difficulty"]=="困难"
+        c=client.get("/api/bank/cart").json()
+        c=client.put("/api/bank/cart",headers=origin,json={"revision":c["revision"],"ids":[seed["id"],merged_id,seed["id"]]}).json()
+        assert c["ids"]==[seed["id"],merged_id]
+        payload={"revision":c["revision"],"kind":"paper","title":"选题快照专项","items":[{"id":r["id"],"revision":r["revision"]} for r in c["items"]],"request_id":"cart-ci"}
+        handoff=client.post("/api/bank/cart/confirm",headers=origin,json=payload)
+        assert handoff.status_code==200,handoff.text
+        assert client.post("/api/bank/cart/confirm",headers=origin,json=payload).json()==handoff.json()
+        paper=client.get("/api/documents/"+handoff.json()["document_id"]).json()
+        assert [b["resource_id"] for b in paper["blocks"]]==c["ids"]
+        assert paper["blocks"][0]["snapshot"]["difficulty"]=="困难"
+        assert client.get("/api/bank/sources/"+source_a["id"]+"/questions").json()["question_count"]==1
         assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
         related_seed=client.post("/api/resources",headers=origin,json={"kind":"question","title":"关联方法专项","subject":"高等数学","content":"计算某项幂函数的定积分","answer":"1","solution":"分部积分法","tags":["相关专题"]}).json()
         related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})
