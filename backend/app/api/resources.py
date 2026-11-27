@@ -516,6 +516,74 @@ def recorded_merge(body:RecordedKnowledgeMerge,db:Session=Depends(get_db),user:U
     audit(db,"resource.recorded_knowledge.merge",user.id);db.commit()
     return {"updated":len(rows)}
 
+class TeachingDetailDraft(BaseModel):
+    revision:int=Field(ge=1)
+    conditions:str=Field(default="",max_length=16000)
+    applications:str=Field(default="",max_length=16000)
+    methods:str=Field(default="",max_length=16000)
+    mistakes:str=Field(default="",max_length=16000)
+    example_ids:list[str]=Field(default_factory=list,max_length=100)
+
+DETAIL_FIELDS=("conditions","applications","methods","mistakes")
+def teaching_unit(db,id,lock=False):
+    row=existing(db,id,lock)
+    if row.kind!="knowledge":raise HTTPException(422,"请选择知识单元")
+    return row
+
+def unit_detail_key(id):
+    return "knowledge.unit.detail."+id
+
+def unit_detail_state(db,id):
+    row=db.get(Setting,unit_detail_key(id))
+    return json.loads(row.value) if row else {**{k:"" for k in DETAIL_FIELDS},"example_ids":[]}
+
+def unit_detail_view(db,row):
+    state=unit_detail_state(db,row.id)
+    ids=state["example_ids"]
+    questions={q.id:q for q in db.scalars(select(TeachingResource).where(TeachingResource.id.in_(ids),TeachingResource.kind=="question"))} if ids else {}
+    return {**state,"revision":row.revision,"archived":row.archived,"examples":[
+        {"id":id,"code":questions[id].code,"title":questions[id].title,"subject":questions[id].subject,"archived":questions[id].archived}
+        if id in questions else {"id":id,"title":"题目不可用","archived":True} for id in ids]}
+
+@router.get("/{id}/teaching-detail")
+def teaching_detail(id:str,db:Session=Depends(get_db)):
+    return unit_detail_view(db,teaching_unit(db,id))
+
+@router.put("/{id}/teaching-detail",dependencies=[Depends(require_origin)])
+def update_teaching_detail(id:str,body:TeachingDetailDraft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user);row=teaching_unit(db,id,True)
+    if row.archived or row.revision!=body.revision:raise HTTPException(409,"知识单元已归档或版本变化，请重新读取")
+    old=unit_detail_state(db,id)
+    ids=list(dict.fromkeys(body.example_ids))
+    if len(ids)!=len(body.example_ids) or any(len(i)>36 for i in ids):raise HTTPException(422,"例题编号重复或无效")
+    added=set(ids)-set(old["example_ids"])
+    if added:
+        found=set(db.scalars(select(TeachingResource.id).where(TeachingResource.id.in_(added),TeachingResource.kind=="question",TeachingResource.archived==False)))
+        if found!=added:raise HTTPException(422,"新增例题必须为有效的未归档题目")
+    state={**{k:getattr(body,k) for k in DETAIL_FIELDS},"example_ids":ids}
+    if state==old:return unit_detail_view(db,row)
+    setting=db.get(Setting,unit_detail_key(id))
+    if setting is None:
+        setting=Setting(key=unit_detail_key(id),value="{}");db.add(setting)
+    setting.value=json.dumps(state,ensure_ascii=False)
+    row.revision+=1;row.updated_at=now()
+    record_bank_history(db,id,"knowledge_unit_detail",old,state,user.id,row.revision)
+    audit(db,"knowledge_unit.detail.update",user.id);db.commit()
+    return unit_detail_view(db,row)
+
+@router.get("/{id}/related-questions")
+def unit_related_questions(id:str,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+    row=teaching_unit(db,id)
+    names=list(dict.fromkeys(n.strip() for n in [*row.tags,row.title] if n.strip()))
+    # Exact recorded names in the same subject; not graph tags or an AI guess.
+    if not names or not row.subject:return {"items":[],"total":0,"limit":limit,"offset":offset,"basis":"recorded_names"}
+    stmt=select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.archived==False,
+        TeachingResource.subject==row.subject,or_(*(cast(TeachingResource.tags,JSONB).contains([n]) for n in names)))
+    total=db.scalar(select(func.count()).select_from(stmt.subquery()))
+    rows=db.scalars(stmt.order_by(TeachingResource.updated_at.desc(),TeachingResource.id).offset(offset).limit(limit))
+    return {"items":[{"id":q.id,"code":q.code,"title":q.title,"subject":q.subject,"question_type":q.question_type,
+        "matched_names":[n for n in names if n in q.tags]} for q in rows],"total":total,"limit":limit,"offset":offset,"basis":"recorded_names"}
+
 @router.get("/{id}/source-overview")
 def source_overview(id:str,db:Session=Depends(get_db)):
     src=existing(db,id)

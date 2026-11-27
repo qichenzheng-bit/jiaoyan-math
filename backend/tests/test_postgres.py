@@ -1215,6 +1215,25 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert any(x["chapter"]=="新目录/极限/空目录" and x["count"]==0 for x in client.get("/api/resources/chapters").json())
         assert client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限外"}).json()["total"]==1
 
+        # Teaching supplement and manually chosen examples remain independent of graph labels.
+        unit_response=client.post("/api/resources",headers=origin,json={"kind":"knowledge","title":"专项甲","subject":"高等数学","content":"知识单元专项独立内容","tags":["专项甲"]})
+        assert unit_response.status_code==200,unit_response.text
+        unit=unit_response.json()
+        unit_url="/api/resources/"+unit["id"]
+        detail=client.get(unit_url+"/teaching-detail").json()
+        assert detail["example_ids"]==[] and detail["conditions"]==""
+        related=client.get(unit_url+"/related-questions").json()
+        assert any(x["id"]==seed["id"] and "专项甲" in x["matched_names"] for x in related["items"])
+        payload={"revision":detail["revision"],"conditions":"函数可微","methods":"泰勒展开","mistakes":"注意适用条件","example_ids":[seed["id"]]}
+        updated_unit=client.put(unit_url+"/teaching-detail",headers=origin,json=payload)
+        assert updated_unit.status_code==200,updated_unit.text
+        saved_detail=updated_unit.json()
+        assert saved_detail["examples"][0]["id"]==seed["id"] and saved_detail["conditions"]=="函数可微"
+        assert client.put(unit_url+"/teaching-detail",headers=origin,json=payload).status_code==409
+        assert client.get(unit_url).json()["tags"]==unit["tags"]
+        assert client.get(unit_url).json()["knowledge_tags"]==unit["knowledge_tags"]
+        assert client.put(unit_url+"/teaching-detail",headers=origin,json={**payload,"revision":saved_detail["revision"],"example_ids":[unit["id"]]}).status_code==422
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
