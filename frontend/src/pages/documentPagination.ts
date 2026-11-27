@@ -80,7 +80,7 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   if(level===1){
    chapterNumber++;if(layout.equationNumbering==='chapter')equationNumber=0
    const newChapter=item.textContent?.trim()??''
-   const key=Object.hasOwn(layout.sectionPages,uid)?uid:''
+   const key=Object.prototype.hasOwnProperty.call(layout.sectionPages,uid)?uid:''
    const changed=key!==sectionKey
    if(changed){
     sectionKey=key;chapter=newChapter
