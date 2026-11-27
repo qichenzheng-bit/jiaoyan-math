@@ -619,7 +619,7 @@ with sync_playwright() as p:
                     page.wait_for_url("**/intake")
                     page.locator(".manual-new").wait_for()
                     expect(page.locator(".project-hub")).to_have_count(0)
-                    assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(48, 69, 58)"
+                    assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(52, 54, 56)"
                     visit(page,"/project/intake",".manual-new")
                     page.wait_for_url("**/intake")
                     page.locator("#workspace-navigation").get_by_role("link",name="教学制作",exact=True).click()
@@ -1196,7 +1196,7 @@ with sync_playwright() as p:
             # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
             page.set_viewport_size({"width":393,"height":873})
             visit(page,"/intake?doc=ai-demo",".manual-list-row")
-            assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(48, 69, 58)"
+            assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(52, 54, 56)"
             assert len(page.locator(".mobile-doc-nav").evaluate("el=>getComputedStyle(el).gridTemplateColumns.split(' ')")) == 2
             page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             page.locator(".mobile-doc-card").wait_for()
