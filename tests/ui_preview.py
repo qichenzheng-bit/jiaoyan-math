@@ -178,7 +178,7 @@ def answer(route):
                 return
             row.update(items=data["items"],reviewed_uids=data["reviewed_uids"],revision=row["revision"]+1)
         result=row
-    if p in ("/intelligence/jobs/review-clean/supplements","/intelligence/jobs/review-match/supplements"):result=[]
+    if p in ("/intelligence/jobs/review-clean/supplements","/intelligence/jobs/review-match/supplements","/intelligence/jobs/compact-single/append-targets"):result=[]
     if p=="/files" and route.request.method=="POST":
         name=q.get("name",["demo.tex"])[0]
         result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}

@@ -31,9 +31,9 @@ export function answerGroups(value:Value,answerOnly=false):Group[]{
  const s=methods&&methods.length>1?methods.map((m,i)=>'解法'+(numerals[i]??String(i+1))+(m.name?'：'+m.name:'')+(i===(methods.findIndex(x=>x.recommended)<0?0:methods.findIndex(x=>x.recommended))?'（推荐解法）':'')+'\\n'+fieldBody(m.body,'solution')).join('\\n\\n'):solution
  return [{sections:sections(answer,s)}]
 }
-export function AnswerSolutionView({value,answerOnly=false,collapsible=false,showMissing=false,showOrigin=false,render=(content)=><MathText content={content}/>}:{value:Value;answerOnly?:boolean;collapsible?:boolean;showMissing?:boolean;showOrigin?:boolean;render?:(content:string)=>ReactNode}){
+export function AnswerSolutionView({value,answerOnly=false,collapsible=false,defaultExpanded=true,showMissing=false,showOrigin=false,render=(content)=><MathText content={content}/>}:{value:Value;answerOnly?:boolean;collapsible?:boolean;defaultExpanded?:boolean;showMissing?:boolean;showOrigin?:boolean;render?:(content:string)=>ReactNode}){
  return <div className="answer-solution-view">{answerGroups(value,answerOnly).map((group,i)=><section className="answer-solution-group" key={i}>{group.label&&<h4>{group.label}</h4>}{group.sections.filter(s=>showMissing||s.content).map(s=>{
   const label=s.field==='answer'?'答案':'解析',heading=<><strong>【{label}】</strong>{showOrigin&&<small className="muted">{value.generated_fields?.includes(s.field)?'AI 生成 · 待审核':s.content?'原文提取 / 已录入':'待人工补充'}</small>}</>,body=s.content?render(s.content):<small className="muted">未提供，请核对补充。</small>
-  return collapsible?<details open className="answer-solution-field" key={s.field}><summary>{heading}</summary><div>{body}</div></details>:<section className="answer-solution-field" key={s.field}><div className="answer-solution-heading">{heading}</div>{body}</section>
+  return collapsible?<details open={defaultExpanded} className="answer-solution-field" key={s.field}><summary>{heading}</summary><div>{body}</div></details>:<section className="answer-solution-field" key={s.field}><div className="answer-solution-heading">{heading}</div>{body}</section>
  })}</section>)}</div>
 }
