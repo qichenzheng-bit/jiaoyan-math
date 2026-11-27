@@ -10,6 +10,7 @@ import {api} from '../auth'
 import ChatText from './ChatText'
 type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
+type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
 type Doc={parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
 
 export default function DocumentPrint({source=false}:{source?:boolean}){
@@ -20,12 +21,17 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const [templateId,setTemplateId]=useState('general'),[templateName,setTemplateName]=useState(''),[message,setMessage]=useState('')
  const [editing,setEditing]=useState(!source),[controls,setControls]=useState(true),[loadedKey,setLoadedKey]=useState('')
  const preview=useRef<HTMLDivElement>(null)
+ const [cloudRevision,setCloudRevision]=useState<number|null>(null),[templateRevision,setTemplateRevision]=useState<number|null>(null),[cloudBusy,setCloudBusy]=useState(false),[cloudLayout,setCloudLayout]=useState<Layout|null>(null)
+ const [hasDraft,setHasDraft]=useState(false)
+ const routeRef=useRef('')
  const storageKey='wg-layout-v1:'+String(source?'source':'doc')+':'+id+':'+(chapterUid??'all')
+ const layoutPath='/settings/document-layout/'+(source?'source':'doc')+'/'+encodeURIComponent(id??'')
+ routeRef.current=storageKey
  const back=source?'/sources':(doc?.kind==='paper'?'/papers':doc?.kind==='handout'?'/handouts':doc?.kind==='textbook'?'/textbooks':'/intake')+'?doc='+id
  useWorkspaceBack(()=>{if(!doc&&!source)return false;navigate(back);return true})
  useEffect(()=>{
-  const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true)
-  api<Doc>((source?'/documents/source-export/':'/documents/')+encodeURIComponent(id??'')+(source?'':'/export'),{signal:c.signal}).then(data=>{
+  const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('')
+  api<Doc>((source?'/documents/source-export/':'/documents/')+encodeURIComponent(id??'')+(source?'':'/export'),{signal:c.signal}).then(async data=>{
    if(c.signal.aborted)return
    if(chapterUid){
     if(source||!['textbook','handout'].includes(data.kind))throw Error('仅讲义和教材支持按章导出')
@@ -36,10 +42,17 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
    }
    const base=builtins.find(t=>t.kind===data.kind)??builtins[builtins.length-1]
    const stored=readLocal<unknown>(storageKey,null)
-   setTemplateId(base.id);setLayout(stored?sanitizeLayout(stored):{...base.layout,originalNumbers:source});setDoc(data);setLoadedKey(storageKey)
+   const [remote,library]=await Promise.allSettled([chapterUid?Promise.resolve(null):api<Saved<Layout|null>>(layoutPath,{signal:c.signal}),api<Saved<LayoutTemplate[]>>('/settings/document-templates',{signal:c.signal})])
+   if(c.signal.aborted)return
+   const saved=remote.status==='fulfilled'?remote.value:null
+   const lib=library.status==='fulfilled'?library.value:null
+   if(saved&&Number.isInteger(saved.revision)){setCloudRevision(saved.revision);setCloudLayout(saved.value?sanitizeLayout(saved.value):null)}
+   if(lib&&Number.isInteger(lib.revision)&&Array.isArray(lib.value)){setTemplateRevision(lib.revision);if(lib.revision>0){setTemplates(lib.value);writeLocal('wg-layout-templates-v1',lib.value)}}
+   const current=saved?.value??stored
+   setHasDraft(Boolean(current));setTemplateId(base.id);setLayout(current?sanitizeLayout(current):{...base.layout,originalNumbers:source});setDoc(data);setLoadedKey(storageKey)
   }).catch(e=>{if(!c.signal.aborted)setError(e.message)})
   return()=>c.abort()
- },[id,source,chapterUid,storageKey])
+ },[id,source,chapterUid,storageKey,layoutPath])
  useEffect(()=>{
   if(!doc||loadedKey!==storageKey||layoutError(layout))return
   if(!writeLocal(storageKey,layout))setMessage('浏览器无法保存排版设置，请保持当前页面。')
@@ -69,20 +82,35 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   if(source)next.originalNumbers=true
   setLayout(next);setConfirmed(false);setReady(false);setEditing(true);setMessage('已应用模板，原始教学内容保持不变。')
  }
- function saveTemplate(){
+ async function saveCloud(){
+  if(cloudRevision===null||cloudBusy||layoutError(layout))return
+  const key=storageKey;setCloudBusy(true)
+  try{const saved=await api<Saved<Layout>>(layoutPath,{method:'PUT',body:JSON.stringify({revision:cloudRevision,value:layout})});if(routeRef.current!==key)return;setCloudRevision(saved.revision);setCloudLayout(saved.value);setMessage('排版配置已保存到服务器，可跨设备读取。')}
+  catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'服务器保存失败，当前浏览器草稿仍保留。')}
+  finally{if(routeRef.current===key)setCloudBusy(false)}
+ }
+ async function saveTemplate(){
   if(!templateName.trim()||layoutError(layout))return
   const kind:LayoutTemplate['kind']=doc?.kind==='paper'||doc?.kind==='handout'||doc?.kind==='textbook'?doc.kind:'all'
   if(templates.length>=100){setMessage('个人模板已达到 100 个，请先删除不用的模板。');return}
   const item:LayoutTemplate={id:crypto.randomUUID(),name:templateName.trim().slice(0,80),kind,layout:{...layout}}
   const list=[...templates,item]
-  if(!writeLocal('wg-layout-templates-v1',list)){setMessage('模板保存失败。');return}
-  setTemplates(list);setTemplateId(item.id);setTemplateName('');setMessage('模板已保存在当前浏览器。')
+  const key=storageKey;setCloudBusy(true)
+  try{if(templateRevision!==null){const result=await api<Saved<LayoutTemplate[]>>('/settings/document-templates',{method:'PUT',body:JSON.stringify({revision:templateRevision,value:list})});if(routeRef.current!==key)return;setTemplateRevision(result.revision)}
+   else if(!writeLocal('wg-layout-templates-v1',list))throw Error('模板保存失败。')
+   setTemplates(list);writeLocal('wg-layout-templates-v1',list);setTemplateId(item.id);setTemplateName('');setMessage(templateRevision!==null?'模板已保存到服务器。':'服务器不可用，模板仅保存在当前浏览器。')
+  }catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'模板保存失败')}
+  finally{if(routeRef.current===key)setCloudBusy(false)}
  }
- function removeTemplate(){
+ async function removeTemplate(){
   if(!templates.some(t=>t.id===templateId))return
   const list=templates.filter(t=>t.id!==templateId)
-  if(!writeLocal('wg-layout-templates-v1',list)){setMessage('删除失败。');return}
-  setTemplates(list);setTemplateId(compatible.find(t=>t.kind===doc?.kind&&builtins.includes(t))?.id??'general')
+  const key=storageKey;setCloudBusy(true)
+  try{if(templateRevision!==null){const result=await api<Saved<LayoutTemplate[]>>('/settings/document-templates',{method:'PUT',body:JSON.stringify({revision:templateRevision,value:list})});if(routeRef.current!==key)return;setTemplateRevision(result.revision)}
+   else if(!writeLocal('wg-layout-templates-v1',list))throw Error('删除失败。')
+   setTemplates(list);writeLocal('wg-layout-templates-v1',list);setTemplateId(compatible.find(t=>t.kind===doc?.kind&&builtins.includes(t))?.id??'general')
+  }catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'删除失败')}
+  finally{if(routeRef.current===key)setCloudBusy(false)}
  }
  const [w,h]=dimensions(layout),invalid=layoutError(layout)
  const style={'--layout-width':w+'mm','--layout-height':h+'mm','--layout-top':layout.top+'mm','--layout-bottom':layout.bottom+'mm','--layout-left':layout.left+'mm','--layout-right':layout.right+'mm','--layout-columns':layout.columns,'--layout-gap':layout.gap+'mm','--layout-size':layout.size+'pt','--layout-line':layout.lineHeight,'--layout-paragraph':layout.paragraphGap+'pt','--layout-font':layout.font==='sans'?'"Noto Sans CJK SC","Microsoft YaHei",sans-serif':'"Noto Serif CJK SC",SimSun,serif'} as CSSProperties
@@ -98,9 +126,9 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   {doc&&<div className="print-controls layout-template-panel">
    <label>选择排版模板<select value={templateId} onChange={e=>setTemplateId(e.target.value)}>{compatible.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
    <button className={editing?'':'primary'} type="button" disabled={!selected} onClick={apply}>{editing?'应用模板':'进入排版工作台'}</button>
-   {editing&&<><label>新模板名称<input value={templateName} maxLength={80} onChange={e=>setTemplateName(e.target.value)} placeholder="保存当前排版"/></label><button type="button" disabled={!templateName.trim()||!!invalid} onClick={saveTemplate}>保存为模板</button><button type="button" disabled={!templates.some(t=>t.id===templateId)} onClick={removeTemplate}>删除个人模板</button></>}
+   {!editing&&hasDraft&&<button type="button" onClick={()=>setEditing(true)}>继续上次排版</button>}{editing&&<><button type="button" disabled={cloudBusy||cloudRevision===null||!!invalid} onClick={()=>void saveCloud()}>保存排版到服务器</button><label>新模板名称<input value={templateName} maxLength={80} onChange={e=>setTemplateName(e.target.value)} placeholder="保存当前排版"/></label><button type="button" disabled={cloudBusy||!templateName.trim()||!!invalid} onClick={()=>void saveTemplate()}>保存为模板</button><button type="button" disabled={cloudBusy||!templates.some(t=>t.id===templateId)} onClick={()=>void removeTemplate()}>删除个人模板</button></>}
    {message&&<p role="status">{message}</p>}
-   <small className="muted">当前排版与个人模板暂存于本浏览器；不修改题库或来源。</small>
+   <small className="muted">{cloudRevision===null?'排版草稿自动保存在当前浏览器。':cloudLayout&&JSON.stringify(cloudLayout)===JSON.stringify(layout)?'排版已同步至服务器。':'本地草稿自动保存，点击保存排版到服务器后可跨设备使用。'} 不修改题库或来源。</small>
   </div>}
   {source&&doc&&<p className="print-controls muted">{doc.has_source_content?'仅导出已入库批次及其他正式关联资源，不包含未入库草稿。':'此来源尚无已录入的关联内容，仅显示来源登记信息。'}</p>}
   {chapterUid&&doc&&<p className="print-controls muted">当前仅导出所选章节内容。</p>}
