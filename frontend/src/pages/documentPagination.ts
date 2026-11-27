@@ -25,7 +25,7 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
  if(!article||!body)return {pages:0,error:'文档内容尚未加载'}
  const sheets:{sheet:HTMLElement;columns:HTMLElement[];header:HTMLElement;footer:HTMLElement;chapter:string}[]=[]
  const contents=Array.from(body.children),headings:{id:string;title:string;level:number;page:number}[]=[]
- let current=0,col=0,chapter='',error=''
+ let current=0,col=0,chapter='',error='',chapterNumber=0,equationNumber=0
  const addPage=(withTitle=false,toc=false)=>{
   const sheet=el('article','print-document layout-sheet')
   const header=el('div','layout-page-header',layout.header?'占位':'')
@@ -71,11 +71,17 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   const level=Number((item as HTMLElement).dataset.layoutLevel??0)
   const pageBreak=(item as HTMLElement).dataset.layoutBreak
   if(pageBreak==='before'||pageBreak==='alone')newPage()
-  if(level===1){chapter=item.textContent?.trim()??'';if(layout.chapterNewPage&&sheets[current].columns.some(n=>n.childElementCount))newPage()}
+  if(level===1){chapterNumber++;if(layout.equationNumbering==='chapter')equationNumber=0;chapter=item.textContent?.trim()??'';if(layout.chapterNewPage&&sheets[current].columns.some(n=>n.childElementCount))newPage()}
   const node=copy(item)
   if(node.id)node.removeAttribute('id')
   node.dataset.layoutUid=uid
   node.id='layout-block-'+uid
+  if(layout.equationNumbering!=='off')for(const formula of node.querySelectorAll<HTMLElement>('.formula-block')){
+   if(formula.querySelector('.tag,.katex-error,.formula-error'))continue
+   equationNumber++
+   const label=layout.equationNumbering==='chapter'&&chapterNumber?chapterNumber+'.'+equationNumber:String(equationNumber)
+   formula.classList.add('layout-numbered-equation');formula.append(el('span','layout-equation-number','('+label+')'))
+  }
   if(!appendPart(node,uid)){error='内容 '+(i+1)+' 超过单栏页面且无法安全拆分，请在内容中插入换行或调整页面参数。';break}
   if(level){const first=target.querySelector('#'+CSS.escape('layout-block-'+uid))?.closest('.layout-sheet');headings.push({id:'layout-block-'+uid,title:item.querySelector('h2,h3,h4,h5,h6')?.textContent?.trim()||item.textContent?.trim()||'',level,page:Math.max(0,sheets.findIndex(p=>p.sheet===first))+1})}
   if(level===1)sheets[current].chapter=chapter
