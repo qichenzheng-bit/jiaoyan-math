@@ -1,6 +1,7 @@
 import {useEffect,useState,type FormEvent} from 'react'
 import {api} from '../auth'
 import {MathText} from '../components/MathText'
+import StatisticsDistribution from './StatisticsDistribution'
 import {WorkspaceLink as Link} from '../components/WorkspaceNavigation'
 
 type Source={source_id:string;title:string;institution:string;year:string;exam_type:string;category:string;source_type:string}
@@ -122,6 +123,7 @@ export default function SourceStatistics(){
    {!report.items.length&&<p className="muted">暂无符合条件的来源。</p>}<small className="muted">条形长度按当前页的最大记录数比较。</small>
    <div className="button-row"><button disabled={reportBusy||!report.offset} onClick={()=>void runReport(Math.max(0,report.offset-report.limit))}>上一页</button><small>共 {report.total} 组</small><button disabled={reportBusy||report.offset+report.limit>=report.total} onClick={()=>void runReport(report.offset+report.limit)}>下一页</button></div></>}
   </section>}
+  {result&&applied&&<StatisticsDistribution key={JSON.stringify([applied,result.offset])} scope={applied} topics={result.items}/>}
   {topic&&<section className="panel"><div className="button-row"><h2><MathText content={topic.name}/> · 关联题目</h2><button disabled={drillBusy||cartBusy} onClick={()=>{setTopic(undefined);setDrill(undefined);setPicked([])}}>关闭</button></div>
    {drillError&&<p role="alert">{drillError}</p>}{drillBusy&&<p role="status">读取题目中…</p>}
    {drill&&<><p className="muted">当前统计范围内共 {drill.total} 道独立题目</p>{drill.items.map(q=><div className="source-statistics-source" key={q.id}><input type="checkbox" aria-label={'选择 '+q.code} checked={picked.includes(q.id)} disabled={cartBusy||(!picked.includes(q.id)&&picked.length>=200)} onChange={e=>setPicked(old=>e.target.checked?[...old,q.id]:old.filter(id=>id!==q.id))}/><span><Link to={'/resources?q='+encodeURIComponent(q.code)}><MathText content={q.title||q.code}/></Link><small>{q.code} · {q.question_type||'题型未确认'} · {q.source_count} 份来源</small></span></div>)}
