@@ -1,0 +1,100 @@
+import type {Layout} from './documentLayout'
+
+export type PaginationResult={pages:number;error:string}
+const el=(tag:string,cls:string,text?:string)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n}
+function copy(n:Element){const c=n.cloneNode(true) as HTMLElement;c.querySelectorAll('.print-controls').forEach(x=>x.remove());return c}
+function overflow(n:HTMLElement){return n.scrollHeight>n.clientHeight+2||n.scrollWidth>n.clientWidth+2}
+export function pageVariables(l:Layout,w:number,h:number){
+ return {'--layout-width':w+'mm','--layout-height':h+'mm','--layout-top':l.top+'mm','--layout-bottom':l.bottom+'mm','--layout-left':l.left+'mm','--layout-right':l.right+'mm','--layout-columns':l.columns,'--layout-gap':l.gap+'mm','--layout-size':l.size+'pt','--layout-line':l.lineHeight,'--layout-paragraph':l.paragraphGap+'pt','--layout-font':l.font==='sans'?'"Noto Sans CJK SC","Microsoft YaHei",sans-serif':'"Noto Serif CJK SC",SimSun,serif'}
+}
+function field(text:string,title:string,subject:string,page:number,total:number,chapter:string){
+ return text.replace(/\{\{(文档名称|科目|当前页码|总页数|当前章名)\}\}/g,(_,key:string)=>({'文档名称':title,'科目':subject,'当前页码':String(page),'总页数':String(total),'当前章名':chapter}[key]??''))
+}
+// Build pages from the existing MathText DOM. No re-parsing or HTML injection.
+// Measure actual rendered heights at the selected column width, after fonts and images load.
+export function paginateDocument(source:HTMLElement,target:HTMLElement,layout:Layout,title:string,subject:string):PaginationResult{
+ target.replaceChildren()
+ const article=source.querySelector('.print-document'),body=article?.querySelector('.layout-body')
+ if(!article||!body)return {pages:0,error:'文档内容尚未加载'}
+ const sheets:{sheet:HTMLElement;columns:HTMLElement[];header:HTMLElement;footer:HTMLElement;chapter:string}[]=[]
+ const contents=Array.from(body.children),headings:{id:string;title:string;level:number;page:number}[]=[]
+ let current=0,col=0,chapter='',error=''
+ const addPage=(withTitle=false,toc=false)=>{
+  const sheet=el('article','print-document layout-sheet')
+  const header=el('div','layout-page-header',layout.header?'占位':'')
+  const footer=el('div','layout-page-footer',layout.footer?'占位':'')
+  if(!layout.header)header.hidden=true
+  if(!layout.footer)footer.hidden=true
+  sheet.append(header)
+  if(withTitle){for(const n of Array.from(article.children).filter(n=>n.matches('h1,.print-subtitle')))sheet.append(copy(n))}
+  const cols=el('div','layout-sheet-columns')
+  const columns=Array.from({length:toc?1:layout.columns},()=>el('div','layout-sheet-column'))
+  columns.forEach(n=>cols.append(n));sheet.append(cols,footer);target.append(sheet)
+  sheets.push({sheet,columns,header,footer,chapter});return sheets.length-1
+ }
+ current=addPage(true)
+ const active=()=>sheets[current].columns[col]
+ const next=()=>{if(col+1<layout.columns)col++;else{current=addPage();col=0}}
+ const newPage=()=>{if(sheets[current].columns.some(n=>n.childElementCount)||current===0){current=addPage();col=0}}
+ function appendPart(part:HTMLElement,uid:string,attempt=0):boolean{
+  let dest=active();dest.append(part)
+  if(!overflow(dest))return true
+  part.remove()
+  if(dest.childElementCount){next();return appendPart(part,uid,attempt+1)}
+  // The first page also has a title. Try a full column before splitting.
+  if(current===0&&attempt===0){next();return appendPart(part,uid,attempt+1)}
+  if(attempt>10000)return false
+  // Split only at explicit semantic element boundaries; equations and images are atomic.
+  if(part.matches('figure,.formula-block,.formula-inline,.katex,.katex-display,img,pre')||part.childElementCount<2||Array.from(part.childNodes).some(n=>n.nodeType===Node.TEXT_NODE&&n.textContent?.trim()))return false
+  const children=Array.from(part.children)
+  for(let i=0;i<children.length;i++){
+   const wrapper=part.cloneNode(false) as HTMLElement
+   if(i>0)wrapper.removeAttribute('id')
+   wrapper.append(copy(children[i]))
+   if(!appendPart(wrapper,uid,attempt+1))return false
+  }
+  return true
+ }
+ for(let i=0;i<contents.length;i++){
+  const item=contents[i]
+  if(item.classList.contains('print-break')){newPage();continue}
+  const uid=(item as HTMLElement).dataset.layoutUid??String(i+1)
+  const level=Number((item as HTMLElement).dataset.layoutLevel??0)
+  if(level===1){chapter=item.textContent?.trim()??'';if(layout.chapterNewPage&&sheets[current].columns.some(n=>n.childElementCount))newPage()}
+  const node=copy(item)
+  if(node.id)node.removeAttribute('id')
+  node.dataset.layoutUid=uid
+  if(level)node.id='layout-heading-'+uid
+  if(!appendPart(node,uid)){error='内容 '+(i+1)+' 超过单栏页面且无法安全拆分，请在内容中插入换行或调整页面参数。';break}
+  if(level)headings.push({id:'layout-heading-'+uid,title:item.querySelector('h2,h3,h4,h5,h6')?.textContent?.trim()||item.textContent?.trim()||'',level,page:current+1})
+  if(level===1)sheets[current].chapter=chapter
+ }
+ // Drop only a truly empty trailing sheet, never a page holding the title.
+ while(sheets.length>1&&!sheets[sheets.length-1].columns.some(n=>n.childElementCount)){sheets.pop()?.sheet.remove()}
+ if(layout.toc&&headings.length&&!error){
+  const before=sheets.slice();const tocSheets:typeof sheets=[]
+  let idx=addPage(false,true);tocSheets.push(sheets[idx]);let dest=sheets[idx].columns[0]
+  dest.append(el('h1','layout-toc-title','目　录'))
+  for(const heading of headings.filter(x=>x.level<=layout.tocDepth)){
+   const row=el('div','layout-toc-row');row.style.paddingLeft=(heading.level-1)*5+'mm'
+   const link=el('a','layout-toc-link',heading.title) as HTMLAnchorElement;link.href='#'+heading.id
+   const dots=el('span','layout-toc-dots');const number=el('span','layout-toc-number',String(heading.page));number.dataset.page=String(heading.page)
+   row.append(link,dots,number);dest.append(row)
+   if(overflow(dest)){row.remove();idx=addPage(false,true);tocSheets.push(sheets[idx]);dest=sheets[idx].columns[0];dest.append(row);if(overflow(dest)){error='目录单行超过页面，请调整纸张和字号。';break}}
+  }
+  const count=tocSheets.length
+  tocSheets.forEach(p=>{p.sheet.querySelectorAll<HTMLElement>('.layout-toc-number').forEach(n=>{n.textContent=String(Number(n.dataset.page)+count)});target.insertBefore(p.sheet,before[0].sheet);p.chapter='目录'})
+  sheets.splice(0,sheets.length,...tocSheets,...before)
+ }
+ const total=sheets.length
+ sheets.forEach((p,i)=>{
+  p.sheet.dataset.page=String(i+1)
+  if(layout.mirrorMargins&&i%2===1)p.sheet.classList.add('layout-mirror')
+  p.header.textContent=field(layout.header,title,subject,i+1,total,p.chapter)
+  p.footer.textContent=field(layout.footer,title,subject,i+1,total,p.chapter)
+  if(p.columns.some(overflow)&&!error)error='第 '+(i+1)+' 页内容超出可用区域，请调整排版。'
+ })
+ if(!error&&target.querySelector('.formula-error,.katex-error'))error='存在无法渲染的数学公式。'
+ if(!error&&Array.from(target.querySelectorAll<HTMLElement>('.katex-display,.formula-block,.math-text-block')).some(n=>n.clientWidth>0&&n.scrollWidth>n.clientWidth+2))error='存在超出正文宽度的数学公式，请调整版式。'
+ return {pages:total,error}
+}
