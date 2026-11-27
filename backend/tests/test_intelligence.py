@@ -56,3 +56,36 @@ def test_duplicate_decision_uses_manual_matcher(monkeypatch):
     intelligence.verify_duplicate_choice(None,reused,"")
     with pytest.raises(HTTPException):intelligence.verify_duplicate_choice(None,{**reused,"reuse_revision":1},"")
     with pytest.raises(HTTPException):intelligence.verify_duplicate_choice(None,{**reused,"content":"修改后的题干"},"")
+
+
+def test_pdf_location_hints_are_bounded_and_untrusted():
+    from app.api.intelligence import pdf_range,valid_pages
+    hints={}
+    rows=parse_answer('[{"kind":"question","title":"题目","content":"求极限","source_pages":{"content":4,"answer":9,"solution":"4","proof":true,"unknown":3}}]',hints,(3,5))
+    assert hints=={rows[0]["uid"]:{"content":4}}
+    assert "source_pages" not in rows[0]
+    assert pdf_range({"file_media_type":"application/pdf","work_batch_id":"b","start":1,"end":10})==(1,10)
+    assert pdf_range({"file_media_type":"application/pdf","work_batch_id":"b","start":1,"end":11}) is None
+    with pytest.raises(HTTPException):valid_pages({"answer":8},(3,5),True)
+
+
+def test_source_matching_only_accepts_exact_excerpts():
+    from app.api.intelligence import literal_source_proposal,source_page
+    from types import SimpleNamespace
+    assert literal_source_proposal('{"answer":"答案为1"}',["answer"],"第一题：答案为1\n第二题") == {"answer":"答案为1"}
+    with pytest.raises(ValueError):literal_source_proposal('{"answer":"答案为2"}',["answer"],"第一题：答案为1")
+    b=SimpleNamespace(units=[{"unit":2,"state":"done","text":"答案为1"},{"unit":3,"state":"done","text":"答案为2"}])
+    assert source_page("答案为1",b)==2
+    b.units[1]["text"]="答案为1"
+    assert source_page("答案为1",b) is None
+
+
+def test_batch_reference_proposals_are_independent():
+    from app.api.intelligence import batch_match_targets,parse_batch_source
+    items=[{"uid":"a","kind":"question","answer":"","solution":"已有解析"},{"uid":"b","kind":"question","answer":"","solution":""}]
+    targets=batch_match_targets(items,["a","b"],["answer","solution"])
+    assert [t["fields"] for t in targets]==[["answer"],["answer","solution"]]
+    result=parse_batch_source('{"a":{"answer":"原答案1"},"b":{"answer":"不存在"}}',targets,"第一题 原答案1")
+    assert result=={"a":{"answer":"原答案1"},"b":{}}
+    with pytest.raises(ValueError):parse_batch_source('{"c":{"answer":"原答案1"}}',targets,"原答案1")
+    with pytest.raises(HTTPException):batch_match_targets(items,["a","a"],["answer"])

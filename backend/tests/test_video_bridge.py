@@ -76,3 +76,9 @@ def test_cover_selection_stores_reference(monkeypatch):
     assert item.data["cover_revision"]==3 and refs==[("cover","studio_item","work")]
     image.media_type="image/jpeg"
     with pytest.raises(HTTPException):video.save_cover(db,None,item,body)
+
+
+def test_video_snapshot_uses_only_recommended_method():
+    from app.core.solution_methods import format_methods
+    r=SimpleNamespace(title="极限",content="求极限",solution=format_methods([{"body":"方法甲","recommended":False},{"body":"方法乙","recommended":True}]),answer="0",subject="高等数学",chapter="",exam_type="",question_type="综合题",analysis="",tags=[],question_data=None)
+    assert snapshot(r)["reference_solution"]=="方法乙"

@@ -5,7 +5,8 @@ export const modules:Module[]=[
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
  {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
- {path:'/intake',name:'手动录入',desc:'在同一资料文档内录入题目与知识单元',icon:'intake',group:'resources',ready:true},
+ {path:'/original-library',name:'原始资料库',desc:'管理上传的原件、处理进度与回收区',icon:'files',group:'resources',ready:true},
+ {path:'/intake',name:'资料录入',desc:'统一手动录入、AI 工作及历史资料',icon:'intake',group:'resources',ready:true},
  {path:'/intelligence',name:'AI 智能录入',desc:'原文提取与草稿审核',icon:'spark',group:'resources',ready:true},
  {path:'/teaching-library',name:'教学资料库',desc:'自己组编的试卷、讲义和教材',icon:'files',group:'resources',ready:true},
  {path:'/resources',name:'题库',desc:'题目、查重与检索',icon:'resources',group:'resources',ready:true},
@@ -31,7 +32,7 @@ function entry(path:string,name?:string):WorkspaceEntry{
 // Global sidebar is organized by work purpose, not implementation module.
 export const workspaceGroups:WorkspaceGroup[]=[
  {id:'intake',name:'资料录入',icon:'intake',sections:[
-  {id:'intake',name:'录入方式',entries:[{path:'/intake',name:'手动录入',icon:'files'}]},
+  {id:'intake',name:'录入方式',entries:[{path:'/intake',name:'录入首页',icon:'intake'},entry('/original-library')]},
  ]},
  {id:'teaching',name:'教学教研',icon:'book',sections:[
   {id:'resources',name:'基础资源',entries:[entry('/resources'),entry('/knowledge-library'),entry('/sources'),entry('/graph')]},
@@ -40,21 +41,30 @@ export const workspaceGroups:WorkspaceGroup[]=[
  {id:'creation',name:'教学制作',icon:'media',sections:[
   {id:'creation',name:'制作与导出',entries:[entry('/videos'),entry('/papers'),entry('/handouts'),entry('/textbooks')]},
  ]},
- {id:'publishing',name:'内容发布',icon:'publishing',sections:[{id:'release',name:'封面制作',entries:[entry('/covers')]}]},
+ {id:'publishing',name:'内容发布',icon:'publishing',sections:[{id:'release',name:'作品与封面',entries:[entry('/covers'),entry('/works','作品管理')]}]},
  {id:'sales',name:'商品售卖',icon:'works',sections:[{id:'store',name:'商品与交易',entries:[entry('/products','商品售卖')]}]},
 ]
 
 export function workspaceParent(path:string,search:string):string{
  const params=new URLSearchParams(search)
  if(path.startsWith('/project/'))return '/'
- if(path==='/intake')return params.has('doc')||params.has('mode')?'/intake':'/'
+ if(path==='/original-library')return '/intake'
+ if(path==='/intake')return params.has('doc')||params.has('mode')||params.has('resource')?'/intake':'/'
  if(path.startsWith('/source-print/'))return '/sources'
  if(path.startsWith('/print/'))return '/teaching-library'
  if(path.startsWith('/resource-edit/'))return params.has('return_source')?'/source-print/'+encodeURIComponent(params.get('return_source')!):'/resources'
  if(path==='/intake-single')return '/intake'
  if(path==='/work'&&params.has('job')&&params.has('review'))return '/work?job='+encodeURIComponent(params.get('job')!)
  if(path==='/work'&&(params.has('job')||params.has('history')))return '/work'
- if(path==='/works')return '/project/creation'
+ if(path==='/works')return '/project/publishing'
  const group=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path===path)))
  return group?'/project/'+group.id:'/'
+}
+
+// Parent matching ignores search params only when identifying the business group.
+export function activeWorkspaceGroup(path:string){
+ if(path.startsWith('/resource-edit/')||path.startsWith('/source-print/'))return workspaceGroups.find(g=>g.id==='teaching')
+ if(path==='/intake-single')return workspaceGroups.find(g=>g.id==='intake')
+ if(path.startsWith('/print/'))return workspaceGroups.find(g=>g.id==='creation')
+ return workspaceGroups.find(g=>path==='/project/'+g.id||g.sections.some(s=>s.entries.some(e=>e.path.split('?')[0]===path)))
 }

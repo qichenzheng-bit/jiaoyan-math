@@ -1,6 +1,7 @@
 """Private storage: original files and generated artifacts have separate roots."""
 import hashlib
 import os
+import re
 import tempfile
 import uuid
 import zipfile
@@ -70,6 +71,7 @@ def detect_type(path: Path, name: str) -> str:
     raise HTTPException(415, "不支持此格式或文件内容与扩展名不符")
 
 def file_path(item: StoredFile) -> Path:
+    if item.purged_at is not None:raise HTTPException(410, "原始文件已永久清理，历史录入记录仍保留")
     base = root()
     path = (base / item.storage_key).resolve()
     if not path.is_relative_to(base) or not path.is_file():
@@ -81,7 +83,8 @@ def serialize(item: StoredFile, duplicate: bool = False) -> dict:
             "media_type": item.media_type, "sha256": item.sha256,
             "generated": item.generated, "archived": item.archived,
             "created_at": item.created_at, "duplicate": duplicate,
-            "previewable": item.media_type in IMAGE_TYPES}
+            "purged_at": item.purged_at, "purge_pending": item.purge_pending,
+            "previewable": item.media_type in IMAGE_TYPES and item.purged_at is None}
 
 def save_staged(db: Session, temp: Path, name: str, user_id: int, generated: bool = False) -> dict:
     name = safe_name(name)
@@ -96,7 +99,7 @@ def save_staged(db: Session, temp: Path, name: str, user_id: int, generated: boo
     digest = hasher.hexdigest()
     # Serialize deduplication across workers with the single administrator row.
     db.scalar(select(User).where(User.id == user_id).with_for_update())
-    existing = db.scalar(select(StoredFile).where(StoredFile.sha256 == digest, StoredFile.generated == generated).order_by(StoredFile.created_at))
+    existing = db.scalar(select(StoredFile).where(StoredFile.sha256 == digest, StoredFile.generated == generated, StoredFile.purged_at.is_(None)).order_by(StoredFile.created_at))
     if existing and file_path(existing).is_file():
         if existing.archived:
             existing.archived = False
@@ -133,8 +136,23 @@ def reference_count(db: Session, file_id: str) -> int:
 def link_file(db: Session, file_id: str, owner_type: str, owner_id: str):
     """Called within a future resource/work transaction, not a public API."""
     item = db.scalar(select(StoredFile).where(StoredFile.id == file_id).with_for_update())
-    if item is None or item.archived:
+    if item is None or item.archived or item.purged_at is not None:
         raise HTTPException(404, "文件不存在或已归档")
     key = (file_id, owner_type, owner_id)
     if db.get(FileReference, key) is None:
         db.add(FileReference(file_id=file_id, owner_type=owner_type, owner_id=owner_id))
+
+# Stable PostgreSQL advisory lock shared with deploy/backup.py. No snapshot may read a blob while it is being purged.
+PURGE_LOCK = 824650219
+def remove_purged_original(item: StoredFile):
+    if item.purged_at is None or not item.archived or item.generated:
+        raise ValueError("file not marked for purge")
+    if not re.fullmatch(r"[0-9a-f-]{36}",item.id) or item.storage_key!="original/"+item.id:
+        raise ValueError("invalid original storage key")
+    base=root()
+    folder=base/"original"
+    path=folder/item.id
+    # Refuse symlinks and unexpected storage layout even when retrying a missing file.
+    if folder.is_symlink() or path.is_symlink() or not path.resolve().is_relative_to(base):
+        raise ValueError("unsafe original path")
+    path.unlink(missing_ok=True)

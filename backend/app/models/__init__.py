@@ -1,4 +1,6 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect, Index
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
@@ -33,6 +35,8 @@ class StoredFile(Base):
     media_type: Mapped[str] = mapped_column(String(100))
     generated: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    purged_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    purge_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 class AuditLog(Base):
@@ -57,10 +61,12 @@ class TeachingResource(Base):
     content: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     solution: Mapped[str] = mapped_column(Text)
+    question_data: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     tags: Mapped[list] = mapped_column(JSON)
     source_id: Mapped[str | None] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     stem_key: Mapped[str] = mapped_column(String(64), index=True, default="", server_default="")
+    search_features: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(),"postgresql"),default=dict,server_default="{}")
     code: Mapped[str] = mapped_column(String(16), unique=True)
     exam_type: Mapped[str] = mapped_column(String(80), default="", server_default="")
     chapter: Mapped[str] = mapped_column(String(120), default="", server_default="")
@@ -82,6 +88,7 @@ class TeachingResource(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),)
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
@@ -114,6 +121,7 @@ class ResourceSourceLink(Base):
     source_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
     provenance_role: Mapped[str] = mapped_column(String(16),primary_key=True)
     original_question_number: Mapped[str] = mapped_column(String(40))
+    occurrences: Mapped[list] = mapped_column(JSON,default=list,server_default="[]")
     page_start: Mapped[int | None] = mapped_column(Integer,nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer,nullable=True)
     chapter: Mapped[str] = mapped_column(String(120))
@@ -283,3 +291,43 @@ class VideoProject(Base):
     work_id: Mapped[str | None] = mapped_column(ForeignKey("studio_items.id", ondelete="RESTRICT"), nullable=True, unique=True)
     created_at: Mapped[int] = mapped_column(BigInteger)
     __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),)
+
+# Persistent AI work sessions; legacy intake jobs remain independent.
+class WorkSession(Base):
+    __tablename__="work_sessions"
+    agent_history: Mapped[list]=mapped_column(JSON,default=list,server_default="[]")
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    title: Mapped[str]=mapped_column(String(200))
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class WorkMaterial(Base):
+    __tablename__="work_materials"
+    __table_args__=(UniqueConstraint("session_id","file_id",name="uq_work_material_file"),)
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    session_id: Mapped[str]=mapped_column(ForeignKey("work_sessions.id",ondelete="RESTRICT"),index=True)
+    file_id: Mapped[str]=mapped_column(ForeignKey("files.id",ondelete="RESTRICT"))
+    total_units: Mapped[int | None]=mapped_column(Integer,nullable=True)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+
+class WorkBatch(Base):
+    __tablename__="work_batches"
+    __table_args__=(UniqueConstraint("material_id","start","end",name="uq_work_batch_range"),)
+    id: Mapped[str]=mapped_column(String(36),primary_key=True)
+    material_id: Mapped[str]=mapped_column(ForeignKey("work_materials.id",ondelete="RESTRICT"),index=True)
+    start: Mapped[int]=mapped_column(Integer)
+    end: Mapped[int]=mapped_column(Integer)
+    units: Mapped[list]=mapped_column(JSON)
+    verified_text: Mapped[str | None]=mapped_column(Text,nullable=True)
+    import_id: Mapped[str | None]=mapped_column(ForeignKey("intake_imports.id",ondelete="RESTRICT"),nullable=True)
+    job_id: Mapped[str | None]=mapped_column(ForeignKey("intake_jobs.id",ondelete="RESTRICT"),nullable=True,unique=True)
+    created_at: Mapped[int]=mapped_column(BigInteger)
+    updated_at: Mapped[int]=mapped_column(BigInteger)
+
+# All ORM write paths (intake, resource editing, registration) maintain the derived index.
+@event.listens_for(Session,"before_flush")
+def update_resource_search_features(session,flush_context,instances):
+    from app.core.search_features import search_features
+    for row in session.new.union(session.dirty):
+        if isinstance(row,TeachingResource) and (row in session.new or inspect(row).attrs.content.history.has_changes()):
+            row.search_features=search_features(row.content) if row.kind=="question" else {}

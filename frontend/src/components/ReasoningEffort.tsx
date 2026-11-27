@@ -1,6 +1,6 @@
 import {createPortal} from 'react-dom'
 import {useLayoutEffect,useState,type ReactNode} from 'react'
-export type ModelCatalog={models:{id:string;label:string;efforts?:string[]}[];source?:string}
+export type ModelCatalog={models:{id:string;label:string;efforts?:string[]}[];source?:string;updated_at?:number|null;capability_source?:string}
 export type ModelPreferences={model:string;effort?:string;video_model?:string;video_effort?:string}
 const labels:Record<string,string>={default:'默认',none:'关闭',off:'关闭',disabled:'关闭',low:'低',medium:'中',high:'高',xhigh:'极高',max:'最大'}
 export function effortLabel(value:string){return labels[value]??value}
@@ -18,4 +18,12 @@ export function InferenceMenu({children}:{children:ReactNode}){
  const [host,setHost]=useState<HTMLElement|null>(null)
  useLayoutEffect(()=>{setHost(document.getElementById('mode-inference-actions'))},[])
  return host?createPortal(children,host):null
+}
+
+export function validModelChoice(catalog:ModelCatalog|undefined,model:string,effort:string,video=false){
+ return catalog?.source==='cli'&&catalog.models.some(m=>m.id===model)&&effortOptions(catalog,model,video).includes(effort)
+}
+export function ModelFields({catalog,model,effort,onModel,onEffort,disabled=false,video=false,modelLabel='生成模型',effortLabelText='推理强度'}:{catalog?:ModelCatalog;model:string;effort:string;onModel:(v:string)=>void;onEffort:(v:string)=>void;disabled?:boolean;video?:boolean;modelLabel?:string;effortLabelText?:string}){
+ const options=catalog?.source==='cli'?catalog.models:[],efforts=effortOptions(catalog,model,video)
+ return <><label>{modelLabel}<select aria-label={modelLabel} value={model} disabled={disabled||!options.length} onChange={e=>onModel(e.target.value)}>{!options.some(m=>m.id===model)&&<option value={model} disabled>{model||'未选择'}（待确认）</option>}{options.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>{effortLabelText}<select aria-label={effortLabelText} value={effort} disabled={disabled||!options.some(m=>m.id===model)} onChange={e=>onEffort(e.target.value)}>{!efforts.includes(effort)&&<option value={effort} disabled>{effortLabel(effort)}（已不可用）</option>}{efforts.map(e=><option key={e} value={e}>{effortLabel(e)}</option>)}</select></label></>
 }

@@ -61,3 +61,19 @@ def test_inline_image_tokens_are_validated_and_size_is_not_identity(db):
     assert question_fingerprint("图 "+marker(25),"","")==question_fingerprint("图 "+marker(75),"","")
     with pytest.raises(HTTPException):
         validate_images(db,{"content":"[[img:00000000-0000-0000-0000-000000000000:50]]"})
+
+
+def test_purge_refuses_unsafe_path_and_preserves_tombstone(db):
+    from app.models import StoredFile
+    first=storage.save_staged(db,stage(b"purge content"),"purge.txt",1)
+    item=db.get(StoredFile,first["id"])
+    path=storage.file_path(item)
+    with pytest.raises(ValueError):storage.remove_purged_original(item)
+    item.archived=True;item.purged_at=1;item.purge_pending=True;db.commit()
+    with pytest.raises(HTTPException) as exc:storage.file_path(item)
+    assert exc.value.status_code==410
+    storage.remove_purged_original(item)
+    storage.remove_purged_original(item)
+    assert not path.exists()
+    new=storage.save_staged(db,stage(b"purge content"),"purge.txt",1)
+    assert new["id"]!=item.id and not new["duplicate"]

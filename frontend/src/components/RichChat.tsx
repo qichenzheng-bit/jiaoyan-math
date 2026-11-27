@@ -4,6 +4,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import {MathFormula} from './MathFormula'
 import {MathText} from './MathText'
+import {ResourceSections} from './ResourceComponents'
+import {WorkspaceFeedback} from './WorkspaceFeedback'
 import {Icon} from './Icon'
 import {WorkspaceLink as Link} from './WorkspaceNavigation'
 import {api} from '../auth'
@@ -73,12 +75,10 @@ function Card({spec}:{spec:CardSpec}){
  return null
 }
 function ResourceCard({reference}:{reference:Ref}){
- const [data,setData]=useState<Resource|null>(null),[tab,setTab]=useState('content'),[busy,setBusy]=useState(false),[error,setError]=useState('')
- async function load(){setBusy(true);setError('');try{const r=await api<Resource>('/resources/'+encodeURIComponent(reference.id));if(r.archived)throw Error('资源已归档');setData(r)}catch(e){setError(e instanceof Error?e.message:'读取失败')}finally{setBusy(false)}}
+ const [data,setData]=useState<Resource|null>(null),[expanded,setExpanded]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('')
+ async function load(){setExpanded(true);if(data||busy)return;setBusy(true);setError('');try{const r=await api<Resource>('/resources/'+encodeURIComponent(reference.id));if(r.archived)throw Error('资源已归档');setData(r)}catch(e){setError(e instanceof Error?e.message:'读取失败')}finally{setBusy(false)}}
  const route=(reference.kind==='source'?'/sources':reference.kind==='knowledge'?'/knowledge-library':'/resources')+'?q='+encodeURIComponent(reference.code)
- const fields=([{key:'content',label:'正文'},{key:'answer',label:'答案'},{key:'solution',label:'解析'},{key:'analysis',label:'思路'},{key:'proof',label:'证明'},{key:'tags',label:'知识点'}] as const).filter(x=>x.key==='content'||Boolean(data?.[x.key]?.length))
- const value=data&&fields.find(x=>x.key===tab)?data[tab as keyof Resource]:data?.content
- return <Frame title={reference.title} icon={reference.kind==='source'?'files':'book'}><small>{reference.code} · {reference.kind==='question'?'题库':reference.kind==='knowledge'?'知识库':'来源库'}{data?.subject?' · '+data.subject:''}</small>{data&&<><div className="rich-card-tabs" role="group" aria-label="资源详情">{fields.map(x=><button key={x.key} type="button" aria-pressed={tab===x.key} onClick={()=>setTab(x.key)}>{x.label}</button>)}</div><MathText content={Array.isArray(value)?value.join('、'):typeof value==='string'?value:''}/></>}{error&&<p role="alert">{error}</p>}<div className="rich-card-actions"><button type="button" onClick={()=>data?setData(null):void load()} disabled={busy}>{busy?'读取中…':data?'收起详情':'展开详情'}</button><Link to={route}>打开资源</Link>{data&&reference.kind==='question'&&<Link to={'/videos?resource='+encodeURIComponent(reference.id)}>制作视频</Link>}</div></Frame>
+ return <Frame title={reference.title} icon={reference.kind==='source'?'files':'book'}><small>{reference.code} · {reference.kind==='question'?'题库':reference.kind==='knowledge'?'知识库':'来源库'}{data?.subject?' · '+data.subject:''}</small>{expanded&&<div className="chat-resource-detail">{data?<ResourceSections resource={data} showKnowledge/>:busy?<WorkspaceFeedback state="loading" title="正在读取资源…"/>:error?<WorkspaceFeedback state="error" title="资源读取失败" detail={error} onRetry={()=>void load()}/>:null}</div>}<div className="rich-card-actions"><button type="button" aria-expanded={expanded} onClick={()=>expanded?setExpanded(false):void load()} disabled={busy}>{busy?'读取中…':expanded?'收起详情':'展开详情'}</button><Link to={route}>打开资源</Link>{expanded&&data&&reference.kind==='question'&&<Link to={'/videos?resource='+encodeURIComponent(reference.id)}>制作视频</Link>}</div></Frame>
 }
 export function ResourceCards({refs}:{refs:Ref[]}){
  return refs.length?<div aria-label="本次真实检索资源"><small className="muted">本次引用或检索到的资源</small>{refs.map(r=><ResourceCard key={r.id} reference={r}/>)}</div>:null

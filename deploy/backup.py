@@ -22,6 +22,8 @@ BASE = Path.home() / "jiaoyan-app"
 STATE = BASE / "backup-state"
 CONFIG = BASE / "config" / "backup.json"
 CHUNK = 32 * 1024 * 1024
+# Must agree with app.services.storage.PURGE_LOCK.
+PURGE_LOCK = 824650219
 MANIFEST = "manifests/latest.json"
 SAFE_SETTINGS = ("display_name", "theme", "ai.qoder.model", "ai.qoder.video_model",
                  "ai.qoder.effort", "ai.qoder.video_effort", "qiandao.qoder_cn.v1")
@@ -46,6 +48,9 @@ EXPORTS = [
     ("teaching/intake/imports", "intake_imports", "true", "id"),
     ("teaching/intake/jobs", "intake_jobs", "true", "id"),
     ("teaching/intake/supplements", "intake_supplements", "true", "id"),
+    ("ai/work/sessions", "work_sessions", "true", "id"),
+    ("ai/work/materials", "work_materials", "true", "id"),
+    ("ai/work/batches", "work_batches", "true", "id"),
     ("ai/tasks/document_edits", "document_ai_edits", "true", "id"),
     ("ai/chats/sessions", "chat_sessions", "true", "id"),
     ("ai/chats/messages", "chat_messages", "true", "id"),
@@ -157,7 +162,9 @@ def logical_allowed(name):
             re.fullmatch(r"files/(originals|assets)/[0-9a-f-]{36}", name) is not None)
 
 
-def check_manifest(repo, manifest):
+WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
+
+def check_manifest(repo, manifest, allow_legacy=False):
     if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
         raise ValueError("invalid manifest")
     for name, entry in manifest["entries"].items():
@@ -167,7 +174,8 @@ def check_manifest(repo, manifest):
             expected = name + ".age." + str(index).zfill(4)
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
-    if not (set(FIXED) | set(SCHEMAS)).issubset(manifest["entries"]):
+    missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
+    if missing and not (allow_legacy and missing==WORK_EXPORTS):
         raise ValueError("incomplete database backup")
 
 
@@ -214,60 +222,63 @@ def capture(work, publish):
     if not source.is_absolute() or not source.is_dir():
         raise ValueError("storage unavailable")
     source = source.resolve()
-    with psycopg.connect("host=/var/run/postgresql dbname=jiaoyan user=jiaoyan connect_timeout=10") as conn:
-        with conn.cursor() as cur:
-            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
-            if {r[0] for r in cur.fetchall()} != TABLES:
-                raise ValueError("schema table inventory changed; review backup mapping")
-            for table, allowed in (("teaching_resources", ("question","knowledge","source")),
-                                   ("teaching_documents", ("intake","paper","handout","textbook")),
-                                   ("studio_items", ("asset","work","publication","account","checkin"))):
-                cur.execute("SELECT DISTINCT kind FROM public." + table)
-                if not {r[0] for r in cur.fetchall()}.issubset(allowed):
-                    raise ValueError("unknown business kind")
-            cur.execute("SELECT pg_export_snapshot()")
-            snapshot = cur.fetchone()[0]
-            tmp = work / "plain"
-            for section, name in zip(("pre-data", "post-data"), SCHEMAS):
-                with tmp.open("wb") as f:
-                    run(["pg_dump", "--schema-only", "--no-owner", "--no-privileges",
-                         "--section=" + section, "--snapshot=" + snapshot], env=env, output=f)
-                # Recent pg_dump emits random paired psql restrict keys; ignore them only for change detection.
-                h = hashlib.sha256()
-                with tmp.open("rb") as f:
-                    for line in f:
-                        if not line.startswith((b"\\restrict ", b"\\unrestrict ")):
-                            h.update(line)
-                publish(name, tmp, h.hexdigest())
-            for path, table, predicate, order in EXPORTS:
-                copy_out(cur, "SELECT * FROM public." + table + " WHERE " + predicate + " ORDER BY " + order, tmp)
-                publish(path + ".csv", tmp)
-            cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) ORDER BY key", (list(SAFE_SETTINGS),))
-            settings = dict(cur.fetchall())
-            for name, rows in (
-                ("system/settings/preferences.csv", [(k,v) for k,v in settings.items() if k != "qiandao.qoder_cn.v1"]),
-                ("system/checkin/state.csv", [("qiandao.qoder_cn.v1", sanitize_checkin(settings["qiandao.qoder_cn.v1"]))] if "qiandao.qoder_cn.v1" in settings else []),
-            ):
-                with tmp.open("w", encoding="utf-8", newline="") as f:
-                    writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-                    writer.writerow(["key", "value"])
-                    writer.writerows(rows)
-                publish(name, tmp)
-            copy_out(cur, "SELECT id,action,NULL::integer AS user_id,created_at FROM public.audit_logs ORDER BY id", tmp)
-            publish("system/versions/audit.csv", tmp)
-            cur.execute("SELECT storage_key,sha256,size_bytes FROM public.files ORDER BY id")
-            for key, sha, size in cur.fetchall():
-                match = FILE_KEY.fullmatch(key)
-                if not match:
-                    raise ValueError("invalid storage key")
-                path = safe_path(source, key)
-                # Stored files are immutable after registration. Never include unregistered or staging files.
-                if not path.is_file() or path.stat().st_size != size or digest(path) != sha:
-                    raise ValueError("registered attachment missing or corrupted")
-                name = "files/" + ("originals" if match[1] == "original" else "assets") + "/" + match[2]
-                publish(name, path, sha)
-            tmp.unlink(missing_ok=True)
+    # Acquire the shared lock on a separate autocommit connection BEFORE creating the repeatable-read snapshot.
+    with psycopg.connect("host=/var/run/postgresql dbname=jiaoyan user=jiaoyan connect_timeout=10",autocommit=True) as gate:
+        gate.execute("SELECT pg_advisory_lock_shared(%s)",(PURGE_LOCK,))
+        with psycopg.connect("host=/var/run/postgresql dbname=jiaoyan user=jiaoyan connect_timeout=10") as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+                if {r[0] for r in cur.fetchall()} != TABLES:
+                    raise ValueError("schema table inventory changed; review backup mapping")
+                for table, allowed in (("teaching_resources", ("question","knowledge","source")),
+                                       ("teaching_documents", ("intake","paper","handout","textbook")),
+                                       ("studio_items", ("asset","work","publication","account","checkin"))):
+                    cur.execute("SELECT DISTINCT kind FROM public." + table)
+                    if not {r[0] for r in cur.fetchall()}.issubset(allowed):
+                        raise ValueError("unknown business kind")
+                cur.execute("SELECT pg_export_snapshot()")
+                snapshot = cur.fetchone()[0]
+                tmp = work / "plain"
+                for section, name in zip(("pre-data", "post-data"), SCHEMAS):
+                    with tmp.open("wb") as f:
+                        run(["pg_dump", "--schema-only", "--no-owner", "--no-privileges",
+                             "--section=" + section, "--snapshot=" + snapshot], env=env, output=f)
+                    # Recent pg_dump emits random paired psql restrict keys; ignore them only for change detection.
+                    h = hashlib.sha256()
+                    with tmp.open("rb") as f:
+                        for line in f:
+                            if not line.startswith((b"\\restrict ", b"\\unrestrict ")):
+                                h.update(line)
+                    publish(name, tmp, h.hexdigest())
+                for path, table, predicate, order in EXPORTS:
+                    copy_out(cur, "SELECT * FROM public." + table + " WHERE " + predicate + " ORDER BY " + order, tmp)
+                    publish(path + ".csv", tmp)
+                cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) ORDER BY key", (list(SAFE_SETTINGS),))
+                settings = dict(cur.fetchall())
+                for name, rows in (
+                    ("system/settings/preferences.csv", [(k,v) for k,v in settings.items() if k != "qiandao.qoder_cn.v1"]),
+                    ("system/checkin/state.csv", [("qiandao.qoder_cn.v1", sanitize_checkin(settings["qiandao.qoder_cn.v1"]))] if "qiandao.qoder_cn.v1" in settings else []),
+                ):
+                    with tmp.open("w", encoding="utf-8", newline="") as f:
+                        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                        writer.writerow(["key", "value"])
+                        writer.writerows(rows)
+                    publish(name, tmp)
+                copy_out(cur, "SELECT id,action,NULL::integer AS user_id,created_at FROM public.audit_logs ORDER BY id", tmp)
+                publish("system/versions/audit.csv", tmp)
+                cur.execute("SELECT storage_key,sha256,size_bytes FROM public.files WHERE to_jsonb(files)->>'purged_at' IS NULL ORDER BY id")
+                for key, sha, size in cur.fetchall():
+                    match = FILE_KEY.fullmatch(key)
+                    if not match:
+                        raise ValueError("invalid storage key")
+                    path = safe_path(source, key)
+                    # Stored files are immutable after registration. Never include unregistered or staging files.
+                    if not path.is_file() or path.stat().st_size != size or digest(path) != sha:
+                        raise ValueError("registered attachment missing or corrupted")
+                    name = "files/" + ("originals" if match[1] == "original" else "assets") + "/" + match[2]
+                    publish(name, path, sha)
+                tmp.unlink(missing_ok=True)
 
 
 def backup():
@@ -280,7 +291,7 @@ def backup():
         run(["git", "clone", "--depth=1", "--branch=main", "--single-branch", REMOTE, str(repo)], env=env)
         prior = read_json(safe_path(repo, MANIFEST))
         if prior is not None:
-            check_manifest(repo, prior)
+            check_manifest(repo, prior, allow_legacy=True)
         previous = prior["entries"] if prior else {}
         entries, index = {}, {}
         def publish(name, path, sha=None):
@@ -345,7 +356,7 @@ def restore(repo, identity, target, destination):
     if destination.exists() or not destination.is_absolute():
         raise ValueError("destination must be an unused absolute path")
     manifest = read_json(safe_path(repo, MANIFEST))
-    check_manifest(repo, manifest)
+    check_manifest(repo, manifest, allow_legacy=True)
     env = {k:v for k,v in os.environ.items() if not k.startswith("PG")}
     env.update(PGHOST="/var/run/postgresql", PGDATABASE=target, PGCONNECT_TIMEOUT="10")
     info = "host=/var/run/postgresql dbname=" + target + " connect_timeout=10"
@@ -375,13 +386,18 @@ def restore(repo, identity, target, destination):
         run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", str(work / SCHEMAS[0])], env=env)
         with psycopg.connect(info) as conn:
             with conn.cursor() as cur:
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+                restored_tables={r[0] for r in cur.fetchall()}
+                expected_tables={table for name,table in FIXED.items() if name in manifest['entries']} | EXCLUDED
+                if restored_tables != expected_tables:raise ValueError('restored schema and backup inventory mismatch')
                 for name, table in FIXED.items():
+                    if name not in manifest['entries']:continue
                     with (work / name).open("rb") as f, cur.copy("COPY public." + table + " FROM STDIN WITH (FORMAT CSV, HEADER TRUE, ENCODING 'UTF8')") as cp:
                         for chunk in iter(lambda: f.read(1024*1024), b""):
                             cp.write(chunk)
                 cur.execute("SELECT setval(pg_get_serial_sequence('public.audit_logs','id'), COALESCE(max(id),1), count(*)>0) FROM public.audit_logs")
                 # Check decrypted attachments against restored database metadata before constraints are installed.
-                cur.execute("SELECT storage_key,sha256,size_bytes FROM public.files")
+                cur.execute("SELECT storage_key,sha256,size_bytes FROM public.files WHERE to_jsonb(files)->>'purged_at' IS NULL")
                 expected = set()
                 for key, sha, size in cur.fetchall():
                     match = FILE_KEY.fullmatch(key)

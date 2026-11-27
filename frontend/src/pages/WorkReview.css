@@ -2,3 +2,32 @@
 @media(min-width:761px) and (max-width:1120px){.wg-review-grid{grid-template-columns:120px minmax(0,1fr) minmax(0,.8fr);gap:7px}.wg-review-list,.wg-review-editor,.wg-review-source{padding:9px}}
 @media(max-width:760px){.legacy-shell.clean-workspace .content-inner:has(.wg-review-workbench),.legacy-shell.clean-workspace .content-inner:has(.wg-work-conversation){padding:10px 12px}.wg-work-conversation{gap:16px}.wg-work-result{padding:12px}.wg-result-counts strong{font-size:21px}.wg-review-header h2{font-size:16px}.wg-review-grid{display:block}.wg-review-list{display:none}.wg-review-mobile-tabs{display:grid;gap:7px}.wg-review-mobile-tabs select{width:100%;min-width:0}.wg-review-grid[data-tab=source] .wg-review-editor,.wg-review-grid[data-tab=edit] .wg-review-source{display:none}.wg-review-source{max-height:none}.wg-review-editor,.wg-review-source{padding:12px}.wg-review-footer{align-items:flex-start;flex-direction:column}.wg-review-footer>div{width:100%;justify-content:flex-end}.wg-review-fields textarea,.wg-review-fields input,.wg-review-fields select{font-size:16px}.wg-review-grid .wg-item-actions{justify-content:space-between}.wg-work-user .chat-message-body{max-width:92%}}
 .wg-review-side{min-width:0;display:grid;gap:8px;align-content:start}.wg-review-matches{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0;max-height:calc(100dvh - 250px);overflow:auto;overflow-wrap:anywhere}.wg-review-matches .manual-matches{display:grid;gap:9px}.wg-review-matches .manual-match{min-width:0;overflow-wrap:anywhere}.wg-review-matches .manual-match .button-row{flex-wrap:wrap}.wg-review-matches input{max-width:100%;min-width:0}.wg-review-matches .chat-rich,.wg-review-matches .katex-display{max-width:100%;overflow-x:auto}.wg-desktop-review-tabs{display:flex}.wg-review-side[data-side=matches]>.wg-review-source,.wg-review-side[data-side=source]>.wg-review-matches{display:none}@media(max-width:760px){.wg-desktop-review-tabs{display:none}.wg-review-grid[data-tab=edit]>.wg-review-side,.wg-review-grid[data-tab=matches]>.wg-review-editor{display:none}.wg-review-grid[data-tab=source] .wg-review-side>.wg-review-matches,.wg-review-grid[data-tab=matches] .wg-review-side>.wg-review-source{display:none}.wg-review-grid[data-tab=matches] .wg-review-side>.wg-review-matches,.wg-review-grid[data-tab=source] .wg-review-side>.wg-review-source{display:grid;max-height:none}.wg-review-grid[data-tab=source] .wg-review-side>.wg-review-source{overflow:auto}}
+
+/* F4.1.3 shared review workspace; all colors use existing theme variables. */
+.wg-review-directory-controls{display:grid;gap:6px}.wg-review-directory-controls select{width:100%;font-size:12px}
+.wg-review-sections{display:grid;gap:8px;min-width:0}.wg-review-sections details{border-top:1px solid var(--line);padding:8px 0;min-width:0}.wg-review-sections summary{cursor:pointer;font-size:13px;font-weight:500}.wg-review-sections details>div{padding:9px 0;overflow-wrap:anywhere;overflow-x:auto}
+.wg-review-checks{display:grid;gap:6px;padding:9px;background:var(--subtle);border-radius:6px;font-size:12px}.wg-review-checks p{margin:0}.wg-review-checks .issue{color:var(--danger)}
+.legacy-shell.clean-workspace .content-inner:has(.manual-unified-review){max-width:none;width:100%;padding:12px 18px}
+.manual-unified-review{max-width:none!important;width:100%;min-width:0;box-sizing:border-box}
+.manual-unified-review .wg-review-grid{grid-template-columns:170px minmax(0,1fr)}
+.manual-unified-review .wg-review-grid.has-side{grid-template-columns:170px minmax(0,1.1fr) minmax(0,.85fr)}
+.manual-unified-review .wg-review-editor{min-width:0}
+.manual-unified-review .manual-form-footer{position:sticky;bottom:0;background:var(--surface);padding:9px;border:1px solid var(--line);border-radius:8px;z-index:3}
+@media(max-width:760px){
+ .legacy-shell.clean-workspace .content-inner:has(.manual-unified-review){padding:10px 12px}
+ .wg-review-grid[data-tab=compare]{display:flex;flex-direction:column;gap:10px}
+ .wg-review-grid[data-tab=compare]>.wg-review-side{display:grid;order:0;width:100%}
+ .wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source{display:grid;max-height:none}
+ .wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-matches{display:none}
+ .wg-review-grid[data-tab=compare]>.wg-review-editor{display:grid;order:1;width:100%;box-sizing:border-box}
+ .wg-review-grid[data-tab=compare] .wg-source-paper{max-height:28dvh;overflow:auto}
+ .wg-review-mobile-tabs .wg-segment button{font-size:11px;padding:6px 2px;white-space:nowrap}
+ .manual-unified-review .wg-review-grid:not(.has-side){display:block}
+}
+
+.wg-review-submitted{font-size:12px;min-width:0}.wg-review-submitted summary{cursor:pointer;color:var(--muted)}
+@media(min-width:761px){.wg-review-workbench .wg-review-list,.wg-review-workbench .wg-review-side{position:sticky;top:8px}}
+@media(max-width:760px){.wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source{max-height:50dvh;overflow:auto;overscroll-behavior:contain;box-sizing:border-box}.wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source .persistent-page{max-width:100%}}
+
+/* F4.1.5: compact receipt/preview, shared desktop/mobile theme. */
+.intake-commit-panel{max-width:980px;margin:auto;width:100%;box-sizing:border-box;display:grid;gap:12px;padding:12px}.intake-commit-panel .wg-panel-head{margin:0}.intake-commit-section{display:grid;gap:8px;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-panel);padding:12px}.intake-commit-section h3,.intake-commit-section p{margin:0}.intake-commit-section details{border-top:1px solid var(--line);padding:8px 0}.intake-commit-section summary{cursor:pointer;font-size:13px}.intake-commit-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.intake-commit-stats>div{display:grid;gap:6px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:0}.intake-commit-stats strong{font-size:24px}.intake-commit-stats small,.intake-commit-row small{color:var(--muted)}.intake-commit-row{display:grid;gap:4px;border-top:1px solid var(--line);padding:8px 0;overflow-wrap:anywhere}.intake-commit-panel .manual-form-footer{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;z-index:3}@media(max-width:760px){.intake-commit-panel{padding:6px;gap:10px}.intake-commit-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.intake-commit-section{padding:10px}}

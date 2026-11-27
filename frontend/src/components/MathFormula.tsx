@@ -1,17 +1,12 @@
-import { useMemo } from 'react'
-import katex from 'katex'
+import {useMemo} from 'react'
+import {renderMathHtml,mathError} from './mathRendering'
 import 'katex/dist/katex.min.css'
 
-export function MathFormula({ latex, display = true }: { latex: string; display?: boolean }) {
-  const result = useMemo(() => {
-    if (latex.length > 12000) return { error: '公式过长，请拆分。' }
-    try {
-      return { html: katex.renderToString(latex.replace(/\\lim(?=\s*_)/g, "\\lim\\limits"), { displayMode: display, throwOnError: true,
-        trust: false, strict: 'warn', maxExpand: 1000, maxSize: 20, output: 'htmlAndMathml' }) }
-    } catch {
-      return { error: 'LaTeX 语法或命令有误，请检查原公式。' }
-    }
-  }, [latex, display])
-  if (result.error) return <span className="formula-error" role="status">{result.error}</span>
-  return <span className={display ? 'formula-block' : 'formula-inline'} dangerouslySetInnerHTML={{ __html: result.html ?? '' }} />
+export function MathFormula({latex,display=true}:{latex:string;display?:boolean}){
+ const result=useMemo(()=>{
+  try{return {html:renderMathHtml(latex,display)}}
+  catch{return {error:mathError(latex)}}
+ },[latex,display])
+ if(result.error)return <span className={'formula-error '+(display?'formula-block':'formula-inline')} role="status" title={result.error}><span className="formula-error-label">{result.error}</span><code className="formula-error-source">{latex}</code></span>
+ return <span className={display?'formula-block':'formula-inline'} dangerouslySetInnerHTML={{__html:result.html??''}}/>
 }

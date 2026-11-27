@@ -1,0 +1,50 @@
+/* App shell geometry has one owner. Feature files may define inner layouts.
+   Breakpoints match the existing drawer and compact navigation contracts. */
+.shell.legacy-shell.clean-workspace{
+ display:flex;height:100dvh;min-height:0;overflow:hidden;
+ --shell-sidebar:var(--sidebar-width);
+ --shell-header:var(--header-height);
+ --shell-gutter:24px;
+}
+.shell.legacy-shell.clean-workspace.is-collapsed{--shell-sidebar:var(--sidebar-collapsed-width)}
+.shell.legacy-shell.clean-workspace>.nav{
+ display:flex;flex-direction:column;position:relative;top:auto;height:100%;
+ width:var(--shell-sidebar);flex:0 0 var(--shell-sidebar);min-width:0;
+ padding:14px 10px 10px;overflow:visible;z-index:15;
+}
+.shell.legacy-shell.clean-workspace.is-collapsed>.nav{padding:12px 6px}
+.shell.legacy-shell.clean-workspace>.workspace{
+ display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;padding-bottom:0;
+}
+.shell.legacy-shell.clean-workspace>.workspace>.topbar{
+ position:relative;top:auto;height:auto;flex:0 0 var(--shell-header);min-height:var(--shell-header);
+ padding:0 22px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:12;
+}
+.shell.legacy-shell.clean-workspace.mode-home>.workspace>.mode-topbar{
+ display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+ justify-content:initial;gap:6px;padding:4px 20px;
+}
+.shell.legacy-shell.clean-workspace>.workspace>.main-content{
+ flex:1;min-height:0;min-width:0;width:100%;max-width:none;padding:0;margin:0;
+ overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent;
+}
+/* Low specificity so intentional feature layouts can set their own content width. */
+:where(.shell.legacy-shell.clean-workspace)>.workspace>.main-content>.content-inner{
+ max-width:var(--workspace-max-width);margin:0 auto;padding:18px var(--shell-gutter) 28px;min-width:0;
+}
+@media(min-width:761px) and (max-width:1000px){
+ .shell.legacy-shell.clean-workspace:not(.is-collapsed){--shell-sidebar:var(--sidebar-compact-width)}
+ .shell.legacy-shell.clean-workspace{--shell-gutter:17px}
+}
+@media(max-width:760px){
+ .shell.legacy-shell.clean-workspace{--shell-sidebar:min(var(--sidebar-mobile-width),86vw);--shell-header:var(--header-mobile-height);--shell-gutter:12px}
+ .shell.legacy-shell.clean-workspace>.workspace{width:100%}
+ .shell.legacy-shell.clean-workspace>.nav,.shell.legacy-shell.clean-workspace.is-collapsed>.nav{
+  position:fixed;left:0;top:0;bottom:0;width:var(--shell-sidebar);height:100dvh;flex-basis:auto;
+  padding:13px 10px 12px;transform:translateX(-105%);visibility:hidden;transition:transform .18s,visibility .18s;box-shadow:0 0 24px #0002;
+ }
+ .shell.legacy-shell.clean-workspace>.nav.open{visibility:visible;transform:translateX(0)}
+ .shell.legacy-shell.clean-workspace>.workspace>.topbar{padding:0 12px;gap:8px}
+ .shell.legacy-shell.clean-workspace.mode-home>.workspace>.mode-topbar{--shell-header:var(--header-height);padding:4px 13px;gap:6px}
+ :where(.shell.legacy-shell.clean-workspace)>.workspace>.main-content>.content-inner{padding:12px var(--shell-gutter) calc(16px + env(safe-area-inset-bottom))}
+}

@@ -233,8 +233,10 @@
 @media(max-height:480px){.legacy-shell.clean-workspace .work-chat[data-chat-layout="v3"]>.chat-scroll:not(:has(.work-review-preview)){justify-content:flex-start}.composer-inference-panel{max-height:45dvh}}
 
 /* Icon-only inference picker; keep the send button in its original position. */
-.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference{width:38px;max-width:38px;flex:0 0 38px}
-.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference .chat-model-shortcut{display:grid;place-items:center;width:38px;height:38px;min-height:38px;padding:0;max-width:none;border-radius:50%;color:var(--ink)}
+
+.legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference .chat-model-shortcut{display:flex;align-items:center;justify-content:flex-end;min-height:36px;min-width:0;max-width:100%;padding:5px 9px;gap:5px;border-radius:20px;color:var(--ink)}
+.composer-model-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 .legacy-shell.clean-workspace [data-chat-layout="v3"] .compact-tools>.composer-inference .chat-model-shortcut[aria-expanded=true]{background:var(--selected)}
 .composer-inference-panel{width:min(272px,calc(100vw - 44px));gap:7px;padding:9px;max-height:min(430px,56dvh);overflow:auto}
 .composer-inference-heading{flex:none;color:var(--muted);font-size:12px;font-weight:500}

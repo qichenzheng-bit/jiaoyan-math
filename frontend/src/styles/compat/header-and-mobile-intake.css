@@ -1,0 +1,31 @@
+/* The title itself used the old dark foreground on a navy header. */
+.legacy-shell.clean-workspace .topbar.clean-topbar .breadcrumb strong{color:var(--header-ink);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.legacy-shell.clean-workspace .topbar.clean-topbar .breadcrumb{min-width:0;flex:1}
+.legacy-shell.clean-workspace .topbar.clean-topbar .menu{border-radius:7px}
+.legacy-shell.clean-workspace .doc-work.manual-intake-open .doc-work-heading{margin:0 0 2px;align-items:center;gap:6px}
+.legacy-shell.clean-workspace .doc-work.manual-intake-open .doc-work-heading .text-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--accent)}
+.legacy-shell.clean-workspace .doc-work.manual-intake-open .doc-mode-switch{background:transparent;border:0;color:var(--muted);padding:4px 6px;min-height:34px;font-size:12px}
+.legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-nav{grid-template-columns:repeat(2,minmax(0,1fr));padding:3px;gap:3px}
+.legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-nav button{border:0;min-height:38px;padding:7px 5px;border-radius:5px}
+.legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-nav button[aria-pressed=false]{background:transparent;color:var(--ink)}
+@media(max-width:760px){
+ .legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar){justify-content:flex-start;gap:8px}
+ .legacy-shell.clean-workspace .topbar.clean-topbar .breadcrumb strong{font-size:15px}
+ .legacy-shell.clean-workspace .doc-work.manual-intake-open .doc-work-heading{flex-wrap:nowrap;margin-bottom:0}
+ .legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-header{padding:10px;gap:8px}
+ .legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-title{gap:7px}
+ .legacy-shell.clean-workspace .manual-intake-cards .mobile-doc-title h2{font-size:17px;margin:0}
+ .legacy-shell.clean-workspace .manual-intake-cards .manual-list-row{grid-template-columns:minmax(0,1fr) auto;padding:10px;gap:6px;position:relative}
+ .legacy-shell.clean-workspace .manual-intake-cards .manual-list-row>div{grid-column:1/-1;display:grid;gap:4px}
+ .legacy-shell.clean-workspace .manual-intake-cards .manual-list-row>div>strong,.legacy-shell.clean-workspace .manual-intake-cards .manual-list-row>div>small{padding-right:72px}
+ .legacy-shell.clean-workspace .manual-intake-cards .manual-list-row>button{position:absolute;top:8px;right:8px;border:0;background:transparent;color:var(--accent);min-width:60px;min-height:36px;padding:4px 6px}
+ .legacy-shell.clean-workspace .manual-intake-cards .manual-list-excerpt{padding:8px;margin-top:4px}
+}
+
+/* Desktop and mobile use identical high-contrast titles, not the previous dark foreground. */
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar){display:flex;justify-content:flex-start;align-items:center;gap:10px}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .breadcrumb{flex:1;justify-content:flex-start;color:var(--header-ink)}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .breadcrumb strong{color:var(--header-ink);font-size:15px;font-weight:600}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .topbar-actions{margin-left:auto}
+.legacy-shell.clean-workspace .topbar.clean-topbar:not(.mode-topbar) .mode-left:empty{display:none}
+
