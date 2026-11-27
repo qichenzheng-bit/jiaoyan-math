@@ -9,6 +9,24 @@ from urllib.parse import unquote, urlsplit
 PDF_MAX_BYTES = 200_000_000
 RENDER_ORIGIN = "http://wg-pdf.invalid"
 
+def selected_pages(spec: str, total: int) -> list[int]:
+    """Return unique zero-based physical page indices in document order."""
+    import re
+    if not spec.strip():
+        return list(range(total))
+    if len(spec)>2000 or not re.fullmatch(r"[0-9,，、\s-]+", spec):
+        raise ValueError("页码范围格式无效，例如 1-3,5")
+    result=set()
+    for part in re.split(r"[,，、]",spec):
+        match=re.fullmatch(r"\s*(\d{1,5})(?:\s*-\s*(\d{1,5}))?\s*",part)
+        if not match:
+            raise ValueError("页码范围格式无效，例如 1-3,5")
+        first=int(match[1]);last=int(match[2] or first)
+        if not 1<=first<=last<=total:
+            raise ValueError(f"页码超出范围，当前共 {total} 页")
+        result.update(range(first-1,last))
+    return sorted(result)
+
 def launch_options():
     # Deployment may select an administrator-installed Chromium. Never accept a
     # browser executable or external URL from an API request.
@@ -21,7 +39,7 @@ def launch_options():
 
 def render_pdf(payload_path: Path, images: dict, output: Path, stage, cancelled, dist: Path | None = None):
     from playwright.sync_api import sync_playwright
-    from pypdf import PdfReader
+    from pypdf import PdfReader, PdfWriter
     dist = (dist or (Path(__file__).resolve().parents[3] / "frontend" / "dist")).resolve()
     index = dist / "index.html"
     assets = (dist / "assets").resolve()
@@ -72,6 +90,8 @@ def render_pdf(payload_path: Path, images: dict, output: Path, stage, cancelled,
                 raise ValueError("未生成可导出的页面")
             if cancelled():
                 return None
+            request=json.loads(payload_path.read_text(encoding="utf-8"))
+            indices=selected_pages(request.get("page_ranges",""),pages)
             stage("生成 PDF")
             page.pdf(path=str(output), prefer_css_page_size=True, print_background=True,
                      display_header_footer=False, tagged=True, outline=True)
@@ -87,6 +107,21 @@ def render_pdf(payload_path: Path, images: dict, output: Path, stage, cancelled,
                 reader = PdfReader(stream)
                 if len(reader.pages) != pages:
                     raise ValueError("PDF 页数与分页预览不一致，已阻止下载")
-            return {"pages": pages, "bytes": output.stat().st_size}
+            if len(indices)!=pages:
+                stage("提取指定物理页码")
+                subset=output.with_suffix(".selected.pdf")
+                try:
+                    with output.open("rb") as stream:
+                        writer=PdfWriter()
+                        writer.append(PdfReader(stream),pages=indices,import_outline=True)
+                        with subset.open("wb") as handle:
+                            writer.write(handle)
+                        writer.close()
+                    if len(PdfReader(subset).pages)!=len(indices):
+                        raise ValueError("指定页码提取失败")
+                    subset.replace(output)
+                finally:
+                    subset.unlink(missing_ok=True)
+            return {"pages": len(indices), "bytes": output.stat().st_size, "total_pages":pages}
         finally:
             browser.close()
