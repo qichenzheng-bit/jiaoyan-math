@@ -265,3 +265,60 @@ def read_document_templates(db:Session=Depends(get_db),user:User=Depends(current
 @router.put("/document-templates",dependencies=[Depends(require_origin)])
 def update_document_templates(body:TemplateUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
     return _layout_save(db,user,_layout_key(user,"templates","all"),body.revision,[t.model_dump(exclude_none=True) for t in body.value],[])
+
+class DocumentLocalEdit(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    title: str|None=Field(default=None,max_length=200)
+    content: str|None=Field(default=None,max_length=50000)
+    answer: str|None=Field(default=None,max_length=20000)
+    solution: str|None=Field(default=None,max_length=50000)
+    analysis: str|None=Field(default=None,max_length=50000)
+    proof: str|None=Field(default=None,max_length=50000)
+
+class SourceDraftValue(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    export_token: str=Field(pattern=r"^[a-f0-9]{64}$")
+    selected_uids: list[str]|None=Field(default=None,max_length=5100)
+    overrides: dict[str,DocumentLocalEdit]=Field(default_factory=dict,max_length=5100)
+    stem: bool=False
+    answerOnly: bool=False
+    filename: str=Field(default="",max_length=200)
+
+class SourceDraftUpdate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revision: int=Field(ge=0)
+    value: SourceDraftValue
+
+@router.get("/source-layout-draft/{identity}")
+def read_source_layout_draft(identity:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,"source",identity)
+    return _layout_record(db,_layout_key(user,"source-draft",identity))
+
+@router.put("/source-layout-draft/{identity}",dependencies=[Depends(require_origin)])
+def update_source_layout_draft(identity:str,body:SourceDraftUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.api.documents import source_export,check_complete_export_size
+    snapshot=source_export(identity,db)
+    if snapshot["export_token"]!=body.value.export_token:
+        raise HTTPException(409,"来源内容已更新，请重新检查排版")
+    valid={b["uid"] for b in snapshot["blocks"]}
+    selected=body.value.selected_uids
+    if (selected is not None and (len(selected)!=len(set(selected)) or not set(selected)<=valid)) or not set(body.value.overrides)<=valid:
+        raise HTTPException(422,"草稿含有失效内容")
+    value=body.value.model_dump(exclude_none=True)
+    check_complete_export_size(len(json.dumps(value,ensure_ascii=False).encode("utf-8")))
+    return _layout_save(db,user,_layout_key(user,"source-draft",identity),body.revision,value)
+
+@router.delete("/source-layout-draft/{identity}",dependencies=[Depends(require_origin)])
+def delete_source_layout_draft(identity:str,revision:int,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,"source",identity)
+    db.scalar(select(User).where(User.id==user.id).with_for_update())
+    key=_layout_key(user,"source-draft",identity)
+    old=_layout_record(db,key)
+    if old["revision"]!=revision:
+        raise HTTPException(409,"草稿已被其他设备更新")
+    item=db.get(Setting,key)
+    if item:
+        db.delete(item)
+        audit(db,"document.layout.draft.delete",user.id)
+        db.commit()
+    return {"revision":0,"value":None,"history":[]}
