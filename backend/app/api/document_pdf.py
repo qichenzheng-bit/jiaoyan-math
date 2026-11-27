@@ -1,7 +1,10 @@
 """Private, bounded PDF jobs. Rendering uses only validated server document snapshots."""
 import json
 import logging
-import tempfile
+import asyncio
+import os
+import re
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.api.documents import source_export, export_document, check_complete_export_size
 from app.api.settings import DocumentLayout
 from app.core.db import get_db
+from app.core.config import settings
 from app.core.security import current_user, require_origin
 from app.models import User, StoredFile
 from app.services import storage
@@ -29,6 +33,8 @@ logger = logging.getLogger(__name__)
 lock = threading.RLock()
 pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="wg-pdf")
 jobs = {}
+loaded_root: Path | None = None
+queue_lock = None
 TERMINAL = {"ready", "failed", "cancelled"}
 TTL = 6 * 3600
 
@@ -73,7 +79,7 @@ class Job:
     scope: str
     identity: str
     filename: str
-    directory: tempfile.TemporaryDirectory
+    directory: Path
     images: dict
     state: str = "queued"
     stage: str = "等待生成"
@@ -82,32 +88,113 @@ class Job:
     bytes: int = 0
     total_pages: int = 0
     page_ranges: str = ""
-    changed: float = field(default_factory=time.monotonic)
+    changed: float = field(default_factory=time.time)
     stop: threading.Event = field(default_factory=threading.Event)
 
     @property
     def output(self):
-        return Path(self.directory.name) / "result.pdf"
+        return self.directory / "result.pdf"
 
     @property
     def payload(self):
-        return Path(self.directory.name) / "payload.json"
+        return self.directory / "payload.json"
 
     def view(self):
         return {"id": self.id, "state": self.state, "stage": self.stage, "detail": self.detail,
                 "filename": self.filename, "pages": self.pages, "bytes": self.bytes, "total_pages": self.total_pages, "page_ranges":self.page_ranges}
 
+def persist(job):
+    """Only server-created files and validated snapshots enter the private queue."""
+    images={key:[str(Path(value[0]).relative_to(job.directory)),value[1]] for key,value in job.images.items()}
+    value={**job.view(),"user_id":job.user_id,"scope":job.scope,"identity":job.identity,
+           "changed":job.changed,"images":images,"cancel_requested":job.stop.is_set()}
+    temporary=job.directory/".job.tmp"
+    with temporary.open("w",encoding="utf-8") as handle:
+        json.dump(value,handle,ensure_ascii=False)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary,job.directory/"job.json")
+
+def ensure_loaded():
+    """One queue owner per storage directory, including across server restarts."""
+    global loaded_root,queue_lock
+    root=storage.root()/".pdf-jobs"
+    if loaded_root==root:return root
+    if loaded_root is not None:
+        raise HTTPException(503,"PDF 存储配置改变，请重启服务")
+    root.mkdir(mode=0o700,exist_ok=True)
+    if root.is_symlink() or not root.is_dir():
+        raise HTTPException(503,"PDF 任务存储无效")
+    import fcntl
+    guard=(root/".lock").open("a")
+    try:fcntl.flock(guard,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except OSError:
+        guard.close()
+        raise HTTPException(503,"PDF 队列已被另一服务进程占用")
+    queue_lock=guard;loaded_root=root
+    pending=[]
+    for folder in root.iterdir():
+        if not folder.is_dir() or folder.is_symlink() or not re.fullmatch(r"[0-9a-f-]{36}",folder.name):continue
+        try:
+            meta=json.loads((folder/"job.json").read_text(encoding="utf-8"))
+            if meta["id"]!=folder.name:raise ValueError("invalid job ID")
+            if meta["state"] not in TERMINAL|{"queued","running"}:raise ValueError("invalid state")
+            if meta["state"] in TERMINAL and time.time()-meta["changed"]>TTL:
+                shutil.rmtree(folder);continue
+            images={}
+            if meta["state"] not in TERMINAL:
+                for key,(relative,media) in meta["images"].items():
+                    path=(folder/relative).resolve()
+                    if not path.is_relative_to(folder.resolve()) or not path.is_file() or media not in storage.IMAGE_TYPES:
+                        raise ValueError("invalid staged image")
+                    images[key]=(str(path),media)
+            job=Job(meta["id"],meta["user_id"],meta["scope"],meta["identity"],meta["filename"],folder,images,
+                state=meta["state"],stage=meta["stage"],detail=meta.get("detail",""),pages=meta.get("pages",0),
+                bytes=meta.get("bytes",0),total_pages=meta.get("total_pages",0),page_ranges=meta.get("page_ranges",""),changed=meta["changed"])
+            jobs[job.id]=job
+            if job.state not in TERMINAL:
+                if meta.get("cancel_requested"):
+                    job.stop.set()
+                if not job.payload.is_file():
+                    change(job,state="failed",stage="恢复失败",detail="排版快照缺失，请重新生成")
+                else:
+                    job.output.unlink(missing_ok=True)
+                    change(job,state="queued",stage="服务重启后等待恢复")
+                    pending.append(job)
+            elif job.state=="ready" and not job.output.is_file():
+                change(job,state="failed",stage="恢复失败",detail="PDF 成品已缺失")
+        except Exception:
+            logger.warning("Invalid PDF job record: %s",folder.name)
+            # Keep corrupt records private for administrator recovery, do not execute.
+    for job in sorted(pending,key=lambda item:item.changed):pool.submit(run,job)
+    return root
+
 def cleanup():
     # Caller holds lock. Never remove data from a running render.
-    stale = [key for key, job in jobs.items() if job.state in TERMINAL and time.monotonic() - job.changed > TTL]
+    root=ensure_loaded()
+    stale=[key for key,job in jobs.items() if job.state in TERMINAL and time.time()-job.changed>TTL]
     for key in stale:
-        jobs.pop(key).directory.cleanup()
+        shutil.rmtree(jobs.pop(key).directory,ignore_errors=True)
+    return root
+
+async def pdf_maintenance_loop():
+    while True:
+        try:
+            if settings.storage_root:
+                def maintain():
+                    with lock:cleanup()
+                await asyncio.to_thread(maintain)
+        except Exception as exc:
+            logger.warning("PDF maintenance unavailable: %s",type(exc).__name__)
+        await asyncio.sleep(60)
+
 
 def change(job, **fields):
     with lock:
         for key, value in fields.items():
             setattr(job, key, value)
-        job.changed = time.monotonic()
+        job.changed = time.time()
+        persist(job)
 
 def run(job):
     try:
@@ -130,8 +217,11 @@ def run(job):
         job.output.unlink(missing_ok=True)
         change(job, state="failed", stage="生成失败", detail="PDF 渲染环境或文件异常，请重试或联系管理员检查浏览器服务。")
     finally:
-        job.payload.unlink(missing_ok=True)
-        job.images.clear()
+        with lock:
+            job.payload.unlink(missing_ok=True)
+            job.images.clear()
+            shutil.rmtree(job.directory/'images',ignore_errors=True)
+            if job.id in jobs:persist(job)
 
 def get_job(user, job_id):
     cleanup()
@@ -198,21 +288,32 @@ def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
     check_complete_export_size(len(raw))
     filename = storage.safe_name(body.filename.strip().removesuffix(".pdf") + ".pdf")
     with lock:
-        cleanup()
+        root=cleanup()
         active = [job for job in jobs.values() if job.state not in TERMINAL]
         if len(active) >= 2:
             raise HTTPException(429, "PDF 生成队列已满，请稍后重试")
         if len(jobs) >= 12:
             raise HTTPException(429, "请先清理已生成的临时 PDF")
-        folder = tempfile.TemporaryDirectory(prefix="wg-layout-pdf-")
-        job = Job(str(uuid4()), user.id, scope, identity, filename, folder, images, page_ranges=body.page_ranges)
+        identifier=str(uuid4())
+        folder=root/identifier
+        folder.mkdir(mode=0o700)
+        job=Job(identifier,user.id,scope,identity,filename,folder,{},page_ranges=body.page_ranges)
         try:
-            job.payload.write_bytes(raw)
-            jobs[job.id] = job
-            pool.submit(run, job)
+            (folder/"images").mkdir(mode=0o700)
+            for i,(key,(path,media)) in enumerate(images.items()):
+                staged=folder/"images"/str(i)
+                # Same private storage filesystem: keep immutable image bytes available
+                # even when the original is archived or physically purged after submission.
+                os.link(path,staged)
+                job.images[key]=(str(staged),media)
+            with job.payload.open("wb") as handle:
+                handle.write(raw);handle.flush();os.fsync(handle.fileno())
+            persist(job)
+            jobs[job.id]=job
+            pool.submit(run,job)
         except Exception:
-            jobs.pop(job.id, None)
-            folder.cleanup()
+            jobs.pop(job.id,None)
+            shutil.rmtree(folder,ignore_errors=True)
             raise
         return job.view()
 
@@ -243,7 +344,7 @@ def delete_pdf(job_id: str, user: User = Depends(current_user)):
         if job.state not in TERMINAL:
             raise HTTPException(409, "请先取消生成任务")
         jobs.pop(job.id)
-        job.directory.cleanup()
+        shutil.rmtree(job.directory)
         return {"deleted": True}
 
 @router.get("/jobs/{job_id}/file")
