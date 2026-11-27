@@ -619,7 +619,7 @@ with sync_playwright() as p:
                     page.wait_for_url("**/intake")
                     page.locator(".manual-new").wait_for()
                     expect(page.locator(".project-hub")).to_have_count(0)
-                    assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(48, 69, 58)"
+                    assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(52, 54, 56)"
                     visit(page,"/project/intake",".manual-new")
                     page.wait_for_url("**/intake")
                     page.locator("#workspace-navigation").get_by_role("link",name="教学制作",exact=True).click()
@@ -957,7 +957,17 @@ with sync_playwright() as p:
             expect(page.locator(".agent-manual")).to_have_count(0)
             page.get_by_role("button",name="资料与识别").first.click()
             expect(page.locator(".agent-manual")).to_be_visible()
+            expect(page.locator(".agent-workspace-body")).to_have_attribute("data-panel-open","true")
+            expect(page.locator(".agent-workspace-panel")).to_be_visible()
+            if GROUP=="mobile":
+                assert page.locator(".agent-workspace-panel").evaluate("(el)=>getComputedStyle(el).position")=="absolute"
+            else:
+                chat_box=page.locator(".agent-chat-column").bounding_box()
+                panel_box=page.locator(".agent-workspace-panel").bounding_box()
+                assert panel_box["x"]>chat_box["x"]+chat_box["width"]-2
+            capture(page,path=str(OUT/("31-agent-work-split-mobile.png" if GROUP=="mobile" else "31-agent-work-split-desktop.png")),full_page=False)
             page.locator(".agent-manual").get_by_role("button",name="收起",exact=True).click()
+            expect(page.locator(".agent-workspace-panel")).to_have_count(0)
             page.get_by_role("button",name="添加资料",exact=True).click()
             expect(page.get_by_role("dialog",name="添加资料")).to_be_visible()
             page.keyboard.press("Escape")
@@ -1186,7 +1196,7 @@ with sync_playwright() as p:
             # Phone-first intake: edit formulas in place, navigate without committing, save all at once.
             page.set_viewport_size({"width":393,"height":873})
             visit(page,"/intake?doc=ai-demo",".manual-list-row")
-            assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(48, 69, 58)"
+            assert page.locator(".topbar .breadcrumb strong").evaluate("el=>getComputedStyle(el).color") == "rgb(52, 54, 56)"
             assert len(page.locator(".mobile-doc-nav").evaluate("el=>getComputedStyle(el).gridTemplateColumns.split(' ')")) == 2
             page.get_by_role("button",name="编辑第 1 个条目",exact=True).click()
             page.locator(".mobile-doc-card").wait_for()
@@ -1342,12 +1352,12 @@ with sync_playwright() as p:
             page.set_viewport_size({"width":1600,"height":900})
             # Theme and mobile smoke checks use the same compiled application.
             visit(page,"/",".chat-home-recent")
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#e8eee8"
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim().toLowerCase()") == "#d7e2d9"
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim().toLowerCase()") == "#f1f5f0"
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase()") == "#52765f"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#f8f7f3"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim().toLowerCase()") == "#efede7"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim().toLowerCase()") == "#ffffff"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase()") == "#80652f"
             page.evaluate("document.documentElement.dataset.theme='dark'")
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#1d2733"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#242424"
             capture(page,path=str(OUT/"09-home-dark.png"),full_page=False)
             page.evaluate("document.documentElement.dataset.theme='light'")
             page.set_viewport_size({"width":393,"height":873})

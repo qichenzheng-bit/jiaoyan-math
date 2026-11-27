@@ -18,16 +18,39 @@ M="{http://schemas.openxmlformats.org/officeDocument/2006/math}"
 MAX_TEXT=24000
 
 def capabilities():
-    limiter=bool(shutil.which("prlimit"))
+    commands={name:shutil.which(name) for name in ("prlimit","tesseract","pdftotext","pdftoppm")}
     languages=[]
-    if limiter and shutil.which("tesseract"):
+    if commands["tesseract"]:
         try:
-            result=subprocess.run([shutil.which("prlimit"),"--as=536870912","--cpu=3","--",shutil.which("tesseract"),"--list-langs"],capture_output=True,timeout=5,check=False)
-            if result.returncode==0:languages=result.stdout.decode("utf-8",errors="replace").splitlines()
-        except (OSError,subprocess.TimeoutExpired):pass
-    ocr="eng" in languages and "chi_sim" in languages
-    return {"text":True,"docx":True,"pdf_text":bool(limiter and shutil.which("pdftotext")),
-            "image_ocr":ocr,"pdf_ocr":bool(ocr and shutil.which("pdftoppm"))}
+            result=subprocess.run([commands["tesseract"],"--list-langs"],capture_output=True,timeout=5,check=False)
+            if result.returncode==0:
+                raw=result.stdout.decode("utf-8",errors="replace") if isinstance(result.stdout,bytes) else str(result.stdout or "")
+                languages=[line.strip() for line in raw.splitlines()
+                           if line.strip() and not line.lstrip().lower().startswith("list of available languages")]
+        except (OSError,subprocess.SubprocessError):
+            languages=[]
+    image_missing=[]
+    if not commands["prlimit"]:image_missing.append("util-linux（prlimit）")
+    if not commands["tesseract"]:image_missing.append("tesseract-ocr")
+    elif "chi_sim" not in languages:image_missing.append("tesseract-ocr-chi-sim（中文语言包）")
+    if commands["tesseract"] and "eng" not in languages:image_missing.append("tesseract-ocr-eng（英文语言包）")
+    pdf_missing=list(image_missing)
+    if not commands["pdftoppm"]:pdf_missing.append("poppler-utils（pdftoppm）")
+    pdf_text_missing=[]
+    if not commands["prlimit"]:pdf_text_missing.append("util-linux（prlimit）")
+    if not commands["pdftotext"]:pdf_text_missing.append("poppler-utils（pdftotext）")
+    return {
+        "text":True,"docx":True,
+        "pdf_text":not pdf_text_missing,
+        "image_ocr":not image_missing,
+        "pdf_ocr":not pdf_missing,
+        "commands":{name:bool(path) for name,path in commands.items()},
+        "languages":languages,
+        "image_ocr_missing":image_missing,
+        "pdf_ocr_missing":pdf_missing,
+        "pdf_text_missing":pdf_text_missing,
+        "repair_command":"sudo bash ~/jiaoyan-app/current/deploy/repair-ocr.sh",
+    }
 
 def latex(node,depth=0):
     if depth>32:raise ValueError("nested formula")
@@ -120,8 +143,11 @@ def bounded_command(args,timeout,output=None):
 
 def ocr(path,pdf,page):
     cap=capabilities()
-    if not cap["pdf_ocr" if pdf else "image_ocr"]:
-        raise HTTPException(503,"服务器缺少OCR组件或中英文字库；可先手工粘贴原文")
+    capability="pdf_ocr" if pdf else "image_ocr"
+    if not cap.get(capability):
+        missing=cap.get(capability+"_missing") or ["OCR 组件或语言包"]
+        label="扫描版 PDF OCR" if pdf else "图片 OCR"
+        raise HTTPException(503,f"{label}暂不可用，缺少：{'、'.join(missing)}。修复命令：sudo bash ~/jiaoyan-app/current/deploy/repair-ocr.sh")
     with tempfile.TemporaryDirectory(prefix="jiaoyan-ocr-") as tmp:
         if pdf:
             prefix=str(Path(tmp)/"page")
