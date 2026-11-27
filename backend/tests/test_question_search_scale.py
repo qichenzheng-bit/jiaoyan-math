@@ -54,3 +54,41 @@ def test_indexed_search_100k():
         print(f"BANK_FILTER_100K rows={total} median_ms={median(times)*1000:.1f} max_ms={max(times)*1000:.1f}")
         assert max(times)<20
         db.rollback()
+
+@pytest.mark.skipif(os.environ.get("RUN_POSTGRES_INTEGRATION")!="1",reason="isolated PostgreSQL only")
+def test_question_bank_pressure_500k():
+    """Synthetic SQL list and filter pressure; not a claim about production hardware."""
+    assert engine().url.database=="jiaoyan_ci"
+    from alembic import command
+    from alembic.config import Config
+    from inspect import signature
+    from fastapi.params import Query
+    from app.api.resources import listing
+    command.upgrade(Config("alembic.ini"),"head")
+    prefix=uuid4().hex[:7]
+    with session_factory()() as db:
+        previous=0
+        for n in (1000,10000,100000,500000):
+            db.execute(text("""
+              INSERT INTO teaching_resources(id,code,kind,title,subject,content,answer,solution,tags,exams,
+                fingerprint,stem_key,search_features,bank_facts,archived,created_at,updated_at,question_type,difficulty)
+              SELECT :prefix||g::text,'Z'||:prefix||lpad(g::text,7,'0'),'question','压力测试题目',
+                CASE WHEN g%3=0 THEN '高等数学' ELSE '线性代数' END,
+                '求参数为 '||g::text||' 的函数极限 $\\lim_{x\\to0}x$','0','直接代入法','[]'::json,'[]'::json,
+                md5(:prefix||g::text),md5(:prefix||g::text),'{}'::jsonb,
+                CASE WHEN g%1000=0 THEN '{"answer_complete":true,"solution_complete":true,"ambiguous":false,"method:泰勒展开":true,"single":true}'::jsonb
+                  ELSE '{"answer_complete":true,"solution_complete":true,"ambiguous":false,"single":true}'::jsonb END,
+                false,g,g,'综合题','简单' FROM generate_series(:start,:end) g
+            """),{"prefix":prefix,"start":previous+1,"end":n})
+            previous=n
+            db.execute(text("ANALYZE teaching_resources"))
+            defaults={name:parameter.default.default for name,parameter in signature(listing).parameters.items() if isinstance(parameter.default,Query)}
+            defaults.update(kind="question",bank_summary=True,compact=True,limit=20,db=db)
+            ordinary=[];combined=[]
+            for _ in range(3):
+                t=perf_counter();a=listing(**defaults);ordinary.append(perf_counter()-t)
+                t=perf_counter();b=listing(**{**defaults,"subject":"高等数学","method_name":"泰勒公式","integrity":"complete"});combined.append(perf_counter()-t)
+                assert a["total"]>=n and len(a["items"])==20 and b["total"]>=n//3000
+            print(f"BANK_PRESSURE rows={n} list_median_ms={median(ordinary)*1000:.1f} filter_median_ms={median(combined)*1000:.1f}")
+            assert max(ordinary+combined)<20,"synthetic database query exceeded 20 seconds"
+        db.rollback()

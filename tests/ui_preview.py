@@ -28,6 +28,8 @@ registration_preview={"revision":1,"items":[{"uid":"ai-q1","candidates":[],"know
 manual_saved={}
 manual_approved={}
 manual_runs={}
+bank_cart={"revision":0,"ids":[]}
+bank_bulk={}
 video_test_enabled=False
 video_jobs=[]
 video_demo={"id":"video-preview","resource_id":items[0]["id"],"resource_revision":1,"source_snapshot":{"title":items[0]["title"],"problem":items[0]["content"],"answer":items[0]["answer"],"reference_solution":items[0]["solution"],"fps":60},"engine_id":"a"*32,"work_id":None,"created_at":1}
@@ -172,6 +174,20 @@ def answer(route):
         return
     if p=="/intelligence/import" and route.request.method=="POST":
         result={"import_id":"import-demo","file_id":"file-demo","file_name":"demo.tex","text":r"求 $\frac{1}{x}$ 的导数。","method":"text","start":1,"end":1,"total_units":None,"warnings":[]}
+    if p=="/bank/cart":
+        if route.request.method=="PUT":
+            v=route.request.post_data_json
+            assert v["revision"]==bank_cart["revision"]
+            bank_cart.update(revision=bank_cart["revision"]+1,ids=v["ids"])
+        result={**bank_cart,"items":[r for ident in bank_cart["ids"] for r in items if r["id"]==ident]}
+    if p=="/bank/bulk":result=list(bank_bulk.values())
+    if p=="/bank/bulk/preview":
+        v=route.request.post_data_json
+        plan={"id":"bulk-demo","state":"preview","next":0,"rows":[{**r,"code":next(x["code"] for x in items if x["id"]==r["id"]),"state":"ready","reason":""} for r in v["items"]]}
+        bank_bulk[plan["id"]]=plan;result=plan
+    if p=="/bank/bulk/bulk-demo":result=bank_bulk["bulk-demo"]
+    if p=="/bank/bulk/bulk-demo/step":
+        plan=bank_bulk["bulk-demo"];plan.update(state="completed",next=len(plan["rows"]));plan["rows"]=[{**r,"state":"done"} for r in plan["rows"]];result=plan
     if p=="/resources":
         rows=[source] if q.get("kind")==["source"] else items
         if q.get("bank_summary")==["true"]:rows=[{**r,"bank_summary":{"source_count":2 if i==0 else 1,"source_title":source["title"],"method_count":2 if i==0 else 1,"has_answer":bool(r.get("answer")),"has_solution":bool(r.get("solution"))}} for i,r in enumerate(rows)]
@@ -638,6 +654,19 @@ with sync_playwright() as p:
                     assert page.locator(".resource-hover-preview details[open]").count()==0
                     page.keyboard.press("Escape")
                     expect(page.get_by_role("dialog",name="资源悬停预览")).to_have_count(0)
+                    page.get_by_role("checkbox",name="选择 QDEMO0001").check()
+                    page.get_by_role("button",name="批量操作",exact=True).click()
+                    page.get_by_role("button",name="预览调整难度",exact=True).click()
+                    expect(page.locator(".bank-bulk-counts")).to_contain_text("可执行 1")
+                    page.get_by_role("button",name="返回题库",exact=False).click()
+                    page.get_by_role("button",name="取消选择",exact=True).click()
+                    page.get_by_role("checkbox",name="选择 QDEMO0001").check()
+                    page.get_by_role("button",name="加入选题清单",exact=True).first.click()
+                    expect(page.locator(".bank-cart-item")).to_have_count(1)
+                    page.get_by_role("button",name="返回题库",exact=False).click()
+                    page.get_by_role("button",name="选题清单",exact=True).click()
+                    expect(page.locator(".bank-cart-item")).to_have_count(1)
+                    page.get_by_role("button",name="返回题库",exact=False).click()
                 if name=="25-word-ai":
                     page.locator(".manual-word-work").wait_for()
                     expect(page.locator(".manual-word-matches")).to_have_count(0)

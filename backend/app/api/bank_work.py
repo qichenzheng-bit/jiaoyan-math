@@ -105,6 +105,9 @@ def occurrence_change(id:str,body:OccurrenceChange,db:Session=Depends(get_db),us
     before=bank.link_view(db,r);rows=list(link.occurrences or [])
     idx=next((i for i,o in enumerate(rows) if o.get("document_id")==body.document_id and o.get("item_uid")==body.item_uid),None)
     if body.action=="add":
+        if not (body.original_question_number.strip() or body.page_start or body.chapter.strip()):raise HTTPException(422,"请至少填写一个真实出现位置")
+        if not rows and (link.original_question_number or link.page_start or link.chapter):
+            rows.append({"document_id":"","item_uid":str(uuid4()),"original_question_number":link.original_question_number,"page_start":link.page_start,"page_end":link.page_end,"chapter":link.chapter})
         item={"document_id":"","item_uid":str(uuid4())}
     else:
         if idx is None:raise HTTPException(409,"出现位置已变化")
@@ -115,7 +118,9 @@ def occurrence_change(id:str,body:OccurrenceChange,db:Session=Depends(get_db),us
         if body.action=="add":
             if any(all(o.get(k)==item.get(k) for k in ("original_question_number","page_start","page_end","chapter")) for o in rows):raise HTTPException(409,"该位置已存在")
             rows.append(item)
-        else:rows[idx]=item
+        else:
+            if any(j!=idx and all(o.get(k)==item.get(k) for k in ("original_question_number","page_start","page_end","chapter")) for j,o in enumerate(rows)):raise HTTPException(409,"该位置已存在")
+            rows[idx]=item
     link.occurrences=rows
     first=rows[0] if rows else {}
     for k in ("original_question_number","chapter"):setattr(link,k,first.get(k,""))
@@ -264,6 +269,15 @@ def bulk_step(id:str,body:BulkStep,db:Session=Depends(get_db),user:User=Depends(
         except (HTTPException,SQLAlchemyError) as e:item.update(state="failed",reason=str(e.detail)[:300] if isinstance(e,HTTPException) else "数据库写入失败")
     plan["next"]+=len(batch);plan["state"]="completed" if plan["next"]>=len(plan["rows"]) else "running"
     store(db,"bank.bulk."+id,plan);audit(db,"bank.bulk.step",user.id);db.commit();return bulk_view(plan)
+@router.post("/bulk/{id}/retry",dependencies=write)
+def bulk_retry(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);previous=bulk_get(db,id,user)
+    if previous["state"] not in ("completed","cancelled"):raise HTTPException(409,"请先完成或取消旧任务")
+    payload=dict(previous["body"]);payload["items"]=[{"id":r["id"],"revision":r["revision"]} for r in previous["rows"] if r["state"]=="failed"]
+    if not payload["items"]:raise HTTPException(422,"没有失败条目")
+    # Stale versions remain blocked; never rebase a previous confirmation automatically.
+    return preview_bulk(BulkPlan.model_validate(payload),db,user)
+
 @router.post("/bulk/{id}/cancel",dependencies=write)
 def bulk_cancel(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);p=bulk_get(db,id,user)

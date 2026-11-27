@@ -44,7 +44,7 @@ export default function Resources({intake=false,initialKind='question',editResou
  const listCurrent=items.find(r=>r.id===selected)??items[0]
  const questionBank=!intake&&kind==='question'
  const [detail,setDetail]=useState<Resource>(),[detailError,setDetailError]=useState('')
- const current=questionBank?(detail?.id===listCurrent?.id&&detail?.revision===listCurrent?.revision?detail:undefined):listCurrent
+ const current=questionBank?(detail?.id===listCurrent?.id&&Number(detail?.revision??0)>=Number(listCurrent?.revision??0)?detail:undefined):listCurrent
  useEffect(()=>{if(!questionBank||!listCurrent)return;const c=new AbortController();setDetailError('');api<Resource>('/resources/'+encodeURIComponent(listCurrent.id),{signal:c.signal}).then(r=>{if(!c.signal.aborted)setDetail({...r,bank_summary:listCurrent.bank_summary})}).catch(e=>{if(!c.signal.aborted)setDetailError(e.message)});return()=>c.abort()},[questionBank,listCurrent?.id,listCurrent?.revision])
  useEffect(()=>{if(questionBank&&!archived)try{sessionStorage.setItem('wg-question-bank-session',JSON.stringify({q,subject,chapter,type,difficulty,sourceFilter,knowledgeFilter,sourceChoices,pointChoices,related,page,pageSize,filters:bankFilters} satisfies BankSession))}catch{/* optional session persistence */}},[questionBank,archived,q,subject,chapter,type,difficulty,sourceFilter,knowledgeFilter,sourceChoices,pointChoices,related,page,pageSize,bankFilters])
  useEffect(()=>{if(!questionBank)return;const s=params.get('source_id'),k=params.get('knowledge_id');if(s!==null){setSourceFilter(s);setSourceChoices([]);setPage(0);setBankFilters({...emptyBankFilters,sort:'number'})}if(k!==null){setKnowledgeFilter(k);setPointChoices([]);setPage(0)}},[params,questionBank])

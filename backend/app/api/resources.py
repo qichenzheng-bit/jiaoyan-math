@@ -387,6 +387,8 @@ def set_archived(db,row,value,user):
             raise HTTPException(409,"来源已被文档引用，请先解除绑定")
         if db.scalar(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==row.id).limit(1)):
             raise HTTPException(409,"来源仍被资源引用，请先解除关联")
+    if not value and row.kind=="question" and any(matching.same_question(r.content,row.content) for r in db.scalars(select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.archived==False,TeachingResource.id!=row.id,TeachingResource.stem_key==row.stem_key))):
+        raise HTTPException(409,"有效题库已有相同题干，请先核对")
     row.archived=value;row.revision+=1;row.updated_at=now();snapshot(db,row)
     audit(db,"resource.archive" if value else "resource.restore",user.id);db.commit()
     return view(row)
@@ -514,7 +516,18 @@ class SourceLinks(BaseModel):
     revision:int=Field(ge=1)
     items:list[SourceLink]=Field(max_length=100)
 def link_view(db,row):
-    return {"revision":row.sources_revision,"items":[{**{k:getattr(l,k) for k in SourceLink.model_fields},"source_title":db.get(TeachingResource,l.source_id).title,"occurrences":l.occurrences or []} for l in links(db,row)]}
+    linked=links(db,row)
+    sources={s.id:s for s in db.scalars(select(TeachingResource).where(TeachingResource.id.in_({l.source_id for l in linked})))}
+    items=[];positions=set()
+    for l in linked:
+        s=sources[l.source_id]
+        occurrences=l.occurrences or []
+        for o in occurrences:
+            loc=tuple(o.get(k) or "" for k in ("original_question_number","page_start","page_end","chapter"))
+            positions.add((s.id,*loc) if loc[0] or loc[1] else (s.id,*loc,o.get("document_id"),o.get("item_uid")))
+        if not occurrences and (l.original_question_number or l.page_start or l.chapter):positions.add((s.id,l.original_question_number,l.page_start or "",l.page_end or "",l.chapter))
+        items.append({**{k:getattr(l,k) for k in SourceLink.model_fields},"source_title":s.title,"source_type":s.source_type,"cohort_year":s.cohort_year,"edition":s.edition,"exam_type":s.exam_type,"source_archived":s.archived,"occurrences":occurrences})
+    return {"revision":row.sources_revision,"items":items,"source_count":len(sources),"occurrence_count":len(positions)}
 
 @router.get("/{id}/sources")
 def list_sources(id:str,db:Session=Depends(get_db)): return link_view(db,existing(db,id))

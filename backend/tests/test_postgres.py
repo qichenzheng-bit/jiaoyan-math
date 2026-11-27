@@ -415,11 +415,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert [b["resource_id"] for b in paper["blocks"]]==c["ids"]
         assert paper["blocks"][0]["snapshot"]["difficulty"]=="困难"
         assert client.get("/api/bank/sources/"+source_a["id"]+"/questions").json()["question_count"]==1
+        loc=client.get("/api/resources/"+seed["id"]+"/sources").json()
+        loc_body={"revision":loc["revision"],"source_id":source_a["id"],"role":"original","action":"add","original_question_number":"11","page_start":3,"page_end":3,"chapter":"例题"}
+        loc_added=client.post("/api/bank/questions/"+seed["id"]+"/occurrences",headers=origin,json=loc_body)
+        assert loc_added.status_code==200,loc_added.text
+        assert loc_added.json()["source_count"]==2
+        ordered=client.get("/api/bank/sources/"+source_a["id"]+"/questions").json()
+        assert [r["original_question_number"] for r in ordered["items"]]==["10","11"]
+        assert client.post("/api/bank/questions/"+seed["id"]+"/occurrences",headers=origin,json=loc_body).status_code==409
+        assert client.get("/api/bank/questions/"+seed["id"]+"/history").json()[0]["kind"]=="occurrence_add"
         compact=client.get("/api/resources",params={"kind":"question","bank_summary":True,"compact":True,"q":seed["code"]}).json()["items"][0]
         assert "answer" not in compact and "solution" not in compact and compact["content"]
         sel=client.get("/api/resources",params={"kind":"question","bank_summary":True,"selection_only":True,"q":seed["code"]}).json()
-        assert sel["items"]==[{"id":seed["id"],"revision":c["items"][0]["revision"]}]
-        exp=client.post("/api/bank/export",headers=origin,json={"items":payload["items"],"request_id":"export-ci"})
+        assert sel["items"]==[{"id":seed["id"],"revision":client.get("/api/resources/"+seed["id"]).json()["revision"]}]
+        exp=client.post("/api/bank/export",headers=origin,json={"items":[sel["items"][0],payload["items"][1]],"request_id":"export-ci"})
         assert exp.status_code==200,exp.text
         assert client.get("/api/documents/"+exp.json()["document_id"]).json()["blocks"][0]["resource_id"]==seed["id"]
         assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
