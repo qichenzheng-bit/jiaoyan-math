@@ -51,6 +51,8 @@ class Block(BaseModel):
     width:int=Field(default=100,ge=20,le=100)
     score:float=Field(default=0,ge=0,le=1000)
     subquestion_scores:list[float]=Field(default_factory=list,max_length=30)
+    local_fields:list[Literal["title","content","answer","solution","analysis","proof"]]=Field(default_factory=list,max_length=6)
+    hidden_fields:list[Literal["answer","solution","analysis","proof"]]=Field(default_factory=list,max_length=4)
     question_data:QuestionData|None=None
     @model_validator(mode="before")
     @classmethod
@@ -161,6 +163,8 @@ def validate(db,body,previous,*,allow_reference_edits=False,within_chapter=False
             prior=old.get(b.uid,{})
             if not allow_reference_edits or b.kind!="reference" or prior.get("kind")!="reference" or prior.get("resource_id")!=b.resource_id or (prior.get("snapshot") or {}).get("revision")!=b.edit_reference_revision:
                 raise HTTPException(409,"引用微调版本冲突，请重新加载原题")
+        if b.local_fields and (body.kind=="intake" or b.kind!="reference" or len(set(b.local_fields))!=len(b.local_fields)):raise HTTPException(422,"局部修改仅用于创作文档的引用条目")
+        if b.hidden_fields and (body.kind=="intake" or b.kind!="reference"):raise HTTPException(422,"仅创作引用支持字段显示设置")
         if b.kind=="reference":
             prior=old.get(b.uid,{})
             if prior.get("kind")=="reference" and prior.get("resource_id")==b.resource_id and prior.get("snapshot"):
@@ -333,6 +337,10 @@ def source_export(source_id:str,db:Session=Depends(get_db)):
     documents=[d for d in documents if (d.kind=="intake" and (any(b["kind"]=="reference" for b in d.blocks) or db.scalar(select(DocumentRegistration.id).where(DocumentRegistration.document_id==d.id,DocumentRegistration.result_revision==d.revision).limit(1)))) or (d.kind!="intake" and source.content.endswith("对应文档编号 "+d.id))]
     linked_ids=select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source.id,ResourceSourceLink.provenance_role.in_(("original","reproduced")))
     resources=list(db.scalars(select(Resource).where(Resource.archived==False,Resource.kind.in_(("question","knowledge")),or_(Resource.source_id==source.id,Resource.id.in_(linked_ids))).order_by(Resource.created_at,Resource.id)))
+    promoted=next((d for d in documents if d.chaptered and source.content.endswith("对应文档编号 "+d.id)),None)
+    if promoted:
+        result=export_document(promoted.id,db)
+        return {**result,"source_export":True,"batch_count":len(chapter_index(db,promoted)),"has_source_content":bool(result["blocks"])}
     result=assemble_source_export(source,documents,resources,latest=True)
     if not result["has_source_content"]:raise HTTPException(409,"该来源尚无已入库资料，不能导出")
     return result
@@ -371,6 +379,7 @@ def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),
             resource=bank.existing(db,b["resource_id"])
             if resource.archived:raise HTTPException(409,"资源已停用")
             item["snapshot"]=bank.view(resource)
+            # Explicit document-local edits survive updating the referenced source snapshot.
             if item.get("subquestion_scores") and (b.get("snapshot") or {}).get("content")!=resource.content:
                 item["subquestion_scores"]=[]
         blocks.append(item)
@@ -507,7 +516,7 @@ def register(id:str,uid:str,body:Register,db:Session=Depends(get_db),user:User=D
 @router.post("/{id}/promote",dependencies=[Depends(require_origin)])
 def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
-    if d.chaptered or d.parent_document_id or d.archived or d.revision!=body.revision or d.kind not in ("paper","handout","textbook") or not d.blocks:raise HTTPException(409,"文档不可转正或版本冲突")
+    if d.parent_document_id or d.archived or d.revision!=body.revision or d.kind not in ("paper","handout","textbook") or not (any(x["blocks_count"] for x in chapter_index(db,d)) if d.chaptered else d.blocks):raise HTTPException(409,"文档不可转正或版本冲突")
     if d.source_id:return public(d)
     record_version(db,d)
     text="自编"+{"paper":"试卷","handout":"讲义","textbook":"教材"}[d.kind]+"；对应文档编号 "+d.id

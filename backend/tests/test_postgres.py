@@ -257,6 +257,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert restore_handout.status_code==200,restore_handout.text
         assert client.get(hcpath).json()["blocks"][-1]["content"]=="1"
         assert hchapter["id"] not in [x["id"] for x in client.get("/api/documents?kind=handout").json()["items"]]
+        promoted=client.post(hpath+"/promote",headers=origin,json={"revision":restore_handout.json()["revision"]})
+        assert promoted.status_code==200,promoted.text
+        source_export=client.get("/api/documents/source-export/"+promoted.json()["source_id"])
+        assert source_export.status_code==200,source_export.text
+        assert source_export.json()["blocks"][-1]["content"]=="1"
         # Exercise the 5000-block boundary through the actual API, not a raised JSON limit.
         import time
         scale_book=client.post("/api/documents/books",headers=origin,json={"title":"5000项教材容量测试"}).json()
