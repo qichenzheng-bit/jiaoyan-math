@@ -34,6 +34,8 @@ class Block(BaseModel):
     chapter:str=Field(default="",max_length=120)
     subject:str|None=Field(default=None,max_length=40)
     knowledge_tags:list[str]=Field(default_factory=list,max_length=20)
+    primary_knowledge_tag:str=Field(default="",max_length=60)
+    generated_fields:list[Literal["answer","solution"]]=Field(default_factory=list,max_length=2)
     dedup_reason:str=Field(default="",max_length=200)
     edit_reference_revision:int|None=Field(default=None,ge=1)
     reuse_resource_id:str|None=Field(default=None,max_length=36)
@@ -959,16 +961,22 @@ def attach_review_source(db,r,source,occurrence=None):
             changed=True
     return changed
 
-def attach_review_knowledge(db,r,ids):
+def attach_review_knowledge(db,r,ids,primary=None):
     if len(set(ids))!=len(ids):raise HTTPException(422,"知识标签重复")
-    known={x.knowledge_id for x in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==r.id))}
+    links={x.knowledge_id:x for x in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==r.id))}
+    known=set(links)
     changed=False
     for ident in ids:
         p=db.get(KnowledgePointCatalog,ident)
         if not p or p.status!="active":raise HTTPException(422,"知识标签不存在或已停用")
         if p.subject!=r.subject:raise HTTPException(422,"知识标签与资源学科不一致")
         if ident not in known:
-            db.add(ResourceKnowledgeLink(resource_id=r.id,knowledge_id=ident,role="related"));changed=True
+            db.add(ResourceKnowledgeLink(resource_id=r.id,knowledge_id=ident,role="core" if ident==primary else "related"));changed=True
+    if primary:
+        if primary not in ids:raise HTTPException(422,"主知识标签必须属于本题标签")
+        for ident,link in links.items():
+            role="core" if ident==primary else "related"
+            if link.role!=role:link.role=role;changed=True
     return changed
 
 @router.post("/{id}/registration-commit",dependencies=[Depends(require_origin)])
@@ -1153,6 +1161,11 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
             source_id=source.id if source else None,exam_type=source.exam_type if source else ""),db)
         primary=data.pop("source_id")
         tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[]))
+        primary_knowledge_id=None
+        if b.get("primary_knowledge_tag"):
+            if b["primary_knowledge_tag"] not in b.get("knowledge_tags",[]):raise HTTPException(422,"主知识标签必须属于本题标签")
+            _,primary_ids=manual_knowledge(db,data["subject"],data["chapter"],[b["primary_knowledge_tag"]])
+            primary_knowledge_id=primary_ids[0]
         knowledge_ids=list(dict.fromkeys([*knowledge_ids,*knowledge_overrides.get(b["uid"],[])]))
         before=None
         peer=next((r for content,r in batch_resources if b["kind"]=="question" and matching.same_question(content,b["content"])),None) if body.merge_same_batch and not b.get("reuse_resource_id") else None
@@ -1165,7 +1178,7 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
                 changed=merge_question_methods(r,b,item_subject)
                 if changed:evaluate[r.id]=r
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
-            changed=attach_review_knowledge(db,r,knowledge_ids) or changed
+            changed=attach_review_knowledge(db,r,knowledge_ids,primary_knowledge_id) or changed
             merged=list(dict.fromkeys([*r.tags,*tags]))
             if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
             if merged!=r.tags:r.tags=merged;changed=True
@@ -1189,7 +1202,7 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
             if not appended and any(data[k]!=getattr(r,k) for k in comparison):
                 raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
-            changed=attach_review_knowledge(db,r,knowledge_ids) or changed
+            changed=attach_review_knowledge(db,r,knowledge_ids,primary_knowledge_id) or changed
             merged=list(dict.fromkeys([*r.tags,*tags]))
             if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
             if merged!=r.tags:r.tags=merged;changed=True
@@ -1207,7 +1220,7 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
                 revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
             db.add(r);db.flush()
             if primary:attach_review_source(db,r,primary,source_occurrence(db,d,b,primary))
-            attach_review_knowledge(db,r,knowledge_ids)
+            attach_review_knowledge(db,r,knowledge_ids,primary_knowledge_id)
             audit(db,"resource.create",user.id)
             action="create"
             if r.kind=="question":evaluate[r.id]=r

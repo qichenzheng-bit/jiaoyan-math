@@ -10,7 +10,7 @@ from app.core.security import current_user,require_origin,now,audit
 from app.core.solution_methods import normalize_subject, parse_methods, format_methods
 from app.core.content_normalization import canonical_text
 from app.core.question_structure import resolve
-from app.models import IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession, IntakeImport, IntakeSupplement, WorkBatch, WorkMaterial
+from app.models import KnowledgePointCatalog, KnowledgeAlias, IntakeJob as Job, TeachingDocument, StoredFile, User, ChatMessage, ChatSession, IntakeImport, IntakeSupplement, WorkBatch, WorkMaterial
 from app.services.pdf_text import extract_pdf
 from app.services import material_import, storage
 from app.api import qoder, documents as docs, resources as bank
@@ -55,6 +55,34 @@ def valid_pages(values,bounds,strict=False):
     if strict and len(valid)!=len(values):raise HTTPException(422,'原页位置必须属于本批PDF范围')
     return valid
 
+def tag_draft(db,item):
+    """Resolve names/unique aliases within the subject; do not create catalog rows."""
+    from app.api.knowledge import norm
+    subject=normalize_subject(item.get("subject") or "")
+    names=[];mapping={}
+    for raw in item.get("knowledge_tags",[])[:5]:
+        name=raw.strip()
+        if not name or len(name)>60:continue
+        key=norm(name)
+        point=db.scalar(select(KnowledgePointCatalog).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.name_key==key)) if subject else None
+        if point and point.status!="active":point=None
+        elif not point and subject:
+            candidates=list(db.scalars(select(KnowledgePointCatalog).join(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.status=="active",KnowledgeAlias.normalized==key).limit(2)))
+            if len(candidates)==1:point=candidates[0]
+        name=point.name if point else name
+        mapping[key]=name
+        if name not in names:names.append(name)
+    main=mapping.get(norm(item.get("primary_knowledge_tag") or "")) or (names[0] if names else "")
+    return {**item,"knowledge_tags":names,"primary_knowledge_tag":main,"analysis":""}
+
+def validate_review_tags(item):
+    if item.get("kind")!="question" or item.get("reuse_resource_id"):return
+    tags=item.get("knowledge_tags",[])
+    from app.api.knowledge import norm
+    if not 2<=len(tags)<=5 or len({norm(x) for x in tags})!=len(tags) or any(not x.strip() or len(x)>60 for x in tags):
+        raise HTTPException(422,"每道题需要2—5个不重复的知识标签")
+    if item.get("primary_knowledge_tag") not in tags:raise HTTPException(422,"请设置一个主知识标签")
+
 def parse_answer(text,page_hints=None,bounds=None):
     text=text.strip()
     fence=chr(96)*3
@@ -92,6 +120,8 @@ def sync(db,j):
         if s=="done":
             try:
                 hints={};j.items=parse_answer(r.get("answer",""),hints,pdf_range(j.provenance or {}))
+                if (j.provenance or {}).get("auto_enrichment"):
+                    j.items=[tag_draft(db,b) if b.get("kind")=="question" else b for b in j.items]
                 if hints:j.provenance={**(j.provenance or {}),"suggested_pages":hints}
                 j.state="review";j.detail="提取结果待人工核对，未入库"
             except (ValueError,TypeError):j.state="failed";j.detail="结构化结果无效，请缩小批次后重试"
@@ -159,6 +189,9 @@ def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     if body.source_id:bank.active_source(db,body.source_id,True)
     prompt="你是数学资料录入助手。知识点是原文实际教学内容（定义、公式、定理、证明等）；知识标签是分类名称，使用 knowledge_tags 字段，二者不可混淆。仅依据原文提取题目与知识点，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type,original_question_number（原文明确的题号，无法确认留空）。最多100项。题目优先使用 question_data 对象（version:1,stem,options:[{label,content}],correct_options:[字母],subquestions:[{number,content,answer,methods:[{name,body,recommended}]}],blanks:[{number,answer}],answer,methods:[{name,body,recommended}]）。使用结构时不要重复输出外层 content/answer/solution，服务端生成兼容文本；填空空位使用标准 LaTeX 下划线，无法可靠对应的原文仍可使用外层字段。小问各自有答案和解法，不设置公共答案解析。仅提取原文实际提供的答案、解析，缺失留空。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    if provenance.get("single_review"):
+        provenance={**provenance,"auto_enrichment":True}
+        prompt+="\n【自动辅助录入规则，优先于上文关于缺失答案解析的规定】忠实保留题干及原文已有答案、解析；仅对缺失的答案或解析自动求解补齐，不需要额外确认。每个小问分别处理，保留已有内容，不编造原文；确实无法可靠求解则留空。答案或解析有任何AI新增时，generated_fields数组分别加入answer或solution，原文提供的字段不得标记为生成。解析写完整可核对的推导，不单设analysis字段。每道题根据实际考点及推导生成2至5个具体、不重复、同科目的knowledge_tags，并在primary_knowledge_tag中填写其中最核心的一个标签的完全相同名称；不强行匹配无关标签。知识点条目仍忠实原文，不自动编造证明。输出仍是原定JSON数组，注意完整输出所有题目。"
     intent=provenance.get("intent","mixed")
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识点及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识点。","mixed":"按原文实际内容识别题目和知识点。"}[intent]
     prompt+="\n【本次整理目标】"+focus
@@ -241,6 +274,7 @@ def review(id:str,body:Review,db:Session=Depends(get_db),user:User=Depends(curre
         previous=set(provenance.get("reviewed_uids",[]))
         for item in items:
             if item["uid"] in body.reviewed_uids and (item["uid"] not in previous or old.get(item["uid"])!=item):
+                if provenance.get("auto_enrichment"):validate_review_tags(item)
                 verify_duplicate_choice(db,item,j.subject)
         provenance["reviewed_uids"]=body.reviewed_uids
     elif "reviewed_uids" in provenance:
@@ -282,7 +316,9 @@ def convert(id:str,body:Convert,db:Session=Depends(get_db),user:User=Depends(cur
     if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==j.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
         raise HTTPException(409,"请先处理或舍弃待审核的AI补充建议")
     if "reviewed_uids" in (j.provenance or {}):
-        for item in j.items:verify_duplicate_choice(db,item,j.subject)
+        for item in j.items:
+            if (j.provenance or {}).get("auto_enrichment"):validate_review_tags(item)
+            verify_duplicate_choice(db,item,j.subject)
     if body.append_document_id:
         if body.append_document_id not in {d.id for d in append_candidates(db,j)}:raise HTTPException(409,"仅可追加到同一原始资料的录入文档")
         d=docs.row(db,body.append_document_id)
