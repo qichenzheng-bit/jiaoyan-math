@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from app.core.question_structure import QuestionData, normalize_payload, resolve
+from app.core.document_merge import merge_document, MergeConflict
 from sqlalchemy import select, delete, func, or_
 from sqlalchemy.orm import Session
 from app.core.db import get_db
@@ -441,6 +442,25 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     record_version(db,d)
     d.blocks=validate(db,body,d.blocks,within_chapter=bool(parent));d.title=body.title.strip();d.subject=normalize_subject(body.subject);d.source_id=body.source_id;d.kind=body.kind
     d.revision+=1;d.updated_at=now();references(db,d);record_version(db,d);finish_chapter_edit(db,parent);audit(db,"document.update",user.id);db.commit();return public(d)
+@router.post("/{id}/merge",dependencies=[Depends(require_origin)])
+def merge_revision(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.archived or d.chaptered or d.kind=="intake" or body.kind!=d.kind or body.revision is None or body.revision>=d.revision:
+        raise HTTPException(409,"当前状态无法自动合并，请保留本地草稿")
+    version=db.get(TeachingDocumentVersion,(id,body.revision))
+    if not version or d.revision-body.revision>HISTORY_KEEP:
+        raise HTTPException(409,"原始版本已清理，无法安全合并，请保留本地草稿")
+    def editable(data):
+        return Draft.model_validate(data).model_dump(exclude={"revision","merge_same_batch"})
+    try:
+        base=editable(version.snapshot)
+        local=editable(body.model_dump())
+        remote=editable(public(d))
+        merged=merge_document(base,local,remote)
+    except MergeConflict as exc:
+        raise HTTPException(409,"双方修改冲突："+str(exc)+"。请下载本地草稿后核对")
+    return update(id,Draft(**merged,revision=d.revision),db,user)
+
 class VersionRestore(BaseModel):
     revision:int=Field(ge=1)
 

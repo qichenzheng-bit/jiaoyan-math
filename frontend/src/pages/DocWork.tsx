@@ -3,7 +3,7 @@ import type {QuestionData} from '../components/questionData'
 import {useEffect,useRef,useState} from 'react'
 import {Link,useSearchParams,useNavigate} from 'react-router-dom'
 import {useWorkspaceGuard,useWorkspaceBack,handleWorkspaceBack} from '../components/WorkspaceNavigation'
-import {api} from '../auth'
+import {api,ApiError} from '../auth'
 import {WorkspaceFeedback} from '../components/WorkspaceFeedback'
 import ManualIntakeCards from '../components/ManualIntakeCards'
 import {InlineImageUpload} from '../components/InlineMathEditor'
@@ -89,7 +89,7 @@ export default function DocWork({intake=false,docKind}:{intake?:boolean;docKind?
    setDoc(saved);choose('');setDirty(false);setPicker(null);syncUrl(saved.id);window.dispatchEvent(new Event('wg-recent-changed'));await refresh()
   })
  }
- async function persist(d:Doc){setSaving(true);setSaveError('');try{const saved=await api<Doc>('/documents/'+d.id+(intake?'/manual-draft':''),{method:'PUT',body:JSON.stringify(d)});setDoc(saved);removeRecovery(saved.id);setDirty(false);window.dispatchEvent(new Event('wg-recent-changed'));return saved}catch(e){setSaveError(e instanceof Error?e.message:'保存失败');throw e}finally{setSaving(false)}}
+ async function persist(d:Doc){setSaving(true);setSaveError('');try{let saved:Doc;try{saved=await api<Doc>('/documents/'+d.id+(intake?'/manual-draft':''),{method:'PUT',body:JSON.stringify(d)})}catch(e){if(intake||!(e instanceof ApiError)||e.status!==409)throw e;saved=await api<Doc>('/documents/'+d.id+'/merge',{method:'POST',body:JSON.stringify(d)});undoStack.current=[];redoStack.current=[];setHistoryTick(v=>v+1);setMessage('已自动合并其他设备的非冲突修改')}setDoc(saved);removeRecovery(saved.id);setDirty(false);window.dispatchEvent(new Event('wg-recent-changed'));return saved}catch(e){setSaveError(e instanceof Error?e.message:'保存失败');throw e}finally{setSaving(false)}}
  async function save(){await act(async()=>{if(!doc)throw Error('请先打开文档');if(!dirty)return;await persist(doc);setMessage(intake?'草稿已保存，尚未入库':'编排已保存到服务器');await refresh()})}
  useEffect(()=>{if(intake||!doc||doc.chaptered||doc.archived||!dirty||busy||saving||picker||saveError)return;const timer=window.setTimeout(()=>void save(),2200);return()=>window.clearTimeout(timer)},[intake,doc,dirty,busy,saving,picker,saveError])
  useEffect(()=>{const retry=()=>{if(!intake&&dirty&&!busy&&doc&&!doc.archived&&!picker)setSaveError('')};window.addEventListener('online',retry);return()=>window.removeEventListener('online',retry)},[intake,dirty,busy,doc,picker])

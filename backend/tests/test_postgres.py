@@ -641,6 +641,13 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/resources/"+seed["id"]).json()["answer"]==prior_answer
         assert client.put("/api/documents/"+paper["id"],headers=origin,json=base_paper).status_code==409
         assert client.get("/api/documents/"+paper["id"]+"/export").json()["blocks"][0]["answer"]=="仅本卷答案"
+        merged_doc=client.post("/api/documents/"+paper["id"]+"/merge",headers=origin,json={**base_paper,"title":"另一设备标题"})
+        assert merged_doc.status_code==200,merged_doc.text
+        assert merged_doc.json()["title"]=="另一设备标题"
+        assert merged_doc.json()["blocks"][0]["answer"]=="仅本卷答案"
+        conflict=client.post("/api/documents/"+paper["id"]+"/merge",headers=origin,json={**changed,"title":"冲突标题"})
+        assert conflict.status_code==409,conflict.text
+        assert client.get("/api/documents/"+paper["id"]).json()["title"]=="另一设备标题"
         partial={**payload,"items":[payload["items"][1]],"request_id":"cart-partial-ci"}
         partial_result=client.post("/api/bank/cart/confirm",headers=origin,json=partial)
         assert partial_result.status_code==200,partial_result.text

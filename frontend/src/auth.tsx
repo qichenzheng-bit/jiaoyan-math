@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { BrandMark,Icon } from './components/Icon'
 
+export class ApiError extends Error {constructor(message:string,public status:number){super(message)}}
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch('/api' + path, {
     ...options, credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...options.headers },
   })
   const data = await response.json()
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '请求失败')
+  if (!response.ok) throw new ApiError(typeof data.detail === 'string' ? data.detail : '请求失败',response.status)
   return data as T
 }
 
