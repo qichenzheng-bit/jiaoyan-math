@@ -30,6 +30,7 @@ manual_approved={}
 manual_runs={}
 bank_cart={"revision":0,"ids":[]}
 bank_bulk={}
+layout_profiles={}
 video_test_enabled=False
 video_jobs=[]
 video_demo={"id":"video-preview","resource_id":items[0]["id"],"resource_revision":1,"source_snapshot":{"title":items[0]["title"],"problem":items[0]["content"],"answer":items[0]["answer"],"reference_solution":items[0]["solution"],"fps":60},"engine_id":"a"*32,"work_id":None,"created_at":1}
@@ -212,6 +213,15 @@ def answer(route):
             result={"mode":"chapters","items":[{"chapter":c,"count":sum(p["chapter"]==c for p in roots)} for c in chapters],"total":len(chapters)}
         else:
             result={"mode":"points","items":[{**p,"child_count":sum(e["source_id"]==p["id"] for e in relations)} for p in rows],"total":len(rows)}
+    if p.startswith("/settings/document-layout/") or p=="/settings/document-templates":
+        record=layout_profiles.get(p,{"revision":0,"value":[] if p.endswith("document-templates") else None,"history":[]})
+        if route.request.method=="PUT":
+            body=route.request.post_data_json
+            if body["revision"]!=record["revision"]:
+                route.fulfill(status=409,content_type="application/json",body=json.dumps({"detail":"配置版本冲突"}));return
+            record={"revision":record["revision"]+1,"value":body["value"],"history":([{"revision":record["revision"],"value":record["value"]}]+record["history"])[:2] if record["revision"] else []}
+            layout_profiles[p]=record
+        result=record
     if p.startswith("/knowledge/points/") and p.endswith("/resources"):result=[]
     if result is None:result={}
     route.fulfill(status=200,content_type="application/json",body=json.dumps(result,ensure_ascii=False))
@@ -1412,6 +1422,16 @@ with sync_playwright() as p:
             page.get_by_role("button",name="预览",exact=True).click()
             expect(page.locator(".print-document")).to_be_visible()
             expect(page.locator(".layout-settings")).to_have_count(0)
+            page.get_by_role("button",name="排版设置",exact=True).click()
+            page.get_by_label("纸张",exact=True).select_option("A5")
+            page.get_by_role("button",name="保存排版到服务器",exact=True).click()
+            expect(page.get_by_role("status").filter(has_text="排版配置已保存到服务器")).to_be_visible()
+            page.get_by_label("新模板名称",exact=True).fill("来源测试模板")
+            page.get_by_role("button",name="保存为模板",exact=True).click()
+            expect(page.get_by_role("status").filter(has_text="模板已保存到服务器")).to_be_visible()
+            page.reload(wait_until="networkidle")
+            page.get_by_role("button",name="继续上次排版",exact=True).click()
+            expect(page.get_by_label("纸张",exact=True)).to_have_value("A5")
             visit(page,"/resources",".bank-row")
             page.locator(".bank-row").first.wait_for()
             expect(page.locator(".bank-detail")).to_be_hidden()
