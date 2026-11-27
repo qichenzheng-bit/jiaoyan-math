@@ -91,6 +91,41 @@ def patch_document(id: str, body: DocumentPatch, db, user):
                                                 blocks=blocks,revision=body.revision),db,user)
 
 
+class AppendReferences(StrictBody):
+    revision:int=Field(ge=1)
+    resource_ids:list[str]=Field(min_length=1,max_length=200)
+    scores:list[float]=Field(default_factory=list,max_length=200)
+
+def append_references(id:str,body:AppendReferences,db,user):
+    resources.admin_lock(db,user)
+    d=documents.row(db,id)
+    if d.archived or d.kind=="intake" or d.chaptered or d.revision!=body.revision:
+        raise HTTPException(409,"请重新读取有效创作文档及版本")
+    if len(d.blocks)+len(body.resource_ids)>200:
+        raise HTTPException(422,"请使用分章教材或拆分文档")
+    if len(set(body.resource_ids))!=len(body.resource_ids) or set(body.resource_ids)&{b.get("resource_id") for b in d.blocks}:
+        raise HTTPException(422,"新增题目重复")
+    if body.scores and (d.kind!="paper" or len(body.scores)!=len(body.resource_ids)):
+        raise HTTPException(422,"分值与题目不匹配")
+    blocks=[documents.Block.model_validate(b) for b in d.blocks]
+    for i,rid in enumerate(body.resource_ids):
+        r=db.get(TeachingResource,rid)
+        if not r or r.archived or r.kind not in ("question","knowledge") or (d.kind=="paper" and r.kind!="question"):
+            raise HTTPException(422,"引用资源无效")
+        blocks.append(documents.Block(uid=str(uuid4()),kind="reference",resource_id=rid,score=body.scores[i] if body.scores else 0))
+    return documents.update(id,documents.Draft(title=d.title,kind=d.kind,subject=d.subject,source_id=d.source_id,
+                                               blocks=blocks,revision=body.revision),db,user)
+
+class TemplateApply(StrictBody):
+    revision:int=Field(ge=0)
+    template_id:str=Field(min_length=1,max_length=80)
+
+def apply_template(scope:Literal["doc","source"],identity:str,body:TemplateApply,db,user):
+    record=settings.read_document_templates(db,user)
+    template=next((v for v in record["value"] if v["id"]==body.template_id),None)
+    if not template:raise HTTPException(404,"未找到用户排版模板")
+    return settings.update_document_layout(scope,identity,settings.LayoutUpdate(revision=body.revision,value=template["layout"]),db,user)
+
 class ReadOriginal(StrictBody):
     file_id: str=Field(min_length=1,max_length=36)
     start: int=Field(default=1,ge=1,le=10000)
@@ -197,6 +232,7 @@ register("question_search", "题库精准筛选；返回真实记录及分页信
 register("knowledge_search", "检索录入的知识点，不是知识标签", resources.listing,
          ("subject","q","chapter","unit_type","limit","offset"), fixed={"kind":"knowledge","archived":False})
 register("resource_read", "读取真实题目或知识点及答案解析", resources.read, ("id",))
+register("related_questions", "根据真实题干、解法与标签查询相关题目候选，不代表重复题", documents.related_questions, ("body",))
 register("resource_methods", "读取已有解法", resources.methods, ("id",))
 register("resource_sources", "读取题目来源", resources.list_sources, ("id",))
 register("tag_search", "检索知识图谱标签", knowledge.list_points, ("q","subject","limit","offset"))
@@ -219,8 +255,11 @@ register("work_search", "查询已归档教学作品", teaching_works.listing, (
 register("work_read", "读取教学作品实际版本", teaching_works.detail, ("ident",))
 register("video_search", "查询视频项目", video.listing)
 register("video_read", "查询视频实际状态与任务", video.detail, ("ident",))
+register("video_code", "读取视频实际Manim源码",video.code,("ident",))
 register("video_history", "读取视频微调记录", video.history, ("ident",))
+register("cover_templates", "读取封面和其他模板素材目录",studio.listing,("q","limit","offset"),fixed={"kind":"asset","category":"template","archived":False})
 register("cover_presets", "查询现有封面预设", studio.presets)
+register("cover_search", "读取已保存的封面作品目录",studio.listing,("q","limit","offset"),fixed={"kind":"work","category":"cover","archived":False})
 register("checkin_state", "查询实际签到状态", qiandao.status)
 register("model_catalog", "查询模型及推理强度", qoder.models)
 register("model_usage", "查询模型实际额度", qoder.usage)
@@ -228,6 +267,9 @@ register("selection_create", "从已存在题目或知识点创建试卷、讲�
          ("body",), write=True)
 register("book_create", "创建教材或章节式讲义草稿", documents.create_book, ("body",), write=True)
 register("chapter_create", "在指定教材中新增章节", documents.create_chapter, ("id","body"), write=True)
+register("document_append", "向现有创作文档或教材章节追加真实引用题目；保留已有内容", append_references, ("id","body"),write=True)
+register("chapter_order", "按实际章节ID调整目录顺序", documents.order_chapters, ("id","body"),write=True)
+register("template_apply", "应用真实用户排版模板，需要当前排版revision", apply_template, ("scope","identity","body"),write=True)
 register("document_patch", "按真实文档块编号局部修改创作文档，不修改题库原件；需要当前版本", patch_document, ("id","body"), write=True)
 register("layout_update", "修改指定文档或来源排版配置，必须使用最新revision；不自动正式导出", settings.update_document_layout, ("scope","identity","body"), write=True)
 register("video_create", "根据题库原题和已有推荐解析创建视频项目", video.create, ("body",), write=True)
@@ -263,6 +305,8 @@ def bounded_result(value, limit=12000):
         result={};rows=value
     else:
         return {"truncated":True,"preview":raw[:limit-100]}
+    if isinstance(value,dict) and isinstance(value.get("lesson"),dict):
+        result["lesson"]={k:v for k,v in value["lesson"].items() if k in ("id","status","state","revision","has_video","video_review_status","code_status","render_status")}
     result.update(truncated=True,items=[])
     for row in rows:
         if isinstance(row,dict):

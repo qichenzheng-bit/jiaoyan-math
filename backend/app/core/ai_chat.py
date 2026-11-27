@@ -123,6 +123,9 @@ def sync(db,m,state):
     except (ValueError,TypeError,HTTPException) as e:
         step={"tool":str(name)[:80],"state":"failed","detail":"查询未成功，请调整参数或说明不足",
               "result":str(e.detail)[:200] if isinstance(e,HTTPException) else "参数无效"}
+    except Exception:
+        db.rollback()
+        step={"tool":str(name)[:80],"state":"failed","detail":"查询工具异常","result":"无法读取实际资料"}
     state["steps"].append(step)
     # Prompt retains the original question, not an unbounded accumulated model conversation.
     data=json.dumps(state["steps"],ensure_ascii=False)

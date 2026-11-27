@@ -1525,6 +1525,39 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
                 db.execute(text("DELETE FROM teaching_documents WHERE id=:id"),{"id":load_book_id})
                 db.commit()
 
+        # The autonomous workflow uses real business APIs with deterministic model output.
+        from app.core import ai_work, ai_tools
+        auto_ws=client.post("/api/workspaces",headers=origin,json={"title":"AI自动工作测试"}).json()
+        auto_url="/api/workspaces/"+auto_ws["id"]+"/agent"
+        auto_calls=[]
+        answers=[{"action":"tool","tool":"question_search","args":{"limit":2}},
+                 {"action":"finish","explanation":"已查询实际题目"}]
+        def auto_worker(method,path,body=None):
+            if path=="/status":return {"chat_available":True}
+            if path=="/chat/start":auto_calls.append(body);return {"state":"running"}
+            return {"state":"done","answer":json.dumps(answers[min(len(auto_calls)-1,1)],ensure_ascii=False)}
+        with monkeypatch.context() as patch:
+            patch.setattr(qoder,"request",auto_worker)
+            requested=client.post(auto_url,headers=origin,json={"instruction":"检索题库","model":"Auto"})
+            assert requested.status_code==200,requested.text
+            for _ in range(4):ai_work.tick()
+            actual=client.get(auto_url).json()
+            assert actual["state"]=="done",actual
+            assert actual["steps"][0]["tool"]=="question_search"
+            assert actual["steps"][0]["result"]["total"]>=1
+            assert len(auto_calls)==2
+        memory=client.put("/api/ai-settings/memory",headers=origin,json={"revision":0,"items":[{"id":"test","scope":"work","text":"公式采用LaTeX"}]})
+        assert memory.status_code==200,memory.text
+        assert client.get("/api/ai-settings/memory").json()["items"][0]["text"]=="公式采用LaTeX"
+        prompt=client.put("/api/ai-settings/prompts/work",headers=origin,json={"revision":0,"text":"按知识点整理"})
+        assert prompt.status_code==200,prompt.text
+        assert client.put("/api/ai-settings/prompts/work",headers=origin,json={"revision":0,"text":"旧版本"}).status_code==409
+        with session_factory()() as db:
+            u=db.get(User,1)
+            created=ai_tools.execute("selection_create",{"body":{"title":"AI实际组卷","kind":"paper","resource_ids":[seed["id"]],"scores":[10],"total_score":10}},db,u)
+            assert created["blocks"][0]["resource_id"]==seed["id"]
+            assert created["blocks"][0]["score"]==10
+            assert ai_tools.execute("document_read",{"id":created["id"]},db,u)["id"]==created["id"]
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
