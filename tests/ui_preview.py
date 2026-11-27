@@ -1,3 +1,4 @@
+import re
 """Actual compiled React UI tests with isolated synthetic API responses."""
 import os
 from pathlib import Path
@@ -26,6 +27,7 @@ ai_edit={"id":"edit-demo","document_id":"ai-demo","base_revision":1,"fields":["s
 registration_preview={"revision":1,"items":[{"uid":"ai-q1","candidates":[],"knowledge":[{"id":"p4","name":"导数","code":"KP4","chapter":"微积分","matched":"导数"}],"chapter_suggestion":"微积分","peer_ids":[],"missing":["solution"]}],"similar_scan_limit":300}
 manual_saved={}
 manual_approved={}
+manual_runs={}
 video_test_enabled=False
 video_jobs=[]
 video_demo={"id":"video-preview","resource_id":items[0]["id"],"resource_revision":1,"source_snapshot":{"title":items[0]["title"],"problem":items[0]["content"],"answer":items[0]["answer"],"reference_solution":items[0]["solution"],"fps":60},"engine_id":"a"*32,"work_id":None,"created_at":1}
@@ -103,6 +105,27 @@ def answer(route):
         if body["approved"] and body["uid"] not in approved:approved.append(body["uid"])
         elif not body["approved"] and body["uid"] in approved:approved.remove(body["uid"])
         result={"revision":body["revision"],"reviewed_uids":approved}
+    if p.endswith("/intake-preview") and route.request.method=="POST":
+        ident=p.split("/")[2];body=manual_saved.get(ident,ai_doc)
+        rows=[{"uid":b["uid"],"number":i+1,"kind":b["kind"],"title":b.get("title") or b["content"][:80],"action":"create","errors":[],"warnings":["答案未填写"] if not b.get("answer") else [],"approved":b["uid"] in manual_approved.get(ident,[]),"original_question_number":""} for i,b in enumerate(body["blocks"]) if b["kind"] in ("question","knowledge")]
+        result={"revision":body["revision"],"source":{"id":body.get("source_id") or "src","title":body["title"],"revision":1},"rows":rows,"total":len(rows),"batch_size":20,"batches":1}
+    if p.endswith("/intake-run"):
+        ident=p.split("/")[2]
+        if route.request.method=="GET":result=manual_runs.get(ident)
+        else:
+            body=manual_saved.get(ident,ai_doc)
+            uids=[b["uid"] for b in body["blocks"] if b["kind"] in ("question","knowledge")]
+            counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0,"methods_added":0,"source_occurrences":0,"evaluation_queued":0}
+            result={"id":"test-run-"+ident,"document_id":ident,"base_revision":body["revision"],"revision":body["revision"],"source":{"id":body.get("source_id") or "src","title":body["title"],"revision":1},"state":"ready","total":len(uids),"completed":0,"next_batch":0,"batches":[{"index":0,"uids":uids,"state":"pending"}],"counts":counts,"error":""}
+            manual_runs[ident]=result
+    if p.endswith("/intake-run/step") and route.request.method=="POST":
+        ident=p.split("/")[2];body=manual_saved.get(ident,ai_doc);run=manual_runs[ident]
+        saved=[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"id":"saved-"+b["uid"],"code":"QNEW","revision":1}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]
+        counts={**run["counts"],"question_create":sum(b["kind"]=="question" for b in body["blocks"]),"knowledge_create":sum(b["kind"]=="knowledge" for b in body["blocks"]),"source_occurrences":run["total"]}
+        run={**run,"state":"completed","completed":run["total"],"revision":body["revision"]+1,"next_batch":1,"counts":counts,"batches":[{**run["batches"][0],"state":"completed","record_id":"test-receipt"}]}
+        manual_runs[ident]=run
+        manual_saved[ident]={**body,"blocks":saved,"revision":body["revision"]+1}
+        result={"document":manual_saved[ident],"run":run}
     if p.endswith("/manual-commit") and route.request.method=="POST":
         body=manual_saved[p.split("/")[2]]
         saved=[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"id":"saved-"+b["uid"],"code":"QNEW","revision":1}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]
@@ -1073,15 +1096,16 @@ with sync_playwright() as p:
             page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
             page.get_by_role("button",name="检查并入库",exact=True).click()
             page.get_by_role("heading",name="入库审核",exact=True).wait_for()
-            expect(page.get_by_role("button",name="确认入库",exact=True)).to_be_disabled()
+            expect(page.get_by_role("button",name="入库预览",exact=True)).to_be_disabled()
             progress=page.locator(".manual-unified-review [role=progressbar]")
             total=int(progress.get_attribute("aria-valuemax"))
             for i in range(total):
                 page.get_by_role("button",name="通过并继续",exact=True).click()
                 expect(progress).to_have_attribute("aria-valuenow",str(i+1))
+            page.get_by_role("button",name="入库预览",exact=True).click()
+            page.get_by_role("heading",name="正式入库确认",exact=True).wait_for()
             if page.locator(".manual-review-accept input").count():page.locator(".manual-review-accept input").check()
-            page.get_by_role("button",name="确认入库",exact=True).click()
-            page.get_by_role("dialog",name="确认入库").get_by_role("button",name="确认",exact=True).click()
+            page.get_by_role("button",name=re.compile(r"^确认入库 ·")).click()
             page.get_by_role("heading",name="入库成功",exact=True).wait_for()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             capture(page,path=str(OUT/"28-mobile-review.png"),full_page=False)

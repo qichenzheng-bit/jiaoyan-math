@@ -1,0 +1,38 @@
+import {useState} from 'react'
+import {api} from '../auth'
+import {MathText} from './MathText'
+import {WorkspaceLink as Link} from './WorkspaceNavigation'
+import {Icon} from './Icon'
+import {ReviewProgress} from './ReviewShared'
+import type {Doc} from '../pages/DocWork'
+export type Counts={question_create:number;question_reuse:number;knowledge_create:number;knowledge_reuse:number;updated:number;methods_added:number;source_occurrences:number;evaluation_queued:number}
+export type PreviewRow={uid:string;number:number;kind:'question'|'knowledge';title:string;action:'create'|'reuse'|'update'|'append'|'batch_reuse';approved:boolean;errors:string[];warnings:string[];code?:string;original_question_number:string;source_page_start?:number|null;source_page_end?:number|null}
+export type IntakePreview={revision:number;source:{id:string;title:string;revision:number};rows:PreviewRow[];total:number;batch_size:number;batches:number}
+export type IntakeRun={id:string;document_id:string;base_revision:number;revision:number;source:IntakePreview['source'];state:'ready'|'failed'|'completed'|'cancelled';total:number;completed:number;next_batch:number;batches:{index:number;uids:string[];state:'pending'|'failed'|'completed';record_id?:string;error?:string}[];counts:Counts;error:string;stale?:boolean}
+const actions={create:'新增资源',reuse:'复用原资源',append:'追加解法',batch_reuse:'同批复用并保留解法',update:'修订已有资源'}
+const countLabels:[keyof Counts,string][]=[['question_create','新增题目'],['question_reuse','复用原题'],['knowledge_create','新增知识单元'],['knowledge_reuse','复用知识单元'],['updated','修订资源'],['methods_added','追加解法'],['source_occurrences','绑定来源位置'],['evaluation_queued','已排队评价题目']]
+export default function IntakeCommitPanel({doc,preview,run,busy,error,onBack,onStart,onResume,onCancel,onContinue}:{doc:Doc;preview?:IntakePreview;run?:IntakeRun;busy:boolean;error:string;onBack:()=>void;onStart:(accept:boolean)=>void;onResume:()=>void;onCancel:()=>void;onContinue:()=>void}){
+ const [accept,setAccept]=useState(false)
+ const warnings=preview?.rows.filter(r=>r.warnings.length)??[]
+ const blocked=preview?.rows.some(r=>!r.approved||r.errors.length)??false
+ const groups=Object.entries(actions) as [PreviewRow['action'],string][]
+ const [historyOpen,setHistoryOpen]=useState(false)
+ return <div className="manual-flow intake-commit-panel">
+ <button className="manual-back" disabled={busy} onClick={run?onContinue:onBack}>← {run?'返回资料':'返回审核'}</button>
+ <div className="wg-panel-head"><div><h1>{run?.state==='completed'?'入库成功':run?'批量入库进度':'正式入库确认'}</h1><MathText content={doc.title}/></div>{run?.state==='completed'&&<Icon name="check" size={32}/>}</div>
+ {preview&&!run&&<><div className="intake-commit-stats">{[['新增题目',preview.rows.filter(r=>r.kind==='question'&&r.action==='create').length],['复用原题',preview.rows.filter(r=>r.kind==='question'&&['reuse','append','batch_reuse'].includes(r.action)).length],['追加解法条目',preview.rows.filter(r=>r.action==='append').length],['来源位置（预计）',preview.rows.filter(r=>r.action!=='update').length]].map(([name,n])=><div key={name}><small>{name}</small><strong>{n}</strong></div>)}</div>
+ <section className="intake-commit-section"><h3>来源绑定</h3><MathText content={preview.source.title}/><p className="muted">共 {preview.total} 个条目，分 {preview.batches} 批，每批最多 {preview.batch_size} 条。历史来源不覆盖。</p></section>
+ <section className="intake-commit-section"><h3>入库明细</h3>{groups.map(([key,label])=>{const items=preview.rows.filter(r=>r.action===key);return items.length>0&&<details key={key}><summary>{label}（{items.length}）</summary>{items.map(r=><div className="intake-commit-row" key={r.uid}><MathText compact content={'第 '+r.number+' 条 '+r.title}/><small>{[r.code,r.original_question_number?'原题号 '+r.original_question_number:'',r.source_page_start?'第 '+r.source_page_start+' 页':''].filter(Boolean).join(' · ')}</small>{r.errors.map(e=><p className="inline-error" key={e}>{e}</p>)}{!r.approved&&<small className="inline-error">待重新审核</small>}</div>)}</details>})}</section>
+ <section className="intake-commit-section"><h3>入库检查</h3><p>{blocked?'仍有未通过条目，请返回审核。':'全部条目已通过人工审核，正式提交时再次校验版本。'}</p>{warnings.length>0&&<><details><summary>{warnings.length} 条存在缺失信息或合并提示</summary>{warnings.map(r=><div key={r.uid}><MathText compact content={r.title}/>{r.warnings.map(w=><p className="muted" key={w}>{w}</p>)}</div>)}</details><label className="manual-review-accept"><input type="checkbox" checked={accept} onChange={e=>setAccept(e.target.checked)} disabled={busy}/> 已核对这些提示，确认继续入库</label></>}</section>
+ <div className="manual-form-footer"><button disabled={busy} onClick={onBack}>返回审核</button><button className="primary" disabled={busy||blocked||!preview.total||warnings.length>0&&!accept} onClick={()=>onStart(accept)}>确认入库 · {preview.total} 条</button></div></>}
+ {run&&<><section className="intake-commit-section"><h3>{run.completed} / {run.total} 条已入库</h3><ReviewProgress done={run.completed} total={run.total}/><small className="muted">任务编号：{run.id.slice(0,8)} · {run.source.title}</small>{run.batches.map(b=><div key={b.index} className="intake-commit-row"><span>第 {b.index+1} 批 · {b.uids.length} 条</span><small>{b.state==='completed'?'已入库':b.state==='failed'?'本批已回滚':busy&&run.next_batch===b.index?'提交中':'待入库'}</small>{b.error&&<p className="inline-error">{b.error}</p>}</div>)}</section>
+ <section className="intake-commit-section"><h3>实际入库结果</h3><div className="intake-commit-stats">{countLabels.map(([k,label])=><div key={k}><small>{label}</small><strong>{run.counts[k]??0}</strong></div>)}</div><button type="button" onClick={()=>setHistoryOpen(v=>!v)}>{historyOpen?'收起':'查看'}已完成批次记录</button>{historyOpen&&run.batches.filter(b=>b.record_id).map(b=><Receipt key={b.record_id} docId={doc.id} recordId={b.record_id!} number={b.index+1}/>)}</section>
+ {run.error&&<p role="alert" className="notice">{run.error}</p>}{run.stale&&<p role="alert" className="notice">草稿版本已更新，旧任务不能继续。请取消剩余批次后重新审核。</p>}
+ <div className="manual-form-footer">{run.state==='completed'?<><button onClick={onContinue}>继续录入</button><Link className="button-link primary" to={'/resources?source_id='+encodeURIComponent(run.source.id)}>查看题库</Link></>:<><button disabled={busy} onClick={onCancel}>取消剩余批次</button><button className="primary" disabled={busy||run.stale||run.state==='cancelled'} onClick={onResume}>{busy?'正在入库…':run.state==='failed'?'重试失败批次':'继续入库'}</button></>}</div></>}
+ {error&&<p role="alert" className="notice">{error}</p>}</div>
+}
+function Receipt({docId,recordId,number}:{docId:string;recordId:string;number:number}){
+ const [items,setItems]=useState<{uid:string;action:string;after:{id:string;code:string;title:string};source_occurrence?:{original_question_number?:string;page_start?:number|null}}[]>(),[error,setError]=useState(''),[busy,setBusy]=useState(false)
+ async function load(){setBusy(true);try{const r=await api<{entries:NonNullable<typeof items>}>('/documents/'+docId+'/registration-history/'+recordId);setItems(r.entries)}catch(e){setError(e instanceof Error?e.message:'读取失败')}finally{setBusy(false)}}
+ return <details onToggle={e=>{if(e.currentTarget.open&&!items&&!busy)void load()}}><summary>第 {number} 批 · {recordId.slice(0,8)}</summary>{busy&&<small>读取中…</small>}{error&&<p role="alert">{error}</p>}{items?.map(r=><div className="intake-commit-row" key={r.uid}><Link to={'/resource-edit/'+encodeURIComponent(r.after.id)}><MathText compact content={r.after.code+' '+r.after.title}/></Link><small>{r.action==='append'?'追加解法':r.action==='create'?'新增':r.action==='update'?'修订':'复用'}{r.source_occurrence?.original_question_number?' · 原题号 '+r.source_occurrence.original_question_number:''}</small></div>)}</details>
+}

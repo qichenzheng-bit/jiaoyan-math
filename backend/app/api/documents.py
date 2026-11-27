@@ -1170,7 +1170,7 @@ def historical_intake_run(id:str,ident:str,db:Session=Depends(get_db)):
 def start_intake_run(id:str,body:IntakeRunStart,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id)
     old=read_run(db,id)
-    if old and body.revision==old["base_revision"] and old["revision"]==d.revision:return run_view(old)
+    if old and old["state"]!="cancelled" and body.revision==old["base_revision"] and old["revision"]==d.revision:return run_view(old)
     if old and old["state"] in ("ready","failed") and old["revision"]==d.revision:raise HTTPException(409,"已有未完成的入库任务，请继续或取消")
     if body.revision!=d.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
     preview=intake_preview(db,d);rows=preview["rows"]
