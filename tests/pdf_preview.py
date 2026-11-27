@@ -85,6 +85,18 @@ def run():
         assert "GraphTagNotForIndex" not in combined_text
         assert not reader2.pages[0].extract_text().strip() and not reader2.pages[-1].extract_text().strip()
         print("Mixed page geometry, knowledge index and cover verification:",sizes)
+        # A separate single-sheet cover spread: 210 + 10 + 210 + 6 mm.
+        payload["layout"]={"paper":"A4","coverFileId":cover_id,"backCoverFileId":cover_id}
+        payload["wrap"]={"spine":10,"bleed":3,"spineText":"SpineMarker","background":"#ffffff","foreground":"#222222"}
+        (path/"payload.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
+        wrap=render_pdf(path/"payload.json",images,path/"wrap.pdf",print,lambda:False,ROOT/"frontend"/"dist")
+        sheet=PdfReader(path/"wrap.pdf").pages[0]
+        assert wrap["pages"]==1
+        assert abs(float(sheet.mediabox.width)-436*72/25.4)<1.5
+        assert abs(float(sheet.mediabox.height)-303*72/25.4)<1.5
+        assert "SpineMarker" in "".join(sheet.extract_text().split())
+        print("Print wrap dimensions verified:",wrap)
+        payload.pop("wrap")
         payload["layout"]={"paper":"A4","columns":1}
         payload["doc"]["blocks"] = [block("bad", "question", r"$\unknowncommand$")]
         (path/"payload.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -96,7 +108,7 @@ def run():
             raise AssertionError("Invalid math must block PDF output")
 
 def scale():
-    count=int(os.environ.get("WG_PDF_SCALE","0"))
+    count=int(os.environ.get("WG_PDF_SCALE","5000"))
     if not count:return
     rows=[]
     for i in range(count):
