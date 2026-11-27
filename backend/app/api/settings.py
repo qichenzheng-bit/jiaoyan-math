@@ -126,6 +126,20 @@ import json
 from pydantic import ConfigDict, model_validator
 from app.models import TeachingDocument, TeachingResource
 
+class DocumentBlockStyle(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    size: float|None=Field(default=None,ge=6,le=36)
+    lineHeight: float|None=Field(default=None,ge=1,le=3)
+    paragraphGap: float|None=Field(default=None,ge=0,le=50)
+    align: Literal["left","center","right","justify"]|None=None
+    bold: bool|None=None
+    frame: Literal["none","border","accent","fill"]|None=None
+    role: Literal["normal","knowledge","definition","theorem","lemma","corollary","proof","example","exercise","method","warning","summary"]|None=None
+    pageBreak: Literal["auto","before","after","alone"]|None=None
+    answerSpace: float|None=Field(default=None,ge=0,le=180)
+    headingLevel: Literal[1,2,3,4,5,6]|None=None
+    optionColumns: Literal["auto",1,2,4]|None=None
+
 class DocumentLayout(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paper: Literal["A4","A3","A5","B5","A6","custom"]="A4"
@@ -153,9 +167,21 @@ class DocumentLayout(BaseModel):
     mirrorMargins: bool=False
     titleSize: float=Field(default=18,ge=8,le=36)
     headingSize: float=Field(default=14,ge=8,le=36)
+    subtitle: str=Field(default="",max_length=200)
+    examTime: str=Field(default="",max_length=200)
+    showScore: bool=True
+    typeHeadings: bool=False
+    numbering: Literal["continuous","section"]="continuous"
+    optionColumns: Literal["auto",1,2,4]="auto"
+    blankWidth: float=Field(default=0,ge=0,le=100)
+    typeStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=100)
+    chapterStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=5100)
+    blockStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=5100)
 
     @model_validator(mode="after")
     def printable_area(self):
+        if any(not key or len(key)>100 or key in {"__proto__","constructor","prototype"} for rules in (self.typeStyles,self.chapterStyles,self.blockStyles) for key in rules):
+            raise ValueError("样式编号无效")
         dims={"A4":(210,297),"A3":(297,420),"A5":(148,210),"B5":(176,250),"A6":(105,148)}
         w,h=sorted(dims.get(self.paper,(self.width,self.height)))
         if self.landscape:w,h=h,w
@@ -169,6 +195,7 @@ class DocumentLayoutTemplate(BaseModel):
     name: str=Field(min_length=1,max_length=80)
     kind: Literal["paper","handout","textbook","all"]
     layout: DocumentLayout
+    isDefault: bool=False
 
 class LayoutUpdate(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -185,6 +212,11 @@ class TemplateUpdate(BaseModel):
         ids=[t.id for t in self.value]
         if len(set(ids))!=len(ids) or set(ids)&{"paper","paper-double","handout","textbook","general"}:
             raise ValueError("模板编号重复或与系统模板冲突")
+        default_kinds=[t.kind for t in self.value if t.isDefault]
+        if len(set(default_kinds))!=len(default_kinds):
+            raise ValueError("同类模板只能设置一个默认项")
+        if any(t.layout.blockStyles or t.layout.chapterStyles for t in self.value):
+            raise ValueError("模板不能携带特定文档的局部样式")
         if any(not t.name.strip() for t in self.value):
             raise ValueError("模板名称不能为空")
         return self
@@ -224,7 +256,7 @@ def read_document_layout(scope:Literal["doc","source"],identity:str,db:Session=D
 @router.put("/document-layout/{scope}/{identity}",dependencies=[Depends(require_origin)])
 def update_document_layout(scope:Literal["doc","source"],identity:str,body:LayoutUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
     _check_layout_target(db,scope,identity)
-    return _layout_save(db,user,_layout_key(user,scope,identity),body.revision,body.value.model_dump())
+    return _layout_save(db,user,_layout_key(user,scope,identity),body.revision,body.value.model_dump(exclude_none=True))
 
 @router.get("/document-templates")
 def read_document_templates(db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -232,4 +264,4 @@ def read_document_templates(db:Session=Depends(get_db),user:User=Depends(current
 
 @router.put("/document-templates",dependencies=[Depends(require_origin)])
 def update_document_templates(body:TemplateUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
-    return _layout_save(db,user,_layout_key(user,"templates","all"),body.revision,[t.model_dump() for t in body.value],[])
+    return _layout_save(db,user,_layout_key(user,"templates","all"),body.revision,[t.model_dump(exclude_none=True) for t in body.value],[])
