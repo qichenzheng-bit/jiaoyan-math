@@ -16,7 +16,8 @@
     "html-to-image": "1.11.13",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "remark-math": "6.0.0"
+    "remark-math": "6.0.0",
+    "docx-preview": "0.3.7"
   },
   "devDependencies": {
     "@types/react": "19.0.12",

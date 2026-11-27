@@ -1137,6 +1137,80 @@ with sync_playwright() as p:
                 expect(page.get_by_role("button",name="知识库",exact=True)).to_be_visible()
 
         if GROUP in {'all','mobile'}:
+            print('UI case: mobile Word layout preview before and after upload',flush=True)
+            import io, zipfile
+            word=io.BytesIO()
+            with zipfile.ZipFile(word,"w",zipfile.ZIP_DEFLATED) as z:
+                z.writestr("[Content_Types].xml",'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+                z.writestr("_rels/.rels",'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+                z.writestr("word/document.xml",'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>本地 Word 版式测试</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/></w:tblPr><w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>原始表格内容</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:br w:type="page"/></w:r></w:p><w:p><w:r><w:t>第二页内容</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>')
+            page.set_viewport_size({"width":393,"height":873})
+            visit(page,"/work",".work-chat")
+            uploads=[]
+            def track_upload(req):
+                if "/api/files?" in req.url and req.method=="POST":
+                    uploads.append(req.url)
+            page.on("request",track_upload)
+            page.locator(".work-chat input[type=file]").first.set_input_files({"name":"预览.docx","mimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","buffer":word.getvalue()})
+            page.get_by_role("button",name="查看 预览.docx").click()
+            preview=page.get_by_role("dialog",name="原始资料预览")
+            expect(preview.get_by_text("本地预览",exact=False)).to_be_visible()
+            rendered=preview.frame_locator('iframe[title="Word 页面"]')
+            expect(rendered.get_by_text("本地 Word 版式测试",exact=True)).to_be_visible(timeout=15000)
+            expect(rendered.get_by_text("原始表格内容",exact=True)).to_be_visible()
+            expect(rendered.locator("section.wg-docx-page")).to_have_count(2)
+            preview.get_by_role("button",name="下一页",exact=True).click()
+            expect(preview.get_by_text("2 / 2",exact=True)).to_be_visible()
+            preview.get_by_role("button",name="放大 Word",exact=True).click()
+            expect(preview.get_by_role("button",name="150%",exact=True)).to_be_visible()
+            assert uploads==[], "Preview must not upload local files"
+            capture(page,path=str(OUT/"phone-word-local-preview.png"),full_page=False)
+            preview.get_by_role("button",name="关闭预览").click()
+            page.get_by_role("button",name="移除 预览.docx").click()
+            page.remove_listener("request",track_upload)
+            def word_session(route):
+                messages=[{**demo_chat["messages"][0],"attachments":[{"id":"stored-word-demo","name":"已上传.docx"}]},demo_chat["messages"][1]]
+                route.fulfill(status=200,content_type="application/json",body=json.dumps({**demo_chat,"messages":messages}))
+            def stored_word(route):
+                route.fulfill(status=200,content_type="application/octet-stream",body=word.getvalue())
+            page.route("**/api/chat/sessions/chat-demo",word_session)
+            page.route("**/api/files/stored-word-demo/download",stored_word)
+            try:
+                visit(page,"/chat?session=chat-demo",".chat-intake-suggestion")
+                page.get_by_role("button",name="查看 已上传.docx").click()
+                preview=page.get_by_role("dialog",name="原始资料预览")
+                expect(preview.frame_locator('iframe[title="Word 页面"]').get_by_text("本地 Word 版式测试",exact=True)).to_be_visible(timeout=15000)
+                expect(preview.get_by_role("button",name="正文模式",exact=True)).to_be_visible()
+                preview.get_by_role("button",name="关闭预览").click()
+            finally:
+                page.unroute("**/api/chat/sessions/chat-demo",word_session)
+                page.unroute("**/api/files/stored-word-demo/download",stored_word)
+            print('UI case: all mobile module entry pages and screenshots',flush=True)
+            phone_pages=[
+                ("/","chat",".compact-composer"),("/work","work",".compact-composer"),
+                ("/intake","intake",".intake-entry"),("/intake?mode=document","new-intake",".legacy-intake"),
+                ("/original-library","originals",".original-library"),("/resources","bank",".bank-workspace"),
+                ("/knowledge-library","knowledge",".bank-workspace"),("/sources","sources",".bank-workspace"),
+                ("/graph","graph",".graph-page"),("/teaching-library","teaching-library",".teaching-library"),
+                ("/project/teaching","teaching",".project-hub"),("/project/creation","creation",".project-hub"),
+                ("/project/publishing","publishing",".project-hub"),("/videos","videos",".video-new-card"),
+                ("/papers","papers",".assembly-picker"),("/handouts","handouts",".assembly-picker"),
+                ("/textbooks","textbooks",".assembly-picker"),("/works","works",".finished-works"),
+                ("/covers","covers",".fc-art"),("/checkin","checkin",".checkin-clean"),
+                ("/qoder","models",".model-center"),("/settings","settings",".legacy-settings"),
+                ("/intake?doc=demo","intake-editor",".manual-list-row"),
+                ("/work?job=review-demo&review=1","review",".wg-review-workbench"),
+                ("/source-catalog/statistics","statistics",".source-statistics")]
+            for width in (393,360):
+                page.set_viewport_size({"width":width,"height":873})
+                for path,label,selector in phone_pages:
+                    print("Phone page:",width,label,flush=True)
+                    visit(page,path,selector)
+                    expect(page.locator(selector).first).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), label
+                    assert page.locator(".workspace > .topbar").evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1}"),label
+                    if width==393:
+                        capture(page,path=str(OUT/("phone-module-"+label+".png")),full_page=False)
             print('UI case: compact phone composition and production navigation',flush=True)
             page.set_viewport_size({"width":393,"height":873})
             visit(page,"/work?job=review-clean&review=1",".wg-review-editor .katex")
@@ -1452,8 +1526,9 @@ with sync_playwright() as p:
                 context.unroute("**/api/qoder/models/refresh",refresh_catalog_route)
             visit(page,"/chat",".chat-home-recent")
             page.get_by_role("button",name="添加与工具").click()
-            expect(page.get_by_role("group",name="聊天工具")).to_be_visible()
-            page.get_by_role("button",name="添加与工具").click()
+            expect(page.get_by_role("dialog",name="添加资料")).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(page.get_by_role("dialog",name="添加资料")).to_have_count(0)
             expect(page.locator(".workspace > header")).to_have_count(1)
             expect(page.locator(".clean-chat header,.clean-chat .chat-top")).to_have_count(0)
             assert page.get_by_label("输入消息").evaluate("(el) => getComputedStyle(el).borderTopWidth === '0px'")
