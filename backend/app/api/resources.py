@@ -1,4 +1,5 @@
 import json
+import hashlib
 from typing import Literal
 from uuid import uuid4
 from difflib import SequenceMatcher
@@ -355,6 +356,65 @@ def chapters(kind:Literal["question","knowledge"]="knowledge",subject:str="",db:
     stmt=select(TeachingResource.subject,TeachingResource.chapter,func.count().label("count")).where(TeachingResource.kind==kind,TeachingResource.archived==False)
     if subject:stmt=stmt.where(TeachingResource.subject==normalize_subject(subject))
     return [{"subject":r.subject,"chapter":r.chapter,"count":r.count} for r in db.execute(stmt.group_by(TeachingResource.subject,TeachingResource.chapter).order_by(TeachingResource.subject,TeachingResource.chapter))]
+
+class RecordedKnowledgeMerge(BaseModel):
+    subject:str=Field(min_length=1,max_length=40)
+    names:list[str]=Field(min_length=1,max_length=20)
+    target:str=Field(min_length=1,max_length=60)
+    preview_token:str|None=Field(default=None,max_length=64)
+
+@router.get("/recorded-knowledge")
+def recorded_knowledge(subject:str=Query(...,min_length=1,max_length=40),q:str=Query("",max_length=60),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+    # Only explicitly recorded knowledge, never graph-node names.
+    name=func.jsonb_array_elements_text(cast(TeachingResource.tags,JSONB)).table_valued("value").render_derived().alias("n")
+    stmt=select(name.c.value.label("name"),func.count(func.distinct(TeachingResource.id)).label("count")).select_from(TeachingResource).join(name,literal(True)).where(
+        TeachingResource.kind.in_(("question","knowledge")),TeachingResource.archived==False,
+        TeachingResource.subject==normalize_subject(subject),name.c.value!="")
+    if q.strip():stmt=stmt.where(name.c.value.contains(q.strip(),autoescape=True))
+    grouped=stmt.group_by(name.c.value).subquery()
+    total=db.scalar(select(func.count()).select_from(grouped))
+    rows=db.execute(select(grouped).order_by(grouped.c.count.desc(),grouped.c.name).offset(offset).limit(limit))
+    return {"items":[dict(r._mapping) for r in rows],"total":total}
+
+def recorded_merge_plan(db,body,lock=False):
+    subject=normalize_subject(body.subject)
+    target=body.target.strip()
+    names=sorted(set(n.strip() for n in body.names if n.strip() and n.strip()!=target))
+    if not subject or not names or not target or any(len(n)>60 for n in names):
+        raise HTTPException(422,"请选择同学科的知识点并填写有效目标名称")
+    stmt=select(TeachingResource).where(TeachingResource.kind.in_(("question","knowledge")),
+        TeachingResource.archived==False,TeachingResource.subject==subject,
+        or_(*(cast(TeachingResource.tags,JSONB).contains([n]) for n in names))).order_by(TeachingResource.id).limit(2001)
+    if lock:stmt=stmt.with_for_update()
+    rows=list(db.scalars(stmt))
+    if len(rows)>2000:raise HTTPException(422,"本次影响超过2000条资源，请缩小合并范围")
+    if not rows:raise HTTPException(409,"没有匹配的现有资源")
+    changes=[]
+    for row in rows:
+        after=list(dict.fromkeys(target if n in names else n for n in row.tags))
+        changes.append({"id":row.id,"revision":row.revision,"kind":row.kind,"before":row.tags,"after":after})
+    digest=hashlib.sha256(json.dumps([subject,names,target,changes],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    return rows,changes,digest
+
+@router.post("/recorded-knowledge/merge-preview",dependencies=[Depends(require_origin)])
+def recorded_merge_preview(body:RecordedKnowledgeMerge,db:Session=Depends(get_db)):
+    _,changes,digest=recorded_merge_plan(db,body)
+    return {"total":len(changes),"questions":sum(c["kind"]=="question" for c in changes),
+            "knowledge":sum(c["kind"]=="knowledge" for c in changes),"preview_token":digest,"sample":changes[:10]}
+
+@router.post("/recorded-knowledge/merge",dependencies=[Depends(require_origin)])
+def recorded_merge(body:RecordedKnowledgeMerge,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    rows,changes,digest=recorded_merge_plan(db,body,True)
+    if body.preview_token!=digest:raise HTTPException(409,"预览已失效，请重新预览并确认")
+    for row,change in zip(rows,changes):
+        old_rec=read_recommendation(db,row) if row.kind=="question" else None
+        row.tags=change["after"]
+        row.revision+=1;row.updated_at=now()
+        if old_rec:store_recommendation(db,row,{**old_rec,"revision":row.revision})
+        record_bank_history(db,row.id,"recorded_knowledge_merge",{"tags":change["before"]},{"tags":change["after"]},user.id,row.revision)
+    audit(db,"resource.recorded_knowledge.merge",user.id);db.commit()
+    return {"updated":len(rows)}
 
 @router.get("/{id}/source-overview")
 def source_overview(id:str,db:Session=Depends(get_db)):

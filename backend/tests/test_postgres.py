@@ -449,6 +449,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert {r["name"] for r in stat_after["items"]}=={"专项甲","专项乙"}
         restore_mapping=client.put("/api/knowledge/resources/"+seed["id"],headers=origin,json={"revision":remapped.json()["revision"],"items":old_mapping["items"]})
         assert restore_mapping.status_code==200,restore_mapping.text
+        recorded_url="/api/resources/recorded-knowledge"
+        catalog_names=client.get(recorded_url,params={"subject":"高等数学","q":"专项"}).json()
+        assert {r["name"] for r in catalog_names["items"]}>={"专项甲","专项乙"}
+        merge_body={"subject":"高等数学","names":["专项甲"],"target":"专项甲合并测试"}
+        preview_merge=client.post(recorded_url+"/merge-preview",headers=origin,json=merge_body)
+        assert preview_merge.status_code==200,preview_merge.text
+        assert client.post(recorded_url+"/merge",headers=origin,json=merge_body).status_code==409
+        applied_merge=client.post(recorded_url+"/merge",headers=origin,json={**merge_body,"preview_token":preview_merge.json()["preview_token"]})
+        assert applied_merge.status_code==200,applied_merge.text
+        assert "专项甲合并测试" in client.get("/api/resources/"+seed["id"]).json()["tags"]
+        assert client.get("/api/knowledge/resources/"+seed["id"]).json()["items"]==old_mapping["items"]
+        reverse_body={"subject":"高等数学","names":["专项甲合并测试"],"target":"专项甲"}
+        reverse_preview=client.post(recorded_url+"/merge-preview",headers=origin,json=reverse_body).json()
+        assert client.post(recorded_url+"/merge",headers=origin,json={**reverse_body,"preview_token":reverse_preview["preview_token"]}).status_code==200
         def seed_search(**kw):
             response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":seed["code"],**kw})
             assert response.status_code==200,response.text
