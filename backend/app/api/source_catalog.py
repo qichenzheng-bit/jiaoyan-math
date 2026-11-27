@@ -2,7 +2,7 @@
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
@@ -85,3 +85,82 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
 def changes(id:str,db:Session=Depends(get_db)):
     source(db,id)
     return {"items":[row for row in history(db,id) if row["kind"]=="source_catalog_update"]}
+
+
+class StatisticsRequest(BaseModel):
+    source_ids:list[str]=Field(default_factory=list,max_length=1000)
+    years:list[str]=Field(default_factory=list,max_length=100)
+    institutions:list[str]=Field(default_factory=list,max_length=100)
+    categories:list[str]=Field(default_factory=list,max_length=100)
+    exam_types:list[str]=Field(default_factory=list,max_length=100)
+    subject:str=Field(default="",max_length=40)
+    all_sources:bool=False
+    limit:int=Field(default=50,ge=1,le=100)
+    offset:int=Field(default=0,ge=0)
+
+@router.post("/statistics",dependencies=[Depends(require_origin)])
+def statistics(body:StatisticsRequest,db:Session=Depends(get_db)):
+    """Count recorded question knowledge names, not graph labels or inferred source totals."""
+    if not (body.all_sources or body.source_ids or body.years or body.institutions or body.categories or body.exam_types):
+        raise HTTPException(422,"请选择统计来源或明确选择全部来源")
+    filters=["s.kind='source'","s.archived=false"]
+    params={"limit":body.limit,"offset":body.offset}
+    for key,col,maxlen in (("source_ids","s.id",36),("years","s.cohort_year",12),
+                            ("institutions","d.institution",120),("categories","d.category",60),
+                            ("exam_types","s.exam_type",80)):
+        values=list(dict.fromkeys(v.strip() for v in getattr(body,key) if v.strip()))
+        if getattr(body,key) and not values or any(len(v)>maxlen for v in values):
+            raise HTTPException(422,"统计筛选条件无效")
+        if values:
+            filters.append(col+" = ANY(CAST(:"+key+" AS varchar[]))")
+            params[key]=values
+    subject_filter=""
+    if body.subject.strip():
+        subject_filter=" AND q.subject=:subject"
+        params["subject"]=normalize_subject(body.subject.strip())
+    cte="""
+    WITH selected AS (
+        SELECT s.id,coalesce(d.intake_status,'unknown') AS intake_status
+        FROM teaching_resources s LEFT JOIN source_catalog_details d ON d.source_id=s.id
+        WHERE """+" AND ".join(filters)+"""
+    ), pairs AS (
+        SELECT l.resource_id AS question_id,l.source_id
+        FROM resource_source_links l JOIN selected s ON s.id=l.source_id
+        JOIN teaching_resources q ON q.id=l.resource_id
+        WHERE q.kind='question' AND q.archived=false"""+subject_filter+"""
+        UNION
+        SELECT q.id,q.source_id FROM teaching_resources q JOIN selected s ON s.id=q.source_id
+        WHERE q.kind='question' AND q.archived=false"""+subject_filter+"""
+    ), questions AS (
+        SELECT DISTINCT question_id FROM pairs
+    ), names AS (
+        SELECT DISTINCT q.id AS question_id,q.subject,btrim(n.name) AS name
+        FROM questions x JOIN teaching_resources q ON q.id=x.question_id
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(CAST(q.tags AS jsonb))='array'
+            THEN CAST(q.tags AS jsonb) ELSE '[]'::jsonb END
+        ) AS n(name)
+        WHERE btrim(n.name)<>''
+    ), grouped AS (
+        SELECT n.subject,n.name,count(DISTINCT n.question_id) AS question_count,
+               count(*) AS source_question_count
+        FROM names n JOIN pairs p ON p.question_id=n.question_id
+        GROUP BY n.subject,n.name
+    )
+    """
+    # One statement gives all counts a consistent snapshot. A source-question pair
+    # is not a physical page occurrence; multiple roles and legacy primary links are deduplicated.
+    query=cte+"""
+    SELECT (SELECT count(*) FROM selected) AS source_count,
+           (SELECT count(*) FROM selected WHERE intake_status='completed') AS confirmed_complete_sources,
+           (SELECT count(*) FROM questions) AS question_count,
+           (SELECT count(*) FROM pairs) AS source_question_count,
+           (SELECT count(DISTINCT question_id) FROM names) AS questions_with_knowledge,
+           (SELECT count(*) FROM grouped) AS knowledge_count,
+           coalesce((SELECT jsonb_agg(to_jsonb(g) ORDER BY g.question_count DESC,g.subject,g.name)
+                     FROM (SELECT * FROM grouped ORDER BY question_count DESC,subject,name
+                           LIMIT :limit OFFSET :offset) g),'[]'::jsonb) AS items
+    """
+    result=dict(db.execute(text(query),params).mappings().one())
+    return {**result,"limit":body.limit,"offset":body.offset,"scope":"recorded_questions_only",
+            "count_unit":"distinct_source_question_pairs","original_question_total":None}
