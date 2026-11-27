@@ -965,9 +965,19 @@ with sync_playwright() as p:
             page.get_by_label("新章节名称").fill("第二章 导数")
             page.get_by_role("button",name="＋ 新增章节",exact=True).click()
             expect(page.locator(".book-chapter-row")).to_have_count(2)
+            if os.environ.get("WG_BOOK_SCREENSHOTS")=="1":
+                page.evaluate("document.fonts.ready")
+                page.screenshot(path=str(OUT/("f44-directory-"+GROUP+".png")),full_page=False)
+                if GROUP=="desktop":
+                    page.set_viewport_size({"width":393,"height":873})
+                    page.screenshot(path=str(OUT/"f44-textbook-directory-phone.png"),full_page=False)
+                    page.set_viewport_size({"width":1600,"height":900})
             page.get_by_role("button",name="编辑本章",exact=True).first.click()
             page.locator(".manual-intake-cards").wait_for()
             assert ("GET","chapter-preview") in book_requests
+            if os.environ.get("WG_BOOK_SCREENSHOTS")=="1":
+                page.evaluate("document.fonts.ready")
+                page.screenshot(path=str(OUT/("f44-chapter-"+GROUP+".png")),full_page=False)
             expect(page.get_by_role("button",name="＋ 章",exact=True)).to_have_count(0)
             if GROUP=="mobile":
                 page.get_by_role("button",name="＋ 添加内容",exact=True).click()

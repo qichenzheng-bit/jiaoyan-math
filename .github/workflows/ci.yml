@@ -245,6 +245,7 @@ jobs:
     env:
       WG_BROWSER_CHANNEL: chrome
       WG_UI_GROUP: ${{ matrix.group }}
+      WG_BOOK_SCREENSHOTS: ${{ (github.head_ref == 'refactor/f4-4-creation' || github.ref_name == 'refactor/f4-4-creation') && '1' || '0' }}
       WG_UI_SCREENSHOTS: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
@@ -298,7 +299,7 @@ jobs:
           curl -fsS http://127.0.0.1:4173/ >/dev/null
           python tests/ui_preview.py
       - uses: actions/upload-artifact@v6
-        if: failure() || github.event_name == 'workflow_dispatch'
+        if: failure() || github.event_name == 'workflow_dispatch' || (github.head_ref == 'refactor/f4-4-creation' || github.ref_name == 'refactor/f4-4-creation')
         continue-on-error: true
         with:
           name: clean-workspace-screenshots-${{ matrix.group }}
