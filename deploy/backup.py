@@ -44,6 +44,7 @@ EXPORTS = [
     ("production/papers/documents", "teaching_documents", "kind='paper'", "id"),
     ("production/handouts/documents", "teaching_documents", "kind='handout'", "id"),
     ("production/textbooks/documents", "teaching_documents", "kind='textbook'", "id"),
+    ("production/documents/versions", "teaching_document_versions", "true", "document_id,revision"),
     ("teaching/documents/references", "document_resource_refs", "true", "document_id,resource_id"),
     ("teaching/intake/registrations", "document_registrations", "true", "id"),
     ("teaching/intake/imports", "intake_imports", "true", "id"),

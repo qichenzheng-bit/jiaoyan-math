@@ -15,7 +15,7 @@ def upgrade():
         sa.Column("snapshot",sa.JSON(),nullable=False),
         sa.Column("created_at",sa.BigInteger(),nullable=False),
         sa.PrimaryKeyConstraint("document_id","revision",name="pk_teaching_document_versions"))
-    op.create_index("ix_teaching_document_versions_created_at","teaching_document_versions",["document_id","created_at"])
+    op.create_index("ix_teaching_document_versions_created_at","teaching_document_versions",["created_at"])
 
 def downgrade():
     raise RuntimeError("Restore coordinated backup to preserve document version history")
