@@ -194,6 +194,41 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert restored.status_code==200,restored.text
         assert restored.json()["title"]=="教材章节测试" and restored.json()["revision"]==3
         assert client.post("/api/documents/"+textbook["id"]+"/versions/2/restore",headers=origin,json={"revision":edited["revision"]}).status_code==409
+        # Large textbook: chapter metadata is separate from chapter bodies.
+        book=client.post("/api/documents/books",headers=origin,json={"title":"分章教材","subject":"高数"})
+        assert book.status_code==200,book.text
+        book=book.json();bid=book["id"];bpath="/api/documents/"+bid
+        assert book["chaptered"] and book["blocks"]==[]
+        first=client.post(bpath+"/chapters",headers=origin,json={"revision":book["revision"],"title":"第一章"})
+        assert first.status_code==200,first.text
+        first=first.json();cid=first["chapter"]["id"]
+        second=client.post(bpath+"/chapters",headers=origin,json={"revision":first["document"]["revision"],"title":"第二章"})
+        assert second.status_code==200,second.text
+        second=second.json();cid2=second["chapter"]["id"]
+        child=client.get("/api/documents/"+cid).json()
+        assert child["parent_document_id"]==bid and child["blocks"]==[]
+        edited_chapter=client.put("/api/documents/"+cid,headers=origin,json={**child,"blocks":[{"uid":"sec","kind":"heading","heading_level":2,"title":"小节"},{"uid":"body","kind":"text","content":"独立章节正文"}]})
+        assert edited_chapter.status_code==200,edited_chapter.text
+        edited_chapter=edited_chapter.json()
+        assert client.get("/api/documents/"+cid2).json()["blocks"]==[]
+        index=client.get(bpath+"/chapters").json()
+        assert [v["blocks_count"] for v in index["items"]]==[2,0]
+        assert all("blocks" not in v for v in index["items"])
+        assert client.get(bpath).json()["blocks"]==[]
+        assert cid not in [v["id"] for v in client.get("/api/documents?kind=textbook").json()["items"]]
+        assert client.put("/api/documents/"+cid,headers=origin,json=child).status_code==409
+        assert client.put("/api/documents/"+cid,headers=origin,json={**edited_chapter,"blocks":[{"uid":"bad","kind":"heading","heading_level":1,"title":"不允许嵌套章"}]}).status_code==422
+        ordered=client.put(bpath+"/chapter-order",headers=origin,json={"revision":index["document"]["revision"],"ids":[cid2,cid]})
+        assert ordered.status_code==200,ordered.text
+        ordered=ordered.json()
+        export=client.get(bpath+"/export").json()
+        assert [b["title"] for b in export["blocks"] if b.get("heading_level")==1]==["第二章","第一章"]
+        assert any(b["content"]=="独立章节正文" for b in export["blocks"])
+        restore_book=client.post(bpath+"/versions/"+str(second["document"]["revision"])+"/restore",headers=origin,json={"revision":ordered["document"]["revision"]})
+        assert restore_book.status_code==200,restore_book.text
+        restored_index=client.get(bpath+"/chapters").json()
+        assert [v["id"] for v in restored_index["items"]]==[cid,cid2]
+        assert client.get("/api/documents/"+cid).json()["blocks"]==[]
         # Full-library stem matching and transactional registration.
         batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[
             {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法","question_type":"综合题"},

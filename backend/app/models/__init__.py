@@ -196,6 +196,10 @@ class KnowledgeRelation(Base):
 
 class TeachingDocument(Base):
     __tablename__="teaching_documents"
+    __table_args__=(Index("ix_teaching_documents_parent_order","parent_document_id","chapter_order"),)
+    chaptered: Mapped[bool]=mapped_column(Boolean,default=False,server_default="false")
+    parent_document_id: Mapped[str | None]=mapped_column(ForeignKey("teaching_documents.id",ondelete="RESTRICT"),nullable=True)
+    chapter_order: Mapped[int]=mapped_column(Integer,default=0,server_default="0")
     id: Mapped[str]=mapped_column(String(36),primary_key=True)
     title: Mapped[str]=mapped_column(String(200))
     kind: Mapped[str]=mapped_column(String(16))

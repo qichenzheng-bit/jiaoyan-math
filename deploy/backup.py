@@ -170,6 +170,7 @@ def logical_allowed(name):
 
 WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
 CATALOG_EXPORTS={"teaching/sources/catalog_details.csv"}
+DOCUMENT_VERSION_EXPORTS={"production/documents/versions.csv"}
 
 def check_manifest(repo, manifest, allow_legacy=False):
     if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
@@ -182,7 +183,9 @@ def check_manifest(repo, manifest, allow_legacy=False):
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
     missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
-    if missing and not (allow_legacy and missing in (WORK_EXPORTS,CATALOG_EXPORTS,WORK_EXPORTS|CATALOG_EXPORTS)):
+    legacy_groups=(WORK_EXPORTS,CATALOG_EXPORTS,DOCUMENT_VERSION_EXPORTS)
+    allowed_missing={frozenset().union(*(group for i,group in enumerate(legacy_groups) if mask&(1<<i))) for mask in range(1,8)}
+    if missing and not (allow_legacy and frozenset(missing) in allowed_missing):
         raise ValueError("incomplete database backup")
 
 
