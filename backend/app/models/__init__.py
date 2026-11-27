@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import Mapped, mapped_column
@@ -88,6 +88,7 @@ class TeachingResource(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),)
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
