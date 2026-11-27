@@ -666,7 +666,12 @@ with sync_playwright() as p:
                     page.get_by_role("button",name="返回题库",exact=False).click()
                     page.get_by_role("button",name="选题清单",exact=True).click()
                     expect(page.locator(".bank-cart-item")).to_have_count(1)
-                    page.get_by_role("button",name="返回题库",exact=False).click()
+                    page.get_by_label("制作类型",exact=True).select_option("video")
+                    page.get_by_role("button",name="确认选题",exact=True).click()
+                    with page.expect_request(lambda req:req.url.endswith("/video/projects") and req.method=="POST") as queued_video:
+                        page.get_by_role("button",name="加入视频项目队列（1）",exact=True).click()
+                    assert queued_video.value.post_data_json["resource_id"]==items[0]["id"]
+                    page.locator(".video-work").wait_for()
                 if name=="25-word-ai":
                     page.locator(".manual-word-work").wait_for()
                     expect(page.locator(".manual-word-matches")).to_have_count(0)
