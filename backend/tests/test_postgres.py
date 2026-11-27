@@ -165,7 +165,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         manual_matches=client.post("/api/resources/similar",headers=origin,json={"kind":"question","title":"极限","content":"求极限","solution":"另一种解法"}).json()
         assert any(c["resource"]["id"]==rid and c["match_kind"]=="same_stem" for c in manual_matches["items"])
         assert any(p["id"]==k["id"] for p in review.json()["items"][0]["knowledge"])
-        choices=[{"uid":"new","action":"create"},{"uid":"same","action":"append","resource_id":rid,"resource_revision":match["revision"],"knowledge_ids":["missing"]}]
+        choices=[{"uid":"new","action":"create","reason":"测试独立题目"},{"uid":"same","action":"append","resource_id":rid,"resource_revision":match["revision"],"knowledge_ids":["missing"]}]
         count=client.get("/api/resources?kind=question").json()["total"]
         failure=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True})
         assert failure.status_code==422,failure.text
@@ -180,7 +180,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         history=client.get(base+"/registration-history").json()
         assert history[0]["count"]==2
         record=client.get(base+"/registration-history/"+history[0]["id"]).json()
-        assert record["entries"][1]["input"]["solution"]=="另一种解法"
+        assert next(e for e in record["entries"] if e["uid"]=="same")["input"]["solution"]=="另一种解法"
         assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True}).status_code==409
         # Phone entry saves the entire draft and registers it atomically, without review.
         manual=reused.json()
@@ -926,6 +926,40 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/files/"+new["id"]+"/download").content==content
         assert client.get("/api/resources/"+saved_image_id).json()["content"]==image_text
         assert client.get("/api/files/"+file_id+"/preview").content==png
+
+        # A durable two-chunk plan, including same question across chunk boundary.
+        many=client.post("/api/documents/setup",headers=origin,json={"title":"跨批次入库专项","source_type":"exam"}).json()
+        many_path="/api/documents/"+many["id"]
+        root={"kind":"question","subject":"高等数学","question_type":"综合题","content":"跨批次唯一检索题目甲","answer":"1","solution":"直接法","dedup_reason":"测试独立题目","uid":"root","original_question_number":"1"}
+        blocks=[root]+[{**root,"uid":"middle-"+str(i),"content":"跨批专项独立练习"+str(i),"original_question_number":str(i+1)} for i in range(1,20)]+[{**root,"uid":"last","solution":"另一种方法","original_question_number":"21"}]
+        draft=client.put(many_path+"/manual-draft",headers=origin,json={**many,"blocks":blocks})
+        assert draft.status_code==200,draft.text
+        revision=draft.json()["revision"]
+        assert client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"accept_warnings":True}).status_code==409
+        for b in blocks:
+            approve=client.post(many_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":b["uid"],"approved":True})
+            assert approve.status_code==200,approve.text
+        preview=client.post(many_path+"/intake-preview",headers=origin,json={"revision":revision}).json()
+        assert preview["total"]==21 and preview["batches"]==2 and all(r["approved"] for r in preview["rows"])
+        run=client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"accept_warnings":True}).json()
+        assert run["state"]=="ready" and run["completed"]==0
+        payload={"run_id":run["id"],"batch":0}
+        first=client.post(many_path+"/intake-run/step",headers=origin,json=payload)
+        assert first.status_code==200,first.text
+        assert first.json()["run"]["completed"]==20,first.text
+        assert client.post(many_path+"/intake-run/step",headers=origin,json=payload).json()["run"]["completed"]==20
+        assert client.get(many_path+"/intake-run").json()["next_batch"]==1
+        final=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1})
+        assert final.status_code==200,final.text
+        finished=final.json()
+        assert finished["run"]["state"]=="completed",finished
+        assert finished["run"]["counts"]["question_create"]==20
+        assert finished["run"]["counts"]["question_reuse"]==1
+        assert finished["document"]["blocks"][0]["resource_id"]==finished["document"]["blocks"][-1]["resource_id"]
+        assert finished["run"]["counts"]["source_occurrences"]==21
+        assert finished["run"]["counts"]["methods_added"]==1
+        assert client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1}).json()["run"]["completed"]==21
+        assert len(client.get(many_path+"/registration-history").json())==2
 
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200

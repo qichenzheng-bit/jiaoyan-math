@@ -666,7 +666,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
     blocks=review_blocks(d,body.revision,[x.uid for x in body.items])
     mapped={};overrides={}
     for b,decision in zip(blocks,body.items):
-        item={**b,"chapter":decision.chapter or b.get("chapter",""),"dedup_reason":decision.reason}
+        item={**b,"chapter":decision.chapter or b.get("chapter",""),"dedup_reason":decision.reason or b.get("dedup_reason","")}
         values=registration_values(db,d,item,True,decision.reason,item["chapter"])
         if decision.action=="create":
             if decision.resource_id:raise HTTPException(422,"新建操作不能指定已有资源")
@@ -778,7 +778,7 @@ def apply_reference_edit(db,block,user):
     db.flush()
     return before,r
 
-def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,knowledge_overrides=None,commit=True,return_record=False):
+def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,knowledge_overrides=None,commit=True,return_record=False,prior=None):
     """Save manual intake, including explicit corrections to existing references, in one transaction."""
     bank.admin_lock(db,user)
     d=row(db,id)
@@ -795,7 +795,13 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
     original_revisions={}
     count=0
     edited_refs=set()
+    prior=prior or {}
     batch_resources=[];evaluate={}
+    # Reuse a resource created/selected in a previous committed chunk only if its revision still matches.
+    for info in prior.values():
+        if not info.get("content"):continue
+        r=db.get(Resource,info["id"])
+        if r and not r.archived and r.kind=="question":batch_resources.append((info["content"],r))
     for i,b in enumerate(blocks):
         if selected is not None and b["uid"] not in selected:continue
         if b.get("edit_reference_revision") is not None:
@@ -836,6 +842,7 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
         peer=next((r for content,r in batch_resources if b["kind"]=="question" and matching.same_question(content,b["content"])),None) if body.merge_same_batch and not b.get("reuse_resource_id") else None
         if peer is not None:
             r=peer;before=bank.view(r)
+            if r.id in prior and original_revisions.setdefault(r.id,r.revision)!=prior[r.id]["revision"]:raise HTTPException(409,"前批次原题已修改，请重新审核")
             if r.subject!=item_subject or matching.answer_conflict(r.answer,b["answer"]):raise HTTPException(422,"本批次同题的答案或科目冲突，请核对")
             changed=False
             if matching.method_keys(b["solution"])-matching.method_keys(r.solution) or not r.answer.strip() and b["answer"].strip():
@@ -844,17 +851,23 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
             if changed:r.revision+=1;r.updated_at=now()
-            action="reuse"
+            action="append" if changed and (r.solution!=before["solution"] or r.answer!=before["answer"]) else "reuse"
         elif b.get("reuse_resource_id"):
             r=bank.existing(db,b["reuse_resource_id"],True)
-            if r.archived or r.kind!=b["kind"] or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
+            expected=b.get("reuse_revision")
+            if r.id in prior and expected==prior[r.id]["base_revision"]:expected=prior[r.id]["revision"]
+            if r.archived or r.kind!=b["kind"] or original_revisions.setdefault(r.id,r.revision)!=expected:
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
             before=bank.view(r)
             appended=b.get("reuse_mode")=="append"
             changed=merge_question_methods(r,b,item_subject) if appended else False
             if changed:evaluate[r.id]=r
             # Prevent an edited draft from silently reusing a different question.
-            if not appended and any(data[k]!=getattr(r,k) for k in (("kind","content","answer","solution","subject","chapter","question_type","difficulty") if b["kind"]=="question" else ("kind","title","content","proof","subject","chapter","unit_type"))):
+            comparison=("kind","content","answer","solution","subject","chapter","question_type","difficulty") if b["kind"]=="question" else ("kind","title","content","proof","subject","chapter","unit_type")
+            if r.id in prior or r.id in {peer.id for _,peer in batch_resources}:
+                # Additional methods from an earlier chunk are expected; never replace them with a stale snapshot.
+                if b["kind"]=="question":comparison=tuple(k for k in comparison if k!="solution")
+            if not appended and any(data[k]!=getattr(r,k) for k in comparison):
                 raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
@@ -884,8 +897,8 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
         replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0),original_question_number=b.get("original_question_number",""),source_page_start=b.get("source_page_start"),source_page_end=b.get("source_page_end")).model_dump()
         replacement["snapshot"]=bank.view(r)
         blocks[i]=replacement
-        history.append({"uid":b["uid"],"action":action,"reason":"手动录入复用原题" if action=="reuse" else "手动直接入库","input":b,"before":before,
-                        "after":bank.view(r),"knowledge_ids":knowledge_ids,"source_id":primary})
+        history.append({"uid":b["uid"],"action":action,"reason":b.get("dedup_reason") or ("复用原题" if action=="reuse" else "追加解法" if action=="append" else "正式入库"),"input":b,"before":before,
+                        "after":bank.view(r),"knowledge_ids":knowledge_ids,"source_id":primary,"source_occurrence":source_occurrence(db,d,b,primary) if primary else None})
     # Refresh references created in this transaction after later same-batch methods were added.
     final_resources={r.id:r for _,r in batch_resources}
     for i,b in enumerate(blocks):
@@ -983,6 +996,12 @@ def manual_review_data(db,d,only_uid=None):
             elif action=="append":
                 try:validate_append(resource,b,b.get("subject") if b.get("subject") is not None else d.subject)
                 except HTTPException as e:errors.append(e.detail)
+            else:
+                keys=("content","answer","solution","chapter","question_type","difficulty") if actual_kind=="question" else ("title","content","proof","chapter","unit_type")
+                if normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject)!=resource.subject or any(b.get(k,"")!=getattr(resource,k) for k in keys):errors.append("引用内容或属性已变化，请重新选择")
+        elif action=="update":
+            r=db.get(Resource,b.get("resource_id"))
+            if not r or r.archived or r.revision!=b.get("edit_reference_revision"):errors.append("原资源版本已变化，请重新审核")
         elif action=="create" and actual_kind=="question" and (peer:=next((x for x in d.blocks[:n-1] if x["kind"]=="question" and matching.same_question(x["content"],b["content"])),None)) is not None:
             if matching.answer_conflict(peer.get("answer",""),b.get("answer","")) or normalize_subject(peer.get("subject") if peer.get("subject") is not None else d.subject)!=normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject):
                 errors.append("本资料同题的答案或科目冲突，请核对")
@@ -1009,8 +1028,13 @@ def manual_review_state(db,d):
     except (ValueError,TypeError):return {}
 
 def manual_item_digest(d,b):
-    value={k:v for k,v in b.items() if k!="question_data"}
-    peers=[{k:v for k,v in x.items() if k!="question_data"} for x in d.blocks if x["uid"]!=b["uid"] and x["kind"]=="question" and b["kind"]=="question" and matching.same_question(x["content"],b["content"])]
+    def reviewed_content(x):
+        value={k:v for k,v in x.items() if k!="question_data"}
+        if x.get("kind")=="question":
+            value["question_data"]=resolve(x.get("content",""),x.get("answer",""),x.get("solution",""),x.get("question_type",""),x.get("question_data")).model_dump(exclude={"legacy_digest"})
+        return value
+    value=reviewed_content(b)
+    peers=[reviewed_content(x) for x in d.blocks if x["uid"]!=b["uid"] and x["kind"]=="question" and b["kind"]=="question" and matching.same_question(x["content"],b["content"])]
     return hashlib.sha256(json.dumps([d.source_id,d.subject,value,peers],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 
 def manual_reviewed(d,state):
@@ -1051,9 +1075,160 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     if not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
         raise HTTPException(409,"请先逐条完成审核")
     if any(r["warnings"] for r in review["rows"]) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
+    if len(review["rows"])>20:raise HTTPException(422,"超过20条，请使用批次入库计划")
     saved=write_registration(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user)
     counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0}
     for item in review["rows"]:
         key="updated" if item["action"] in ("update","append") else "question_reuse" if item["action"]=="batch_reuse" else item["kind"]+"_"+item["action"]
         counts[key]+=1
     return {"document":saved,"counts":counts}
+
+
+REGISTRATION_CHUNK=20
+
+class IntakeRunStart(BaseModel):
+    revision:int=Field(ge=1)
+    accept_warnings:bool=False
+
+class IntakeRunStep(BaseModel):
+    run_id:str=Field(min_length=1,max_length=36)
+    batch:int=Field(ge=0,le=10)
+
+def run_key(ident):return "intake.run."+ident
+def active_run_key(id):return "intake.active."+id
+def read_run(db,id,ident=None):
+    if not ident:
+        pointer=db.get(Setting,active_run_key(id))
+        if not pointer:return None
+        ident=pointer.value
+    record=db.get(Setting,run_key(ident))
+    if not record:return None
+    try:data=json.loads(record.value)
+    except (ValueError,TypeError):return None
+    return data if isinstance(data,dict) and data.get("document_id")==id else None
+
+def store_run(db,data):
+    db.merge(Setting(key=run_key(data["id"]),value=json.dumps(data,ensure_ascii=False)))
+    db.merge(Setting(key=active_run_key(data["document_id"]),value=data["id"]))
+
+def run_view(run):
+    return {k:v for k,v in run.items() if k not in ("prior","approved_digests")}
+
+def registration_counts():
+    return {"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0,"methods_added":0,"source_occurrences":0,"evaluation_queued":0}
+
+def actual_counts(db,entries):
+    counts=registration_counts();evaluations=set()
+    for e in entries:
+        r=e["after"];old=e.get("before") or {};kind=r["kind"];action=e["action"]
+        if action=="create":counts[kind+"_create"]+=1
+        elif action=="update":counts["updated"]+=1
+        else:counts[kind+"_reuse"]+=1
+        if kind=="question" and action!="create":
+            counts["methods_added"]+=len(matching.method_keys(r["solution"])-matching.method_keys(old.get("solution","")))
+        if e.get("source_occurrence"):counts["source_occurrences"]+=1
+        if kind=="question":
+            resource=db.get(Resource,r["id"])
+            if resource and bank.read_recommendation(db,resource).get("state")=="queued":evaluations.add(r["id"])
+    counts["evaluation_queued"]=len(evaluations)
+    return counts,sorted(evaluations)
+
+def intake_preview(db,d):
+    if d.kind!="intake" or d.archived:raise HTTPException(409,"文档不可入库")
+    review=manual_review_data(db,d);approved=set(manual_reviewed(d,manual_review_state(db,d)))
+    source=bank.active_source(db,d.source_id)
+    blocks={b["uid"]:b for b in d.blocks}
+    rows=[]
+    for r in review["rows"]:
+        b=blocks[r["uid"]];target=b.get("reuse_resource_id") or b.get("resource_id")
+        rows.append({**r,"approved":r["uid"] in approved and not r["errors"],"code":b.get("reuse_code") or (b.get("snapshot") or {}).get("code"),"original_question_number":b.get("original_question_number",""),"source_page_start":b.get("source_page_start"),"source_page_end":b.get("source_page_end"),"target_id":target})
+    return {"revision":d.revision,"source":{"id":source.id,"title":source.title,"revision":source.revision},"rows":rows,"total":len(rows),"batch_size":REGISTRATION_CHUNK,"batches":(len(rows)+REGISTRATION_CHUNK-1)//REGISTRATION_CHUNK}
+
+@router.post("/{id}/intake-preview",dependencies=[Depends(require_origin)])
+def preview_intake(id:str,body:ManualRevision,db:Session=Depends(get_db)):
+    d=row(db,id)
+    if d.revision!=body.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    return intake_preview(db,d)
+
+@router.get("/{id}/intake-run")
+def current_intake_run(id:str,db:Session=Depends(get_db)):
+    if not db.get(Doc,id):raise HTTPException(404,"文档不存在")
+    run=read_run(db,id)
+    if not run:return None
+    d=db.get(Doc,id)
+    result=run_view(run)
+    result["stale"]=run["revision"]!=d.revision or d.archived
+    return result
+
+@router.get("/{id}/intake-run/{ident}")
+def historical_intake_run(id:str,ident:str,db:Session=Depends(get_db)):
+    run=read_run(db,id,ident)
+    if not run:raise HTTPException(404,"入库任务不存在")
+    return run_view(run)
+
+@router.post("/{id}/intake-run",dependencies=[Depends(require_origin)])
+def start_intake_run(id:str,body:IntakeRunStart,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    old=read_run(db,id)
+    if old and body.revision==old["base_revision"] and old["revision"]==d.revision:return run_view(old)
+    if old and old["state"] in ("ready","failed") and old["revision"]==d.revision:raise HTTPException(409,"已有未完成的入库任务，请继续或取消")
+    if body.revision!=d.revision:raise HTTPException(409,"草稿版本已变化，请重新检查")
+    preview=intake_preview(db,d);rows=preview["rows"]
+    if not rows or any(r["errors"] or not r["approved"] for r in rows):raise HTTPException(409,"请先逐条完成审核")
+    if any(r["warnings"] for r in rows) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
+    if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):raise HTTPException(409,"请先处理AI编辑建议")
+    ids=[r["uid"] for r in rows]
+    run={"id":str(uuid4()),"document_id":id,"base_revision":d.revision,"revision":d.revision,"source":preview["source"],"state":"ready","created_at":now(),"updated_at":now(),"total":len(ids),"completed":0,"next_batch":0,"batches":[{"index":i//REGISTRATION_CHUNK,"uids":ids[i:i+REGISTRATION_CHUNK],"state":"pending"} for i in range(0,len(ids),REGISTRATION_CHUNK)],"counts":registration_counts(),"prior":{},"evaluation_ids":[],"error":""}
+    store_run(db,run);audit(db,"document.intake.run.start",user.id);db.commit()
+    return run_view(run)
+
+@router.post("/{id}/intake-run/step",dependencies=[Depends(require_origin)])
+def step_intake_run(id:str,body:IntakeRunStep,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from sqlalchemy.exc import SQLAlchemyError
+    bank.admin_lock(db,user);d=row(db,id)
+    run=read_run(db,id,body.run_id)
+    current=read_run(db,id)
+    if not run or not current or current["id"]!=run["id"]:raise HTTPException(409,"入库任务已变化，请刷新")
+    # Repeat requests for a committed chunk return the existing receipt, not a second write.
+    if body.batch<run["next_batch"] or run["state"]=="completed":return {"run":run_view(run),"document":public(d)}
+    if run["state"] not in ("ready","failed") or body.batch!=run["next_batch"]:raise HTTPException(409,"批次顺序或状态无效")
+    if d.archived or d.revision!=run["revision"]:raise HTTPException(409,"草稿已修改，请取消旧任务后重新审核")
+    batch=run["batches"][body.batch]
+    try:
+        with db.begin_nested():
+            src=bank.active_source(db,d.source_id)
+            if src.id!=run["source"]["id"] or src.revision!=run["source"]["revision"]:raise HTTPException(409,"来源资料已变化，请重新审核")
+            # Check actual target versions and pending block identities under the same lock.
+            selected=set(batch["uids"])
+            if not selected<={b["uid"] for b in d.blocks if b["kind"] in ("question","knowledge") or b.get("edit_reference_revision")}:raise HTTPException(409,"待入库条目已变化")
+            saved,record=write_registration(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user,selected=selected,commit=False,return_record=True,prior=run["prior"])
+            counts,evaluations=actual_counts(db,record.entries)
+            record_id=record.id
+            prior=dict(run["prior"])
+            for e in record.entries:
+                r=db.get(Resource,e["after"]["id"])
+                if not r or r.kind!="question":continue
+                old=prior.get(r.id)
+                prior[r.id]={"id":r.id,"revision":r.revision,"base_revision":old["base_revision"] if old else (e.get("before") or {}).get("revision",r.revision),"content":r.content}
+    except (HTTPException,SQLAlchemyError) as exc:
+        run["state"]="failed";run["error"]=str(exc.detail)[:500] if isinstance(exc,HTTPException) else "数据库写入失败，本批次已回滚"
+        batch["state"]="failed";batch["error"]=run["error"];run["updated_at"]=now()
+        store_run(db,run);audit(db,"document.intake.run.failed",user.id);db.commit()
+        return {"run":run_view(run),"document":public(d)}
+    run["prior"]=prior
+    batch.update(state="completed",record_id=record_id,counts=counts);batch.pop("error",None)
+    for k,v in counts.items():
+        if k!="evaluation_queued":run["counts"][k]+=v
+    run["evaluation_ids"]=sorted(set(run["evaluation_ids"])|set(evaluations))
+    run["counts"]["evaluation_queued"]=len(run["evaluation_ids"])
+    run["completed"]+=len(batch["uids"]);run["next_batch"]+=1;run["revision"]=d.revision;run["updated_at"]=now();run["error"]=""
+    run["state"]="completed" if run["next_batch"]==len(run["batches"]) else "ready"
+    store_run(db,run);db.commit()
+    return {"run":run_view(run),"document":saved}
+
+@router.post("/{id}/intake-run/cancel",dependencies=[Depends(require_origin)])
+def cancel_intake_run(id:str,body:IntakeRunStep,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);row(db,id);run=read_run(db,id)
+    if not run or run["id"]!=body.run_id or run["state"] not in ("ready","failed"):raise HTTPException(409,"任务不能取消")
+    run["state"]="cancelled";run["updated_at"]=now();store_run(db,run);audit(db,"document.intake.run.cancel",user.id);db.commit()
+    return run_view(run)
