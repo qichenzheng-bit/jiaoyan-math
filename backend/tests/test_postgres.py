@@ -500,6 +500,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         paper=client.get("/api/documents/"+handoff.json()["document_id"]).json()
         assert [b["resource_id"] for b in paper["blocks"]]==c["ids"]
         assert paper["blocks"][0]["snapshot"]["difficulty"]=="困难"
+        scored=client.put("/api/documents/"+paper["id"],headers=origin,json={**paper,"blocks":[{**paper["blocks"][0],"score":7.5},*paper["blocks"][1:]]})
+        assert scored.status_code==200,scored.text
+        assert scored.json()["blocks"][0]["score"]==7.5
+        bad_scores=client.put("/api/documents/"+paper["id"],headers=origin,json={**scored.json(),"blocks":[{**scored.json()["blocks"][0],"subquestion_scores":[1,2]},*scored.json()["blocks"][1:]]})
+        assert bad_scores.status_code==422,bad_scores.text
         partial={**payload,"items":[payload["items"][1]],"request_id":"cart-partial-ci"}
         partial_result=client.post("/api/bank/cart/confirm",headers=origin,json=partial)
         assert partial_result.status_code==200,partial_result.text

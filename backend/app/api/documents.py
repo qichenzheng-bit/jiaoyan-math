@@ -50,6 +50,7 @@ class Block(BaseModel):
     file_id:str|None=Field(default=None,max_length=36)
     width:int=Field(default=100,ge=20,le=100)
     score:float=Field(default=0,ge=0,le=1000)
+    subquestion_scores:list[float]=Field(default_factory=list,max_length=30)
     question_data:QuestionData|None=None
     @model_validator(mode="before")
     @classmethod
@@ -110,6 +111,14 @@ def validate(db,body,previous,*,allow_reference_edits=False):
             f=db.get(StoredFile,b.file_id) if b.file_id else None
             if not f or f.archived or f.media_type not in storage.IMAGE_TYPES:raise HTTPException(422,"图片无效")
         elif b.file_id:raise HTTPException(422,"仅图片块允许文件引用")
+        if b.subquestion_scores:
+            v=data.get("snapshot") or data
+            structure=resolve(v.get("content",""),v.get("answer",""),v.get("solution",""),v.get("question_type",""),v.get("question_data"))
+            if body.kind!="paper" or v.get("kind")!="question" or len(structure.subquestions)!=len(b.subquestion_scores) or any(not 0<=s<=1000 for s in b.subquestion_scores) or sum(b.subquestion_scores)>1000:
+                raise HTTPException(422,"小问分值与题目结构不匹配或超出范围")
+            data["score"]=round(sum(b.subquestion_scores),6)
+        if body.kind=="paper" and data.get("snapshot",{}).get("kind")=="knowledge":
+            raise HTTPException(422,"试卷不能直接引用知识单元")
         validate_images(db,data)
         if data.get('snapshot'):validate_images(db,data['snapshot'])
         result.append(data)
@@ -217,6 +226,8 @@ def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),
             resource=bank.existing(db,b["resource_id"])
             if resource.archived:raise HTTPException(409,"资源已停用")
             item["snapshot"]=bank.view(resource)
+            if item.get("subquestion_scores") and (b.get("snapshot") or {}).get("content")!=resource.content:
+                item["subquestion_scores"]=[]
         blocks.append(item)
     doc.blocks=blocks;doc.revision+=1;doc.updated_at=now()
     references(db,doc);audit(db,"document.refresh_references",user.id);db.commit()
