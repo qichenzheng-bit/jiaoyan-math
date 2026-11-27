@@ -53,7 +53,7 @@ if [[ "${JIAOYAN_PREBUILT_FRONTEND:-0}" == 1 ]]; then
   test "$(cat "$release/frontend/dist/release-sha.txt")" = "$sha"
   echo "Using the exact frontend tested in CI."
 else
-  (cd "$release/frontend" && npm install --prefer-offline --no-audit --no-fund && npm run build)
+  (cd "$release/frontend" && npm ci --prefer-offline --no-audit --no-fund && npm run build)
 fi
 set -a
 # File is provisioned by the administrator; never source repository .env.

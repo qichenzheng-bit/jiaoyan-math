@@ -88,6 +88,7 @@ jobs:
         with:
           persist-credentials: false
       - run: for f in deploy/*.sh; do bash -n "$f"; done
+      - run: python3 -m compileall -q deploy backend/app
       - run: bash deploy/unpack-video-source.sh "$RUNNER_TEMP/video-source-check"
   backend:
     needs: plan
@@ -150,7 +151,6 @@ jobs:
         run: |
           set -euo pipefail
           # Include the entire tracked frontend tree, build workflow and exact toolchain.
-          # Periodically refresh unlocked transitive dependencies until a lockfile is committed.
           key=$({
             git rev-parse HEAD:frontend
             git rev-parse HEAD:.github/workflows/ci.yml
@@ -200,13 +200,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/frontend-build-cache
           key: ${{ steps.build-key.outputs.key }}
-      - name: Export generated public dependency lock
-        if: steps.compiled.outputs.cache-hit != 'true'
-        run: |
-          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
-            node -e 'const lock=require("./package-lock.json"); for(const p of Object.values(lock.packages||{})){if(p.resolved&&!p.resolved.startsWith("https://registry.npmjs.org/"))throw Error("non-public registry");}'
-            base64 -w 120 package-lock.json | sed 's/^/JIAOYAN_LOCK:/'
-          fi
       - name: Retain generated dependency lock for review
         if: steps.compiled.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v6
@@ -217,7 +210,6 @@ jobs:
           retention-days: 7
       - name: Audit production npm dependencies
         if: steps.compiled.outputs.cache-hit != 'true'
-        continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
       - run: printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
       - uses: actions/upload-artifact@v6
