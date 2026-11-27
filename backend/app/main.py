@@ -18,7 +18,7 @@ from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.source_catalog import router as source_catalog_router
 from app.api.documents import router as document_router
-from app.api.document_pdf import router as document_pdf_router
+from app.api.document_pdf import router as document_pdf_router, pdf_maintenance_loop
 from app.api.intelligence import router as intelligence_router
 from app.api.workspaces import router as workspace_router
 from app.api.intake_records import router as intake_records_router
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop())]
+    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop()), asyncio.create_task(pdf_maintenance_loop())]
     try:
         yield
     finally:
