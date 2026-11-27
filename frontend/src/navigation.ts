@@ -40,7 +40,7 @@ export const workspaceGroups:WorkspaceGroup[]=[
  {id:'creation',name:'教学制作',icon:'media',sections:[
   {id:'creation',name:'制作与导出',entries:[entry('/videos'),entry('/papers'),entry('/handouts'),entry('/textbooks')]},
  ]},
- {id:'publishing',name:'作品与封面',icon:'works',sections:[{id:'release',name:'作品与封面',entries:[entry('/covers'),entry('/works','作品管理')]}]},
+ {id:'publishing',name:'作品与封面',icon:'works',sections:[{id:'release',name:'制作与管理',entries:[entry('/covers'),entry('/works','作品管理')]}]},
 ]
 
 export function workspaceParent(path:string,search:string):string{
