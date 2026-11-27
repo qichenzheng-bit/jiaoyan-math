@@ -162,3 +162,12 @@ def test_usage_api_distinguishes_old_worker_and_outage(monkeypatch):
         expected = {"available":False,"reason":reason}
         assert qoder.usage() == expected
         assert qoder.usage_refresh() == expected
+
+def test_vision_attachment_rejects_paths_and_invalid_media():
+    import base64
+    import pytest
+    raw=b"\x89PNG\r\n\x1a\nexample"
+    encoded=base64.b64encode(raw).decode()
+    assert worker.vision_attachment({"media_type":"image/png","base64":encoded})==(".png",raw)
+    for value in ({"path":"/etc/passwd"},{"media_type":"image/png","base64":"!"},{"media_type":"text/plain","base64":encoded},{"media_type":"image/jpeg","base64":encoded}):
+        with pytest.raises(ValueError):worker.vision_attachment(value)

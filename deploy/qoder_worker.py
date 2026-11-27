@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Unix-socket-only Qoder CN worker. Separate non-root service account."""
 import errno
+import base64
+import binascii
 import json
 import math
 import os
@@ -18,6 +20,20 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 SOCKET = "/run/jiaoyan-qoder/worker.sock"
+VISION_MAX_BYTES = 8 * 1024 * 1024
+VISION_TYPES = {"image/png":".png","image/jpeg":".jpg","image/webp":".webp","image/gif":".gif"}
+
+def vision_attachment(data):
+    """Accept bounded image bytes only; never trust caller-provided paths or filenames."""
+    if not isinstance(data,dict) or set(data)!={"media_type","base64"}: raise ValueError("image attachment required")
+    media,encoded=data["media_type"],data["base64"]
+    if not isinstance(media,str) or media not in VISION_TYPES or not isinstance(encoded,str) or len(encoded)>4*((VISION_MAX_BYTES+2)//3): raise ValueError("invalid attachment")
+    try: raw=base64.b64decode(encoded,validate=True)
+    except (ValueError,binascii.Error): raise ValueError("invalid image encoding")
+    valid=(media=="image/png" and raw.startswith(b"\x89PNG\r\n\x1a\n") or media=="image/jpeg" and raw.startswith(b"\xff\xd8\xff") or media=="image/webp" and raw[:4]==b"RIFF" and raw[8:12]==b"WEBP" or media=="image/gif" and raw[:6] in (b"GIF87a",b"GIF89a"))
+    if not valid or not 0<len(raw)<=VISION_MAX_BYTES: raise ValueError("invalid image or size")
+    return VISION_TYPES[media],raw
+
 AUTH_DOMAINS = ("qoder.cn", "qoder.com.cn", "qoder.com", "aliyun.com", "alibabacloud.com")
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 URL = re.compile(r"https://[^\s<>\x00-\x20\"']+")
@@ -445,7 +461,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 12, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 13, "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -560,7 +576,7 @@ def prune_snapshots():
     except OSError:
         pass
 
-def chat_run(job, exe, model, prompt):
+def chat_run(job, exe, model, prompt, attachment=None):
     video = job.get("video", False)
     output_limit = 300000 if video else 48000
     global chat_active,verified_at,retained_auth
@@ -573,6 +589,11 @@ def chat_run(job, exe, model, prompt):
             if video:
                 if job["system"]: args += ["--system-prompt", job["system"]]
             if job["effort"] != "default": args += ["--reasoning-effort",job["effort"]]
+            if attachment is not None:
+                suffix,raw=attachment
+                image=Path(cwd)/("source"+suffix)
+                image.write_bytes(raw)
+                args += ["--attachment",str(image)]
             proc = subprocess.Popen(args+["-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
             with lock:
@@ -645,12 +666,16 @@ def chat_run(job, exe, model, prompt):
                 pass
             chat_active=None
 
-def chat_start(data, video=False):
+def chat_start(data, video=False, vision=False):
     global chat_active
     if not isinstance(data,dict): return 422,{"detail":"请求无效"}
     ident,model,prompt=data.get("id"),data.get("model"),data.get("prompt")
     if not isinstance(ident,str) or not JOB_ID.fullmatch(ident) or not allowed_model(model) or not isinstance(prompt,str) or "\x00" in prompt or not 0<len(prompt.encode("utf-8"))<=(120000 if video else 100000):
         return 422,{"detail":"模型或上下文无效；请检查模型及提示词长度"}
+    attachment=None
+    if vision:
+        try: attachment=vision_attachment(data.get("attachment"))
+        except ValueError: return 422,{"detail":"图片附件无效或超过8 MiB"}
     system,effort,timeout=data.get("system",""),data.get("effort","default"),data.get("timeout",900)
     if effort != "default" and (not isinstance(effort,str) or effort not in catalog_efforts.get(model, [])):
         return 422,{"detail":"当前模型未报告该推理强度，请刷新模型配置"}
@@ -672,7 +697,7 @@ def chat_start(data, video=False):
         except OSError: return 503,{"detail":"任务结果缓存不可写，请检查执行服务存储"}
         chat_jobs[ident]=job
         chat_active=ident
-        threading.Thread(target=chat_run,args=(job,exe,model,prompt),daemon=True).start()
+        threading.Thread(target=chat_run,args=(job,exe,model,prompt,attachment) if vision else (job,exe,model,prompt),daemon=True).start()
         return 200,chat_snapshot(job)
 
 def chat_state(ident, cancel=False):
@@ -712,13 +737,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
             return self.reply(*chat_state(self.path.split("/")[2], True))
-        if self.path in ("/chat/start", "/video/start"):
+        if self.path in ("/chat/start", "/video/start", "/vision/start"):
             try:
                 n=int(self.headers.get("Content-Length","0"))
-                if not 0<n<=(800000 if self.path == "/video/start" else 200000): raise ValueError()
+                if not 0<n<=(12*1024*1024 if self.path=="/vision/start" else 800000 if self.path == "/video/start" else 200000): raise ValueError()
                 data=json.loads(self.rfile.read(n))
             except (ValueError,UnicodeError): return self.reply(422,{"detail":"请求无效"})
-            return self.reply(*chat_start(data, video=self.path == "/video/start"))
+            return self.reply(*chat_start(data, video=self.path == "/video/start", vision=self.path=="/vision/start"))
         if self.path == "/models/refresh":
             return self.reply(*refresh_models())
         if self.path == "/usage/refresh":
