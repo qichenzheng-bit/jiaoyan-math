@@ -2,12 +2,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.api import teaching_works as api
-from app.models import User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject, WorkHandoff
+from app.models import User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject
 
 
 def test_catalogue_combines_real_video_records_and_documents():
     engine = create_engine("sqlite://")
-    for model in (User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject, WorkHandoff):
+    for model in (User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add(User(id=1, username="test", password_hash="test", created_at=1))

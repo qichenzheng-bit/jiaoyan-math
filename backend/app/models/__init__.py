@@ -421,13 +421,3 @@ class TeachingWorkPendingCover(Base):
     filename: Mapped[str] = mapped_column(String(255))
     snapshot: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[int] = mapped_column(BigInteger)
-
-
-class WorkHandoff(Base):
-    """Private preparation draft, not an actual product or publication."""
-    __tablename__ = "work_handoffs"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, index=True)
-    purpose: Mapped[str] = mapped_column(String(16))
-    items: Mapped[list] = mapped_column(JSON)
-    created_at: Mapped[int] = mapped_column(BigInteger)

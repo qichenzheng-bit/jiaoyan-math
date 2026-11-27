@@ -205,9 +205,6 @@ def versions(id:str,db:Session=Depends(get_db)):
 @router.post("/{id}/archive",dependencies=[Depends(require_origin)])
 def archive(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     admin_lock(db,user);r=existing(db,id)
-    if r.kind=="work":
-        from app.api.teaching_works import related_handoffs
-        if related_handoffs(db,user.id,r.id):raise HTTPException(409,"作品仍被准备单引用")
     dependent={"work":("publication","work_id"),"account":("checkin","account_id")}.get(r.kind)
     if dependent and any(x.data.get(dependent[1])==r.id for x in db.scalars(select(Item).where(Item.kind==dependent[0],Item.archived==False))):raise HTTPException(409,"仍有有效关联记录")
     if not r.archived:r.archived=True;r.revision+=1;r.updated_at=now();save_version(db,r);audit(db,"studio.archive",user.id);db.commit()
