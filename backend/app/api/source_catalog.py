@@ -93,6 +93,7 @@ class StatisticsRequest(BaseModel):
     institutions:list[str]=Field(default_factory=list,max_length=100)
     categories:list[str]=Field(default_factory=list,max_length=100)
     exam_types:list[str]=Field(default_factory=list,max_length=100)
+    source_types:list[str]=Field(default_factory=list,max_length=20)
     subject:str=Field(default="",max_length=40)
     all_sources:bool=False
     limit:int=Field(default=50,ge=1,le=100)
@@ -101,13 +102,13 @@ class StatisticsRequest(BaseModel):
 @router.post("/statistics",dependencies=[Depends(require_origin)])
 def statistics(body:StatisticsRequest,db:Session=Depends(get_db)):
     """Count recorded question knowledge names, not graph labels or inferred source totals."""
-    if not (body.all_sources or body.source_ids or body.years or body.institutions or body.categories or body.exam_types):
+    if not (body.all_sources or body.source_ids or body.years or body.institutions or body.categories or body.exam_types or body.source_types):
         raise HTTPException(422,"请选择统计来源或明确选择全部来源")
     filters=["s.kind='source'","s.archived=false"]
     params={"limit":body.limit,"offset":body.offset}
     for key,col,maxlen in (("source_ids","s.id",36),("years","s.cohort_year",12),
                             ("institutions","d.institution",120),("categories","d.category",60),
-                            ("exam_types","s.exam_type",80)):
+                            ("exam_types","s.exam_type",80),("source_types","s.source_type",16)):
         values=list(dict.fromkeys(v.strip() for v in getattr(body,key) if v.strip()))
         if getattr(body,key) and not values or any(len(v)>maxlen for v in values):
             raise HTTPException(422,"统计筛选条件无效")

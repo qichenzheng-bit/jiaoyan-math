@@ -14,6 +14,7 @@ import Work from './pages/Work'
 import OriginalLibrary from './pages/OriginalLibrary'
 import Graph from './pages/Graph'
 import SourceCatalog from './pages/SourceCatalog'
+import SourceStatistics from './pages/SourceStatistics'
 import DocWork from './pages/DocWork'
 import Intake from './pages/Intake'
 import DocumentPrint from './pages/DocumentPrint'
@@ -85,6 +86,7 @@ export default function App(){
     <Route path="/publishing" element={<Navigate to="/project/publishing" replace/>}/>
     <Route path="/analytics" element={<Navigate to="/project/publishing" replace/>}/>
     <Route path="/resource-edit/:id" element={<ResourceEdit/>}/>
+    <Route path="/source-catalog/statistics" element={<SourceStatistics/>}/>
     <Route path="/source-catalog/:id" element={<SourceCatalog/>}/>
     <Route path="/project/intake" element={<Navigate to="/intake" replace/>}/>
     <Route path="/project/:id" element={<ProjectHub/>}/>

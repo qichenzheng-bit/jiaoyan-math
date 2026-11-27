@@ -399,6 +399,19 @@ def test_migration_and_login(tmp_path, monkeypatch):
         relation=client.get("/api/resources/"+seed["id"]+"/sources").json()
         linked=client.put("/api/resources/"+seed["id"]+"/sources",headers=origin,json={"revision":relation["revision"],"items":[{"source_id":source_a["id"],"is_primary":True,"original_question_number":"10"},{"source_id":source_b["id"],"is_primary":False,"original_question_number":"2"}]})
         assert linked.status_code==200,linked.text
+        stats_path="/api/source-catalog/statistics"
+        assert client.post(stats_path,headers=origin,json={}).status_code==422
+        aggregate=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"],source_a["id"]]})
+        assert aggregate.status_code==200,aggregate.text
+        data=aggregate.json()
+        assert data["source_count"]==2 and data["question_count"]==1 and data["source_question_count"]==2
+        assert data["knowledge_count"]==2 and data["questions_with_knowledge"]==1
+        assert data["original_question_total"] is None and data["confirmed_complete_sources"]==0
+        assert {r["name"] for r in data["items"]}=={"专项甲","专项乙"}
+        assert all(r["question_count"]==1 and r["source_question_count"]==2 for r in data["items"])
+        single=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"years":["2018"]}).json()
+        assert single["source_count"]==1 and single["source_question_count"]==1
+        assert len(client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"limit":1,"offset":1}).json()["items"])==1
         def seed_search(**kw):
             response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":seed["code"],**kw})
             assert response.status_code==200,response.text
