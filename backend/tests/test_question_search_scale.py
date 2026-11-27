@@ -78,7 +78,7 @@ def test_question_bank_pressure_500k():
                 md5(:prefix||g::text),md5(:prefix||g::text),'{}'::jsonb,
                 CASE WHEN g%1000=0 THEN '{"answer_complete": true,"solution_complete": true,"ambiguous": false,"method:泰勒展开": true,"single": true}'::jsonb
                   ELSE '{"answer_complete": true,"solution_complete": true,"ambiguous": false,"single": true}'::jsonb END,
-                false,g,g,'综合题','简单' FROM generate_series(:start,:end) g
+                false,g,g,'综合题','简单' FROM generate_series(CAST(:start AS integer),CAST(:end AS integer)) g
             """),{"prefix":prefix,"start":previous+1,"end":n})
             previous=n
             db.execute(text("ANALYZE teaching_resources"))
