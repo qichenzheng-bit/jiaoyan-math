@@ -89,7 +89,7 @@ class TeachingResource(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"),Index("ix_source_catalog_year","kind","archived","cohort_year","exam_type"))
+    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"),Index("ix_source_catalog_year","kind","archived","cohort_year","exam_type"),Index("ix_resource_source_reverse","source_id","kind","archived"),Index("ix_resource_chapter_scope","kind","archived","subject","chapter"))
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
@@ -130,6 +130,7 @@ class ResourceSourceLink(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean)
     role_verified: Mapped[bool] = mapped_column(Boolean)
     __table_args__ = (
+        Index("ix_resource_source_link_reverse","source_id","resource_id"),
         CheckConstraint("resource_id <> source_id",name="ck_resource_source_not_self"),
         CheckConstraint("provenance_role IN ('original','reproduced','adapted')",name="ck_resource_source_role"),
         CheckConstraint("(page_start IS NULL OR page_start >= 1) AND (page_end IS NULL OR page_end >= 1) AND (page_start IS NULL OR page_end IS NULL OR page_end >= page_start)",name="ck_resource_source_pages"),

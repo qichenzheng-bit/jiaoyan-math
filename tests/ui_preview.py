@@ -380,7 +380,7 @@ with sync_playwright() as p:
                     assert page.get_by_label("录入批次名称").input_value()==source["title"]
                     capture(page,path=str(OUT/"21-source-reuse.png"),full_page=False)
                 if name=="17-intake-knowledge":
-                    assert page.get_by_role("button",name="知识点",exact=True).get_attribute("aria-pressed")=="true"
+                    assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
                 if name=="05-chat":
                     assert page.locator("#mode-more-panel .reasoning-effort").count()==0
                     page.get_by_role("button",name="打开模型选择",exact=True).click()
