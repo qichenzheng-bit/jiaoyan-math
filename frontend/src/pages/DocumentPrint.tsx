@@ -1,16 +1,16 @@
 import {useWorkspaceBack} from '../components/WorkspaceNavigation'
 import {MathText} from '../components/MathText'
-import {useEffect,useState,useRef,useMemo} from 'react'
+import {useEffect,useState,useRef,useMemo,Fragment} from 'react'
 import PagedPreview from './PagedPreview'
 import PdfJobs from './PdfJobs'
 import type {CSSProperties} from 'react'
-import {defaults,builtins,dimensions,layoutError,sanitizeLayout,readLocal,writeLocal,readTemplates} from './documentLayout'
-import type {Layout,LayoutTemplate} from './documentLayout'
+import {defaults,builtins,dimensions,layoutError,sanitizeLayout,readLocal,writeLocal,readTemplates,templateLayout,sanitizeRule} from './documentLayout'
+import type {Layout,LayoutTemplate,BlockStyle,Role} from './documentLayout'
 import './document-layout.css'
 import {useParams,useSearchParams,Link,useNavigate} from 'react-router-dom'
 import {api} from '../auth'
 import ChatText from './ChatText'
-type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string}
+type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:{stem:string;options?:{label:string;content:string}[];blanks?:unknown[]}}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
 type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
 export type PrintDoc={export_token?:string;parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
@@ -177,4 +177,78 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   </>}
  </div>
 }
-export function PrintableDocument({doc,stem=false,answerOnly=false,source=false,sourceId,layout}:{doc:PrintDoc;stem?:boolean;answerOnly?:boolean;source?:boolean;sourceId?:string;layout?:Layout}){let n=0;return <article className={"print-document"+(layout?" configured-print":"")}>{layout?.header&&<div className="layout-document-header"><MathText compact content={layout.header.replaceAll('{{文档名称}}',doc.title).replaceAll('{{科目}}',doc.subject??'')}/></div>}<h1><MathText compact content={doc.title}/></h1><div className="print-subtitle">{doc.subject}{doc.kind==='paper'&&!source&&' · 总分 '+doc.blocks.reduce((s,b)=>s+(b.score??0),0)}</div><div className="layout-body">{doc.blocks.map(b=>{const v={...(b.snapshot??b)};for(const field of b.local_fields??[])v[field]=b[field];for(const field of b.hidden_fields??[])v[field]='';if(b.kind==='pagebreak')return <div key={b.uid} className="print-break"/>;if(b.kind==='image')return <figure key={b.uid} data-layout-uid={b.uid}><img src={'/api/files/'+b.file_id+'/preview'} alt={b.title} style={{width:b.width+'%'}}/><figcaption><MathText compact content={b.title}/></figcaption></figure>;if(b.kind==='heading'&&b.heading_level){const Heading=b.heading_level===2?'h3':'h2';return <section className={'print-block print-heading-level-'+b.heading_level} key={b.uid} data-layout-uid={b.uid} data-layout-level={b.heading_level}><Heading><MathText compact content={v.title||v.content}/></Heading>{v.title&&v.content&&<ChatText content={v.content}/>}</section>}const question=v.kind==='question';if(question)n++;return <section className={"print-block"+(question&&layout?.keepQuestions?" layout-keep":"")} key={b.uid} data-layout-uid={b.uid}>{source&&sourceId&&b.resource_id&&<Link className="print-controls source-edit-link" to={'/resource-edit/'+encodeURIComponent(b.resource_id)+(sourceId?'?return_source='+encodeURIComponent(sourceId):'')}>编辑{question?'题目':'知识单元'}</Link>}{question?<p className="print-question-number">{layout?.originalNumbers&&b.original_question_number?b.original_question_number:n}. {b.score?'（本题满分 '+b.score+' 分）':''}</p>:v.title&&<h2><MathText compact content={v.title}/></h2>}<ChatText content={v.content}/>{question&&!!b.subquestion_scores?.length&&<p className="print-question-number">{b.subquestion_scores.map((s,i)=>'（'+(i+1)+'）'+s+'分').join('　')}</p>}{stem&&question&&layout&&layout.answerSpace>0&&<div className="layout-answer-space" style={{height:layout.answerSpace+'mm'}}/>}{!stem&&<>{v.answer&&<div>答案：<ChatText content={v.answer}/></div>}{!answerOnly&&v.analysis&&<div>思路：<ChatText content={v.analysis}/></div>}{!answerOnly&&v.solution&&<div>解析：<ChatText content={v.solution}/></div>}{!answerOnly&&v.proof&&<div>证明：<ChatText content={v.proof}/></div>}</>}</section>})}</div>{layout?.footer&&<div className="layout-document-footer"><MathText compact content={layout.footer.replaceAll('{{文档名称}}',doc.title).replaceAll('{{科目}}',doc.subject??'')}/></div>}</article>}
+
+const roleNames:Record<Role,string>={normal:'',knowledge:'知识点',definition:'定义',theorem:'定理',lemma:'引理',corollary:'推论',proof:'证明',example:'例',exercise:'练习',method:'方法',warning:'易错点',summary:'小结'}
+function effective(b:Block):Content{
+ const v={...(b.snapshot??b)}
+ for(const field of b.local_fields??[])v[field]=b[field]
+ for(const field of b.hidden_fields??[])v[field]=''
+ return v
+}
+function blockCss(rule:BlockStyle):CSSProperties{
+ return {fontSize:rule.size===undefined?undefined:rule.size+'pt',lineHeight:rule.lineHeight,marginBottom:rule.paragraphGap===undefined?undefined:rule.paragraphGap+'pt',textAlign:rule.align,fontWeight:rule.bold===undefined?undefined:rule.bold?700:400}
+}
+function RichPrint({content,labels,blankWidth=0}:{content:string;labels:Map<string,string>;blankWidth?:number}){
+ const raw=blankWidth>0?content.replaceAll('\\underline{\\qquad}','\\underline{\\hspace{'+blankWidth+'mm}}'):content
+ if(!raw.includes('[[ref:'))return <ChatText content={raw}/>
+ return <div className="layout-rich-reference">{raw.split(/(\[\[ref:[A-Za-z0-9_-]{1,100}\]\])/g).filter(Boolean).map((part,i)=>{
+  const m=part.match(/^\[\[ref:([A-Za-z0-9_-]{1,100})\]\]$/)
+  return m?(labels.has(m[1])?<a key={i} href={'#layout-block-'+m[1]} className="layout-cross-ref">{labels.get(m[1])}</a>:<span key={i} data-layout-reference-error="true">[失效引用：{m[1]}]</span>):<MathText key={i} compact content={part}/>
+ })}</div>
+}
+export function PrintableDocument({doc,stem=false,answerOnly=false,source=false,sourceId,layout}:{doc:PrintDoc;stem?:boolean;answerOnly?:boolean;source?:boolean;sourceId?:string;layout?:Layout}){
+ let n=0,chapter='',type='',group=0
+ const counts:Record<string,number>={},labels=new Map<string,string>()
+ const hasHeadings=doc.blocks.some(b=>b.kind==='heading')
+ const rows=doc.blocks.map(b=>{
+  const v=effective(b),question=v.kind==='question',kind=question?'question':b.kind==='heading'?'heading':v.kind
+  if(b.kind==='heading'&&b.heading_level===1){chapter=b.uid;if(layout?.numbering==='section')n=0}
+  const generic={...layout?.typeStyles[kind],...(v.question_type?layout?.typeStyles[v.question_type]:{})}
+  const specific={...layout?.chapterStyles[chapter],...layout?.blockStyles[b.uid]}
+  const role=specific.role??generic.role??'normal'
+  const rule:BlockStyle={...generic,...layout?.typeStyles['role:'+role],...specific}
+  const qtype=v.question_type||'其他题型'
+  const section=Boolean(question&&doc.kind==='paper'&&layout?.typeHeadings&&!hasHeadings&&qtype!==type)
+  if(section){type=qtype;group++;if(layout?.numbering==='section')n=0}
+  if(question)n++
+  const roleNumber=role!=='normal'?(counts[role]=(counts[role]??0)+1):0
+  const number=layout?.originalNumbers&&b.original_question_number?b.original_question_number:String(n)
+  const label=role!=='normal'?roleNames[role]+(role==='proof'||role==='warning'||role==='summary'?'':' '+roleNumber):question?'第 '+number+' 题':v.title||v.content.slice(0,60)
+  labels.set(b.uid,label)
+  return {b,v,question,role,roleNumber,rule,number,section,group,qtype}
+ })
+ const score=doc.blocks.reduce((sum,b)=>sum+(b.score??0),0)
+ const groups=new Map<number,{count:number;score:number}>()
+ for(const row of rows)if(row.question){const g=groups.get(row.group)??{count:0,score:0};g.count++;g.score+=row.b.score??0;groups.set(row.group,g)}
+ const chinese=['','一','二','三','四','五','六','七','八','九','十']
+ return <article className={"print-document"+(layout?" configured-print":"")}>
+  <h1><MathText compact content={doc.title}/></h1>
+  <div className="print-subtitle"><MathText compact content={layout?.subtitle??''}/>{layout?.subtitle&&<br/>}{doc.subject}{doc.kind==='paper'&&(!source||score>0)&&layout?.showScore!==false&&' · 总分 '+score}{layout?.examTime&&' · 考试时间：'+layout.examTime}</div>
+  <div className="layout-body">{rows.map(({b,v,question,role,roleNumber,rule,number,section,group,qtype})=>{
+   if(b.kind==='pagebreak')return <div key={b.uid} className="print-break"/>
+   const common={style:blockCss(rule),'data-layout-uid':b.uid,'data-layout-break':rule.pageBreak}
+   const frame=rule.frame?' layout-frame-'+rule.frame:''
+   if(b.kind==='image')return <figure key={b.uid} {...common}><img src={'/api/files/'+b.file_id+'/preview'} alt={b.title} style={{width:b.width+'%'}}/><figcaption><MathText compact content={b.title}/></figcaption></figure>
+   if(b.kind==='heading'){
+    const level=rule.headingLevel??b.heading_level??2
+    const Heading= ('h'+Math.min(6,level+1)) as 'h2'|'h3'|'h4'|'h5'|'h6'
+    return <section className={'print-block print-heading-level-'+level+frame} key={b.uid} {...common} data-layout-level={level}><Heading><MathText compact content={v.title||v.content}/></Heading>{v.title&&v.content&&<RichPrint content={v.content} labels={labels}/>}</section>
+   }
+   const structured=v.question_data,options=structured?.options??[]
+   const canUseOptions=!!layout&&question&&options.length>0&&[structured?.stem??'',...options.map(o=>o.label+'. '+o.content)].join('\n').trim()===v.content.trim()
+   const space=rule.answerSpace??layout?.answerSpace??0
+   if(answerOnly&&!question)return null
+   return <Fragment key={b.uid}>
+    {section&&<section className="print-block layout-type-heading" data-layout-level="2" data-layout-uid={'type-'+group}><h2>{chinese[group]??group}、{qtype}</h2><small>共 {groups.get(group)?.count??0} 题{(groups.get(group)?.score??0)>0&&layout?.showScore!==false?'，共 '+groups.get(group)?.score+' 分':''}</small></section>}
+    <section className={"print-block"+(question&&layout?.keepQuestions?" layout-keep":"")+frame} {...common}>
+     {source&&sourceId&&b.resource_id&&<Link className="print-controls source-edit-link" to={'/resource-edit/'+encodeURIComponent(b.resource_id)+'?return_source='+encodeURIComponent(sourceId)}>编辑{question?'题目':'知识单元'}</Link>}
+     {question?<p className="print-question-number">{role!=='normal'?roleNames[role]+' '+roleNumber:number+'.'} {b.score&&layout?.showScore!==false?'（本题满分 '+b.score+' 分）':''}</p>:role!=='normal'||v.title?<h2>{role!=='normal'&&roleNames[role]+(role==='proof'||role==='warning'||role==='summary'?'：':' '+roleNumber+'　')}<MathText compact content={v.title}/></h2>:null}
+     {!answerOnly&&(canUseOptions?<><RichPrint content={structured?.stem??''} labels={labels}/><div className="layout-options" data-option-layout={String(rule.optionColumns??layout?.optionColumns??'auto')}>{options.map(o=><div className="layout-option" key={o.label}><span>{o.label}. </span><MathText compact content={o.content}/></div>)}</div></>:<RichPrint content={v.content} labels={labels} blankWidth={layout?.blankWidth}/>)}
+     {!answerOnly&&question&&!!b.subquestion_scores?.length&&layout?.showScore!==false&&<p className="print-question-number">{b.subquestion_scores.map((value,i)=>'（'+(i+1)+'）'+value+'分').join('　')}</p>}
+     {stem&&question&&space>0&&<div className="layout-answer-space" style={{height:space+'mm'}}/>}
+     {!stem&&<>{v.answer&&<div>答案：<RichPrint content={v.answer} labels={labels}/></div>}{!answerOnly&&v.analysis&&<div>思路：<RichPrint content={v.analysis} labels={labels}/></div>}{!answerOnly&&v.solution&&<div>解析：<RichPrint content={v.solution} labels={labels}/></div>}{!answerOnly&&v.proof&&<div>证明：<RichPrint content={v.proof} labels={labels}/></div>}</>}
+    </section>
+   </Fragment>
+  })}</div>
+ </article>
+}
