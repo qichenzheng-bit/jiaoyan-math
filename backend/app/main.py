@@ -18,6 +18,7 @@ from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.source_catalog import router as source_catalog_router
 from app.api.documents import router as document_router
+from app.api.document_pdf import router as document_pdf_router
 from app.api.intelligence import router as intelligence_router
 from app.api.workspaces import router as workspace_router
 from app.api.intake_records import router as intake_records_router
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(source_catalog_router, prefix="/api")
     app.include_router(document_router, prefix="/api")
+    app.include_router(document_pdf_router, prefix="/api")
     app.include_router(intelligence_router, prefix="/api")
     app.include_router(workspace_router, prefix="/api")
     app.include_router(intake_records_router, prefix="/api")
