@@ -182,7 +182,7 @@ def library(q:str=Query("",max_length=255),archived:bool=False,offset:int=Query(
         return {"items":library_details(db,db.scalars(ordered.offset(offset).limit(limit)))[0],"total":total}
     # Completion is derived from authoritative registration state; filter before pagination.
     items=[];total=0
-    for part in chunks(db.scalars(ordered),size=100):
+    for part in db.scalars(ordered.execution_options(yield_per=100)).partitions(100):
         for row in library_details(db,part)[0]:
             if row["complete"]!=(progress_filter=="done"):continue
             if offset<=total<offset+limit:items.append(row)

@@ -195,14 +195,25 @@ jobs:
         with:
           path: ${{ runner.temp }}/frontend-build-cache
           key: ${{ steps.build-key.outputs.key }}
+      - name: Export generated public dependency lock
+        if: steps.compiled.outputs.cache-hit != 'true'
+        run: |
+          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            node -e 'const lock=require("./package-lock.json"); for(const p of Object.values(lock.packages||{})){if(p.resolved&&!p.resolved.startsWith("https://registry.npmjs.org/"))throw Error("non-public registry");}'
+            base64 -w 120 package-lock.json | sed 's/^/JIAOYAN_LOCK:/'
+          fi
       - name: Retain generated dependency lock for review
-        if: github.event_name == 'workflow_dispatch'
+        if: steps.compiled.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: frontend-dependency-lock
           path: frontend/package-lock.json
           if-no-files-found: error
           retention-days: 7
+      - name: Audit production npm dependencies
+        if: steps.compiled.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
       - run: printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
       - uses: actions/upload-artifact@v6
         with:

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import audit, current_user, require_origin
-from app.models import Setting, AuditLog, User
+from app.models import Setting, AuditLog, User, StoredFile
 from app.services.storage import root
 
 router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(current_user)])
@@ -43,6 +43,24 @@ def status():
     release_file = Path(__file__).resolve().parents[3] / "RELEASE_SHA"
     release = release_file.read_text().strip() if release_file.is_file() else "development"
     return {"version":settings.version,"release":release,"disk":disk}
+
+@router.get("/storage-audit")
+def storage_audit(db:Session=Depends(get_db)):
+    """Read-only report; never delete an unregistered file during a web request."""
+    import re
+    import time
+    directory=root()/"generated"
+    if not directory.is_dir() or directory.is_symlink():return {"candidate_count":0,"candidate_bytes":0}
+    registered=set(db.scalars(select(StoredFile.storage_key).where(StoredFile.generated==True)))
+    count=size=0
+    cutoff=time.time()-24*3600
+    for path in directory.iterdir():
+        if not re.fullmatch(r"[0-9a-f-]{36}",path.name) or path.is_symlink() or not path.is_file():continue
+        try:st=path.stat()
+        except FileNotFoundError:continue
+        if "generated/"+path.name not in registered and st.st_mtime<cutoff:
+            count+=1;size+=st.st_size
+    return {"candidate_count":count,"candidate_bytes":size}
 
 @router.get("/audit")
 def logs(db: Session = Depends(get_db)):

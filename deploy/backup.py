@@ -188,6 +188,9 @@ def check_manifest(repo, manifest, allow_legacy=False):
             expected = name + ".age." + str(index).zfill(4)
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
+    video={n for n in manifest["entries"] if n.startswith("production/video-engine/")}
+    if video and not {"production/video-engine/"+n for n in ("index.json","database.dump","settings.json")}<=video:
+        raise ValueError("incomplete video snapshot")
     missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
     legacy_groups=(WORK_EXPORTS,CATALOG_EXPORTS,DOCUMENT_VERSION_EXPORTS,FINISHED_WORK_EXPORTS)
     allowed_missing={frozenset().union(*(group for i,group in enumerate(legacy_groups) if mask&(1<<i))) for mask in range(1,1<<len(legacy_groups))}
@@ -307,7 +310,8 @@ def video_entries():
         fcntl.flock(gate,fcntl.LOCK_SH)
         source=VIDEO_BASE/"current"
         meta=read_json(safe_path(source,"index.json"))
-        if not meta or meta.get("format")!=1:raise ValueError("invalid video snapshot")
+        if meta is None:return
+        if meta.get("format")!=1:raise ValueError("invalid video snapshot")
         stamp=datetime.fromisoformat(meta["created_at"])
         elapsed=(datetime.now(timezone.utc)-stamp).total_seconds()
         if not 0<=elapsed<=36*3600:return None
