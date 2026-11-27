@@ -8,7 +8,7 @@ from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
-from app.services.document_pdf import render_pdf
+from app.services.document_pdf import render_pdf, selected_pages
 
 # Hosted runner only. Production launch keeps Chromium sandbox enabled.
 os.environ["WG_PDF_CHROMIUM_SANDBOX"] = "0"
@@ -18,6 +18,11 @@ def block(uid, kind, content="", **kw):
                 solution="", analysis="", proof="", file_id=None, width=100, **kw)
 
 def run():
+    assert selected_pages("1-2,2，4",5)==[0,1,3]
+    for invalid in ("0","3-2","6","1,,2","abc"):
+        try:selected_pages(invalid,5)
+        except ValueError:pass
+        else:raise AssertionError(invalid)
     blocks = [
         {**block("chapter-one", "heading", heading_level=1), "title": "第一章 Chapter One"},
         {**block("question-one", "question", r"MarkerAlpha 求极限 $ \lim_{x\to0}\frac{\sin x}{x} $"), "answer": "HiddenAnswerAlpha"},
@@ -30,7 +35,7 @@ def run():
     payload = {
         "doc": {"title": "数学讲义 Layout Test", "subject": "高等数学", "kind": "handout", "blocks": blocks},
         "layout": {"paper": "A4", "columns": 1, "toc": True, "chapterNewPage": True,
-                   "footer": "第 {{当前页码}} 页，共 {{总页数}} 页"},
+                   "footer": "第 {{当前页码}} 页，共 {{总页数}} 页", "equationNumbering":"chapter"},
         "stem": True, "answerOnly": False, "source": False,
     }
     with tempfile.TemporaryDirectory() as folder:
@@ -48,6 +53,13 @@ def run():
             assert abs(float(page.mediabox.width) - 595.28) < 1.5
             assert abs(float(page.mediabox.height) - 841.89) < 1.5
         print("PDF pagination, searchable text, student mode and A4 dimensions:", result)
+        payload["page_ranges"]="2"
+        payload["preview_pages"]=result["pages"]
+        (path/"payload.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
+        subset=render_pdf(path/"payload.json", {}, path/"subset.pdf", print, lambda: False, ROOT/"frontend"/"dist")
+        assert subset["pages"]==1 and subset["total_pages"]==result["pages"]
+        assert PdfReader(path/"subset.pdf").pages[0].extract_text()==reader.pages[1].extract_text()
+        payload.pop("page_ranges");payload.pop("preview_pages")
         payload["doc"]["blocks"] = [block("bad", "question", r"$\unknowncommand$")]
         (path/"payload.json").write_text(json.dumps(payload), encoding="utf-8")
         try:
