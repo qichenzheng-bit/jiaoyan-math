@@ -2,6 +2,7 @@ import {useWorkspaceBack} from '../components/WorkspaceNavigation'
 import {MathText} from '../components/MathText'
 import {useEffect,useState,useRef,useMemo} from 'react'
 import PagedPreview from './PagedPreview'
+import PdfJobs from './PdfJobs'
 import type {CSSProperties} from 'react'
 import {defaults,builtins,dimensions,layoutError,sanitizeLayout,readLocal,writeLocal,readTemplates} from './documentLayout'
 import type {Layout,LayoutTemplate} from './documentLayout'
@@ -12,7 +13,7 @@ import ChatText from './ChatText'
 type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
 type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
-export type PrintDoc={parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
+export type PrintDoc={export_token?:string;parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
 
 export default function DocumentPrint({source=false}:{source?:boolean}){
  const {id}=useParams(),navigate=useNavigate(),[params]=useSearchParams(),chapterUid=params.get('chapter')
@@ -169,6 +170,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
     <button className="primary" disabled={!ready||!confirmed||!!invalid} onClick={async()=>{await document.fonts.ready;window.print()}}>打印 / 保存为 PDF</button>
     <label>文件名<input value={filename} onChange={e=>setFilename(e.target.value)} maxLength={200}/></label><small className="muted">{pageCount?`共 ${pageCount} 页`:"正在计算页数"} · 当前分页预览使用实际纸张尺寸。</small>
    </div>
+   {doc.export_token&&<PdfJobs path={'/document-pdf/'+(source?'source':'doc')+'/'+encodeURIComponent(id??'')} canExport={ready&&confirmed&&!invalid&&!!filename.trim()} pageCount={pageCount} request={{export_token:doc.export_token,layout,stem,answerOnly,selected_uids:scopeMode==='all'?null:scope,overrides,chapter_uid:chapterUid,filename,confirmed:true}}/>}
    {invalid&&<p role="alert">{invalid}</p>}{previewError&&<p role="alert" className="print-controls">{previewError}</p>}
    {!invalid&&viewDoc&&viewDoc.blocks.length>0&&<div className="print-preview-content layout-preview"><PagedPreview layout={layout} title={viewDoc.title} subject={viewDoc.subject??''} version={renderVersion} onResult={result=>{setPageCount(result.pages);setPreviewError(result.error);setReady(Boolean(result.pages)&&!result.error);setConfirmed(false)}}><PrintableDocument doc={viewDoc} stem={stem} answerOnly={answerOnly} source={source} layout={layout}/></PagedPreview></div>}
    {viewDoc&&!viewDoc.blocks.length&&<p role="alert">请选择至少一个内容条目。</p>}
