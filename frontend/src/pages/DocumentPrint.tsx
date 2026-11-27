@@ -96,7 +96,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   const next=templateLayout(sanitizeLayout(selected.layout))
   if(source)next.originalNumbers=layout.originalNumbers
   if(applyMode==='partial'){
-   const groups:Record<string,(keyof Layout)[]>={page:['paper','width','height','landscape','top','bottom','left','right','columns','gap','mirrorMargins','chapterNewPage'],body:['font','size','lineHeight','paragraphGap','titleSize','headingSize','keepQuestions'],special:['subtitle','examTime','showScore','typeHeadings','numbering','optionColumns','blankWidth','answerSpace','originalNumbers'],header:['header','footer','toc','tocDepth'],types:['typeStyles']}
+   const groups:Record<string,(keyof Layout)[]>={page:['paper','width','height','landscape','top','bottom','left','right','columns','gap','mirrorMargins','chapterNewPage'],body:['font','size','lineHeight','paragraphGap','titleSize','headingSize','keepQuestions','equationNumbering'],special:['subtitle','examTime','showScore','typeHeadings','numbering','optionColumns','blankWidth','answerSpace','originalNumbers'],header:['header','footer','toc','tocDepth'],types:['typeStyles']}
    const chosen=new Set(applyParts.flatMap(part=>groups[part]??[]))
    for(const key of Object.keys(next) as (keyof Layout)[])if(!chosen.has(key))Object.assign(next,{[key]:layout[key]})
   }
@@ -233,6 +233,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
     <details><summary>正文与数学排版</summary><div className="layout-fields">
      <label>正文字体<select value={layout.font} onChange={e=>patch({font:e.target.value as Layout['font']})}><option value="serif">宋体类</option><option value="sans">黑体类</option></select></label>
      {num('字号 (pt)','size',6,36,.5)}{num('主标题字号 (pt)','titleSize',8,36,.5)}{num('章节标题字号 (pt)','headingSize',8,36,.5)}{num('行距','lineHeight',1,3,.1)}{num('段后间距 (pt)','paragraphGap',0,50)}
+     <label>独立公式编号<select aria-label="独立公式编号" value={layout.equationNumbering} onChange={e=>patch({equationNumbering:e.target.value as Layout['equationNumbering']})}><option value="off">不自动编号</option><option value="continuous">全文连续编号</option><option value="chapter">按章编号</option></select></label>
      <label className="layout-check"><input type="checkbox" checked={layout.keepQuestions} onChange={e=>patch({keepQuestions:e.target.checked})}/>尽量保持题目完整</label>
      <label className="layout-check"><input type="checkbox" checked={layout.originalNumbers} onChange={e=>patch({originalNumbers:e.target.checked})}/>保留已有原题号</label>
      {doc.kind==='paper'&&num('每题答题留白 (mm)','answerSpace',0,180,5)}
