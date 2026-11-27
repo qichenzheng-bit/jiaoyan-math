@@ -1,17 +1,21 @@
 """Authenticated finished works catalogue. Videos remain in the existing engine."""
 from typing import Literal
+from uuid import uuid4
+from pathlib import Path
+import os, shutil, tempfile, zipfile, threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, literal, cast, Integer, or_
+from sqlalchemy import select, func, literal, cast, Integer, or_, delete
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.security import current_user, require_origin
+from app.core.security import current_user, require_origin, audit, now
 from app.models import (User, TeachingWork, TeachingWorkVersion, TeachingWorkAsset,
-                        TeachingWorkPendingCover, StoredFile, StudioItem, VideoProject, TeachingDocument, TeachingResource)
+                        TeachingWorkPendingCover, StoredFile, StudioItem, VideoProject, TeachingDocument, TeachingResource, FileReference, WorkHandoff)
 from app.services import storage, teaching_works
 from app.services.finished_pdf_preview import render_page
 
@@ -129,7 +133,7 @@ def detail(ident: str, db: Session = Depends(get_db), user: User = Depends(curre
         item = db.get(StudioItem, ident)
         project = db.get(VideoProject, found["origin_id"])
         cover = item.data.get("cover_file_id")
-        return {**dict(found), "versions": [], "pending_cover": None, "facets": project.work_facets,
+        return {**dict(found), "handoffs": related_handoffs(db,user.id,ident), "versions": [], "pending_cover": None, "facets": project.work_facets,
                 "video": {"project_id": project.id, "resource_id": project.resource_id,
                           "cover_file_id": cover, "revision_managed_by_engine": True}}
     # Do not load complete document snapshots in the file/detail request.
@@ -139,7 +143,7 @@ def detail(ident: str, db: Session = Depends(get_db), user: User = Depends(curre
         StoredFile, StoredFile.id == TeachingWorkAsset.file_id).where(TeachingWorkAsset.work_id == work.id)))
     pending = db.execute(select(TeachingWorkPendingCover.filename, TeachingWorkPendingCover.created_at).where(
         TeachingWorkPendingCover.work_id == work.id)).first()
-    return {**summary(work), "facets": next((v.facets for v in versions if v.number==work.current_version),{}), "pending_cover": {"filename":pending.filename,"created_at":pending.created_at} if pending else None,
+    return {**summary(work), "handoffs": related_handoffs(db,user.id,ident), "facets": next((v.facets for v in versions if v.number==work.current_version),{}), "pending_cover": {"filename":pending.filename,"created_at":pending.created_at} if pending else None,
             "versions": [{"number": v.number, "created_at": v.created_at, "files": [
                 {"role": a.role, "filename": a.filename, "pages": a.pages,
                  "size_bytes": f.size_bytes, "media_type": f.media_type}
@@ -281,3 +285,157 @@ def preview_pending(ident: str, page: int, dpi: int = Query(120, ge=72, le=180),
     db.rollback()
     return Response(render_page(path, page, dpi), media_type="image/png",
                     headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+
+
+HANDOFF_OWNER="work_handoff"
+zip_slots=threading.BoundedSemaphore(1)
+
+def lock_admin(db,user):
+    db.scalar(select(User.id).where(User.id==user.id).with_for_update())
+
+def handoff_view(row):
+    return {"id":row.id,"purpose":row.purpose,"items":row.items,"created_at":row.created_at}
+
+def related_handoffs(db,user_id,ident):
+    return [{"id":r.id,"purpose":r.purpose,"version":i.get("version")}
+            for r in db.scalars(select(WorkHandoff).where(WorkHandoff.user_id==user_id))
+            for i in r.items if i["id"]==ident]
+
+class WorkChoice(BaseModel):
+    id:str=Field(min_length=1,max_length=36)
+    version:int|None=Field(default=None,ge=0)
+class Choices(BaseModel):
+    items:list[WorkChoice]=Field(min_length=1,max_length=100)
+class RenameRequest(BaseModel):
+    title:str=Field(min_length=1,max_length=200)
+    expected_updated:int
+class HandoffRequest(Choices):
+    purpose:Literal["publish","product"]
+
+def resolve_choice(db,user,choice):
+    work=db.scalar(select(TeachingWork).where(TeachingWork.id==choice.id,TeachingWork.user_id==user.id).with_for_update())
+    if work:
+        if work.current_version!=choice.version:raise HTTPException(409,"作品版本已变化，请刷新")
+        return work,None
+    video=video_records(user).subquery()
+    found=db.execute(select(video).where(video.c.id==choice.id)).mappings().first()
+    if not found or choice.version is not None:raise HTTPException(404,"作品不存在")
+    return None,found
+
+def current_assets(db,work):
+    rows=list(db.scalars(select(TeachingWorkAsset).where(TeachingWorkAsset.work_id==work.id,TeachingWorkAsset.version==work.current_version)))
+    if not any(a.role=="body" for a in rows):raise HTTPException(409,"尚无正式正文")
+    return rows
+
+@router.patch("/{ident}/name",dependencies=[Depends(require_origin)])
+def rename(ident:str,body:RenameRequest,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    lock_admin(db,user)
+    title=body.title.strip()
+    if not title:raise HTTPException(422,"名称不能为空")
+    work=db.scalar(select(TeachingWork).where(TeachingWork.id==ident,TeachingWork.user_id==user.id).with_for_update())
+    if work:
+        if work.updated_at!=body.expected_updated:raise HTTPException(409,"作品已更新")
+        work.title=title;work.updated_at=now()
+    else:
+        _,video=resolve_choice(db,user,WorkChoice(id=ident))
+        row=db.get(StudioItem,video["id"])
+        if row.updated_at!=body.expected_updated:raise HTTPException(409,"作品已更新")
+        from app.api.studio import save_version
+        row.title=title;row.revision+=1;row.updated_at=now();save_version(db,row)
+    audit(db,"teaching_work.rename",user.id);db.commit()
+    return {"title":title}
+
+@router.post("/manage/delete",dependencies=[Depends(require_origin)])
+def delete_works(body:Choices,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.api import document_pdf
+    with document_pdf.lock:
+        lock_admin(db,user)
+        targets=[]
+        for choice in {c.id:c for c in body.items}.values():
+            work,video=resolve_choice(db,user,choice)
+            if related_handoffs(db,user.id,choice.id):raise HTTPException(409,"仍有发布或商品准备单引用")
+            if work and any(j.user_id==user.id and j.scope==work.origin_scope and j.identity==work.origin_id and j.state not in document_pdf.TERMINAL for j in document_pdf.jobs.values()):
+                raise HTTPException(409,"作品正在导出")
+            if video and db.scalar(select(StudioItem.id).where(StudioItem.kind=="publication",StudioItem.archived==False,StudioItem.data["work_id"].as_string()==choice.id).limit(1)):
+                raise HTTPException(409,"视频仍有发布记录")
+            targets.append((work,video))
+        for work,video in targets:
+            if work:
+                for number in db.scalars(select(TeachingWorkVersion.number).where(TeachingWorkVersion.work_id==work.id)):
+                    db.execute(delete(FileReference).where(FileReference.owner_type==teaching_works.OWNER,FileReference.owner_id==teaching_works.version_owner(work.id,number)))
+                teaching_works.remove_pending(db,db.get(TeachingWorkPendingCover,work.id))
+                db.execute(delete(TeachingWorkAsset).where(TeachingWorkAsset.work_id==work.id))
+                db.execute(delete(TeachingWorkVersion).where(TeachingWorkVersion.work_id==work.id))
+                db.delete(work)
+            else:
+                from app.api.studio import save_version
+                row=db.get(StudioItem,video["id"]);row.archived=True;row.revision+=1;row.updated_at=now();save_version(db,row)
+        audit(db,"teaching_work.delete",user.id);db.commit()
+    return {"removed":len(targets),"videos_archived":sum(v is not None for _,v in targets)}
+
+@router.post("/manage/zip",dependencies=[Depends(require_origin)])
+def download_zip(body:Choices,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    if not zip_slots.acquire(blocking=False):raise HTTPException(429,"已有打包任务")
+    folder=None
+    try:
+        folder=Path(tempfile.mkdtemp(prefix="work-zip-",dir=storage.root()))
+        lock_admin(db,user)
+        staged=[];total=0
+        for choice in {c.id:c for c in body.items}.values():
+            work,video=resolve_choice(db,user,choice)
+            if video:raise HTTPException(422,"视频请单独下载")
+            for a in current_assets(db,work):
+                item=db.get(StoredFile,a.file_id);total+=item.size_bytes
+                if total>500*1024*1024:raise HTTPException(413,"单次打包最多500 MB，请分批下载")
+                path=folder/str(len(staged));os.link(storage.file_path(item),path)
+                name=storage.safe_name(work.title)[:100]+"-"+work.id[:8]+"/"+a.role+"-"+storage.safe_name(a.filename)
+                staged.append((path,name))
+        db.rollback()
+        target=folder/"works.zip"
+        with zipfile.ZipFile(target,"w",compression=zipfile.ZIP_STORED,allowZip64=True) as z:
+            for path,name in staged:z.write(path,name);path.unlink()
+        return FileResponse(target,media_type="application/zip",filename="教学作品.zip",background=BackgroundTask(shutil.rmtree,folder,ignore_errors=True),headers={"Cache-Control":"no-store"})
+    except BaseException:
+        if folder:shutil.rmtree(folder,ignore_errors=True)
+        raise
+    finally:zip_slots.release()
+
+@router.get("/handoffs/list")
+def list_handoffs(purpose:Literal["publish","product"],db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return [handoff_view(r) for r in db.scalars(select(WorkHandoff).where(WorkHandoff.user_id==user.id,WorkHandoff.purpose==purpose).order_by(WorkHandoff.created_at.desc(),WorkHandoff.id).limit(100))]
+
+@router.post("/handoffs/create",dependencies=[Depends(require_origin)])
+def create_handoff(body:HandoffRequest,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    lock_admin(db,user);ident=str(uuid4());items=[]
+    for choice in {c.id:c for c in body.items}.values():
+        work,video=resolve_choice(db,user,choice)
+        if work:
+            assets=[]
+            for a in current_assets(db,work):
+                storage.file_path(db.get(StoredFile,a.file_id))
+                storage.link_file(db,a.file_id,HANDOFF_OWNER,ident)
+                assets.append({"role":a.role,"file_id":a.file_id,"filename":a.filename})
+            items.append({"id":work.id,"title":work.title,"kind":work.kind,"version":work.current_version,"assets":assets})
+        else:
+            cover=db.get(StudioItem,video["id"]).data.get("cover_file_id")
+            if cover:storage.link_file(db,cover,HANDOFF_OWNER,ident)
+            items.append({"id":video["id"],"title":video["title"],"kind":"video","version":None,"project_id":video["origin_id"],"cover_file_id":cover,"assets":[]})
+    row=WorkHandoff(id=ident,user_id=user.id,purpose=body.purpose,items=items,created_at=now())
+    db.add(row);audit(db,"teaching_work.handoff",user.id);db.commit()
+    return handoff_view(row)
+
+@router.get("/handoffs/{ident}/files/{work_id}/{role}")
+def handoff_file(ident:str,work_id:str,role:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    row=db.get(WorkHandoff,ident)
+    if not row or row.user_id!=user.id:raise HTTPException(404,"准备单不存在")
+    asset=next((a for i in row.items if i["id"]==work_id for a in i["assets"] if a["role"]==role),None)
+    if not asset:raise HTTPException(404,"文件不存在")
+    return file_response(db.get(StoredFile,asset["file_id"]),asset["filename"],True)
+
+@router.delete("/handoffs/{ident}",dependencies=[Depends(require_origin)])
+def remove_handoff(ident:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    lock_admin(db,user);row=db.get(WorkHandoff,ident)
+    if not row or row.user_id!=user.id:raise HTTPException(404,"准备单不存在")
+    db.execute(delete(FileReference).where(FileReference.owner_type==HANDOFF_OWNER,FileReference.owner_id==ident))
+    db.delete(row);audit(db,"teaching_work.handoff.remove",user.id);db.commit()
+    return {"removed":True}
