@@ -1352,12 +1352,12 @@ with sync_playwright() as p:
             page.set_viewport_size({"width":1600,"height":900})
             # Theme and mobile smoke checks use the same compiled application.
             visit(page,"/",".chat-home-recent")
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#e8eee8"
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim().toLowerCase()") == "#d7e2d9"
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim().toLowerCase()") == "#f1f5f0"
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase()") == "#52765f"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#f8f7f3"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim().toLowerCase()") == "#efede7"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim().toLowerCase()") == "#ffffff"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase()") == "#80652f"
             page.evaluate("document.documentElement.dataset.theme='dark'")
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#1d2733"
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()") == "#242424"
             capture(page,path=str(OUT/"09-home-dark.png"),full_page=False)
             page.evaluate("document.documentElement.dataset.theme='light'")
             page.set_viewport_size({"width":393,"height":873})
