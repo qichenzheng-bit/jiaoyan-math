@@ -3,7 +3,7 @@ from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel,Field
-from sqlalchemy import select,func
+from sqlalchemy import select,func,text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.db import get_db
@@ -44,7 +44,7 @@ def change_method(id:str,body:MethodChange,db:Session=Depends(get_db),user:User=
     if data.warnings:raise HTTPException(422,"题目结构待核对，请先编辑原题")
     groups={str(p.number):p.methods for p in data.subquestions} if data.subquestions else {"main":data.methods}
     if body.group not in groups:raise HTTPException(422,"小问不存在")
-    ms=list(groups[body.group]);i=(body.index or 0)-1
+    ms=[m for m in groups[body.group] if m.body.strip()];i=(body.index or 0)-1
     before={"solution":r.solution,"question_data":data.model_dump(),"evaluation":bank.read_recommendation(db,r)}
     if body.action=="delete":
         if not 0<=i<len(ms):raise HTTPException(422,"解法不存在")
@@ -128,16 +128,38 @@ def occurrence_change(id:str,body:OccurrenceChange,db:Session=Depends(get_db),us
 def source_questions(id:str,offset:int=Query(0,ge=0),limit:int=Query(30,ge=1,le=100),db:Session=Depends(get_db)):
     s=bank.existing(db,id)
     if s.kind!="source":raise HTTPException(422,"请选择来源资料")
-    links=list(db.execute(select(L,R).join(R,R.id==L.resource_id).where(L.source_id==id,R.kind=="question",R.archived==False)))
-    positions=[]
-    for l,r in links:
-        rows=l.occurrences or [{"document_id":"","item_uid":"","original_question_number":l.original_question_number,"page_start":l.page_start,"page_end":l.page_end,"chapter":l.chapter}]
-        for o in rows:positions.append({"id":r.id,"code":r.code,"title":r.title,"content":r.content,**o})
-    def number(o):
-        n=o.get("original_question_number") or ""
-        return int(n) if n.isdigit() and len(n)<10 else 10**9
-    positions.sort(key=lambda o:((number(o),o.get("page_start") or 10**9) if s.source_type=="exam" else (o.get("page_start") or 10**9,number(o)),o.get("chapter") or "",o["id"],o.get("item_uid") or ""))
-    return {"source":bank.view(s),"total":len(positions),"question_count":len({o["id"] for o in positions}),"items":positions[offset:offset+limit]}
+    # Expand locations in PostgreSQL; only load the requested page of stems.
+    cte="""
+    WITH positions AS (
+      SELECT r.id,r.code,l.provenance_role AS role,
+        o->>'document_id' AS document_id,o->>'item_uid' AS item_uid,
+        COALESCE(o->>'original_question_number','') AS original_question_number,
+        CASE WHEN o->>'page_start' ~ '^[0-9]{1,9}$' THEN (o->>'page_start')::int END AS page_start,
+        CASE WHEN o->>'page_end' ~ '^[0-9]{1,9}$' THEN (o->>'page_end')::int END AS page_end,
+        COALESCE(o->>'chapter','') AS chapter
+      FROM resource_source_links l JOIN teaching_resources r ON r.id=l.resource_id
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_array_length(l.occurrences::jsonb)>0 THEN l.occurrences::jsonb
+        ELSE jsonb_build_array(jsonb_build_object('original_question_number',l.original_question_number,'page_start',l.page_start,'page_end',l.page_end,'chapter',l.chapter)) END
+      ) o
+      WHERE l.source_id=:sid AND r.kind='question' AND NOT r.archived
+      UNION ALL
+      SELECT r.id,r.code,'original',NULL,NULL,'',NULL,NULL,''
+      FROM teaching_resources r WHERE r.source_id=:sid AND r.kind='question' AND NOT r.archived
+      AND NOT EXISTS (SELECT 1 FROM resource_source_links l WHERE l.resource_id=r.id AND l.source_id=:sid)
+    ), ranked AS (
+      SELECT *,row_number() OVER(PARTITION BY id,original_question_number,page_start,page_end,chapter,
+        CASE WHEN original_question_number='' AND page_start IS NULL THEN COALESCE(document_id,'')||':'||COALESCE(item_uid,'') ELSE '' END
+        ORDER BY document_id NULLS LAST,item_uid NULLS LAST,role) AS rank
+      FROM positions
+    ), unique_positions AS (SELECT * FROM ranked WHERE rank=1)
+    """
+    totals=db.execute(text(cte+" SELECT count(*) AS total,count(DISTINCT id) AS questions FROM unique_positions"),{"sid":id}).one()
+    number="CASE WHEN p.original_question_number ~ '^[0-9]{1,9}$' THEN p.original_question_number::int END"
+    order=number+" NULLS LAST,p.page_start NULLS LAST" if s.source_type=="exam" else "p.page_start NULLS LAST,"+number+" NULLS LAST"
+    sql=cte+" SELECT p.id,p.code,r.title,r.content,p.document_id,p.item_uid,p.original_question_number,p.page_start,p.page_end,p.chapter FROM unique_positions p JOIN teaching_resources r ON r.id=p.id ORDER BY "+order+",p.chapter,p.id,p.item_uid NULLS LAST LIMIT :limit OFFSET :offset"
+    positions=[dict(x) for x in db.execute(text(sql),{"sid":id,"limit":limit,"offset":offset}).mappings()]
+    return {"source":bank.view(s),"total":totals.total,"question_count":totals.questions,"items":positions}
 
 class Selected(BaseModel):
     id:str=Field(max_length=36)
@@ -288,3 +310,21 @@ def confirm_cart(body:CartConfirm,db:Session=Depends(get_db),user:User=Depends(c
     db.add(d);db.flush();docs.references(db,d)
     store(db,receipt,{"input":body.model_dump(),"document_id":d.id})
     audit(db,"bank.cart.confirm",user.id);db.commit();return {"document_id":d.id}
+
+class ExportSelection(BaseModel):
+    items:list[Selected]=Field(min_length=1,max_length=200)
+    request_id:str=Field(min_length=1,max_length=36)
+@router.post("/export",dependencies=write)
+def export_selection(body:ExportSelection,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);key="bank.export."+str(user.id)+"."+body.request_id
+    old=read_setting(db,key)
+    if old:
+        if old["input"]!=body.model_dump():raise HTTPException(409,"请求编号已使用")
+        return {"document_id":old["document_id"]}
+    if len({i.id for i in body.items})!=len(body.items):raise HTTPException(422,"选题重复")
+    for i in body.items:question(db,i.id,i.revision)
+    draft=docs.Draft(kind="paper",title="题库选题导出",blocks=[docs.Block(uid=str(uuid4()),kind="reference",resource_id=i.id) for i in body.items])
+    d=TeachingDocument(id=str(uuid4()),title=draft.title,kind=draft.kind,subject="",source_id=None,blocks=docs.validate(db,draft,[]),revision=1,archived=False,created_at=now(),updated_at=now())
+    db.add(d);db.flush();docs.references(db,d)
+    store(db,key,{"input":body.model_dump(),"document_id":d.id});audit(db,"bank.export",user.id);db.commit()
+    return {"document_id":d.id}

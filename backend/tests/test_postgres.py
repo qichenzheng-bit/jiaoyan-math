@@ -415,6 +415,13 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert [b["resource_id"] for b in paper["blocks"]]==c["ids"]
         assert paper["blocks"][0]["snapshot"]["difficulty"]=="困难"
         assert client.get("/api/bank/sources/"+source_a["id"]+"/questions").json()["question_count"]==1
+        compact=client.get("/api/resources",params={"kind":"question","bank_summary":True,"compact":True,"q":seed["code"]}).json()["items"][0]
+        assert "answer" not in compact and "solution" not in compact and compact["content"]
+        sel=client.get("/api/resources",params={"kind":"question","bank_summary":True,"selection_only":True,"q":seed["code"]}).json()
+        assert sel["items"]==[{"id":seed["id"],"revision":c["items"][0]["revision"]}]
+        exp=client.post("/api/bank/export",headers=origin,json={"items":payload["items"],"request_id":"export-ci"})
+        assert exp.status_code==200,exp.text
+        assert client.get("/api/documents/"+exp.json()["document_id"]).json()["blocks"][0]["resource_id"]==seed["id"]
         assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
         related_seed=client.post("/api/resources",headers=origin,json={"kind":"question","title":"关联方法专项","subject":"高等数学","content":"计算某项幂函数的定积分","answer":"1","solution":"分部积分法","tags":["相关专题"]}).json()
         related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})
