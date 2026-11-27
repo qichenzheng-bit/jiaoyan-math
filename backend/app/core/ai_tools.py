@@ -13,7 +13,10 @@ from pydantic.fields import FieldInfo
 from app.api import resources, knowledge, source_catalog, documents, settings, video, workspaces, bank_work, studio, qiandao, qoder, teaching_works
 from app.models import TeachingResource, StoredFile, ChatSession, ChatMessage, WorkSession
 from app.services import material_import
-from sqlalchemy import select
+from sqlalchemy import select, func
+from app.core import ai_cover
+from app.core.search_features import search_features
+from app.core.content_normalization import canonical_text
 
 
 class StrictBody(BaseModel):
@@ -126,6 +129,26 @@ def apply_template(scope:Literal["doc","source"],identity:str,body:TemplateApply
     if not template:raise HTTPException(404,"未找到用户排版模板")
     return settings.update_document_layout(scope,identity,settings.LayoutUpdate(revision=body.revision,value=template["layout"]),db,user)
 
+class FormulaQuery(StrictBody):
+    formula:str=Field(min_length=1,max_length=4000)
+    subject:str=Field(default="",max_length=40)
+    limit:int=Field(default=30,ge=1,le=100)
+    offset:int=Field(default=0,ge=0)
+
+def formula_search(body:FormulaQuery,db):
+    # The existing GIN feature index matches formula shape, not mathematical equivalence.
+    raw=body.formula.strip()
+    if "$" not in canonical_text(raw):raw="$"+raw+"$"
+    keys=[k for k in search_features(raw) if k.startswith("m:")]
+    if not keys:raise HTTPException(422,"请输入有效LaTeX公式")
+    stmt=select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.archived==False,
+        TeachingResource.search_features.op("?")(keys[0]))
+    if body.subject:stmt=stmt.where(TeachingResource.subject==resources.normalize_subject(body.subject))
+    total=db.scalar(select(func.count()).select_from(stmt.subquery()))
+    rows=db.scalars(stmt.order_by(TeachingResource.updated_at.desc(),TeachingResource.id).offset(body.offset).limit(body.limit))
+    return {"items":[resources.view(r) for r in rows],"total":total,"offset":body.offset,
+            "scope":"formula_shape_candidates","warning":"公式结构候选，不代表代数等价或重复题；多公式题可能需要关键词和标签辅助检索"}
+
 class ReadOriginal(StrictBody):
     file_id: str=Field(min_length=1,max_length=36)
     start: int=Field(default=1,ge=1,le=10000)
@@ -228,7 +251,8 @@ def register(name, description, handler, fields=(), *, fixed=None, write=False, 
 
 register("question_search", "题库精准筛选；返回真实记录及分页信息", resources.listing,
          ("subject","q","chapter","question_type","difficulty","source_id","source_ids","knowledge_id","knowledge_ids","year_from","year_to","method_name","limit","offset"),
-         fixed={"kind":"question","archived":False,"compact":True})
+         fixed={"kind":"question","archived":False,"compact":True,"bank_summary":True})
+register("formula_search", "按LaTeX公式结构检索真实候选题；不是数学等价性证明",formula_search,("body",))
 register("knowledge_search", "检索录入的知识点，不是知识标签", resources.listing,
          ("subject","q","chapter","unit_type","limit","offset"), fixed={"kind":"knowledge","archived":False})
 register("resource_read", "读取真实题目或知识点及答案解析", resources.read, ("id",))
@@ -259,6 +283,7 @@ register("video_code", "读取视频实际Manim源码",video.code,("ident",))
 register("video_history", "读取视频微调记录", video.history, ("ident",))
 register("cover_templates", "读取封面和其他模板素材目录",studio.listing,("q","limit","offset"),fixed={"kind":"asset","category":"template","archived":False})
 register("cover_presets", "查询现有封面预设", studio.presets)
+register("cover_create", "生成可编辑的封面草稿，图层位置以画布百分比表示；不输出PNG或自动发布",ai_cover.create,("body",),write=True)
 register("cover_search", "读取已保存的封面作品目录",studio.listing,("q","limit","offset"),fixed={"kind":"work","category":"cover","archived":False})
 register("checkin_state", "查询实际签到状态", qiandao.status)
 register("model_catalog", "查询模型及推理强度", qoder.models)

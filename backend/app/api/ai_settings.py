@@ -22,3 +22,12 @@ def prompt(scope:prefs.Scope,db:Session=Depends(get_db),user:User=Depends(curren
 @router.put("/prompts/{scope}",dependencies=[Depends(require_origin)])
 def update_prompt(scope:prefs.Scope,body:prefs.PromptUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
     data=prefs.set_prompt(db,user,scope,body);audit(db,"ai.prompt.update",user.id);db.commit();return data
+
+@router.get("/cover-drafts/{ident}")
+def cover_draft(ident:str,db:Session=Depends(get_db)):
+    from app.api import studio
+    from fastapi import HTTPException
+    r=studio.existing(db,ident,"work")
+    if r.archived or r.data.get("category")!="cover":
+        raise HTTPException(404,"封面草稿不存在")
+    return studio.public(r)

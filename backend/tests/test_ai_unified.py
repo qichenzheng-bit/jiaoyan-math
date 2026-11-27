@@ -70,3 +70,24 @@ def test_preference_scope_and_history(monkeypatch):
     assert "仅聊天" not in ai_preferences.context(db,user,"work")
     assert len(ai_preferences.prompt(db,user,"work")["history"])==2
     with pytest.raises(HTTPException):ai_preferences.set_prompt(db,user,"work",ai_preferences.PromptUpdate(revision=0,text="old"))
+
+def test_cover_draft_is_editable_and_rejects_unsafe_layers():
+    from app.core.ai_cover import CoverDraft,build
+    valid={"name":"封面","format":"xiaohongshu","layers":[{"kind":"text","content":"高等数学","x":10,"y":10,"w":80,"h":20}]}
+    design=build(CoverDraft.model_validate(valid),Mock())
+    assert design["width"]==1080 and design["layers"][0]["x"]==108
+    with pytest.raises(ValidationError):
+        CoverDraft.model_validate({**valid,"layers":[{**valid["layers"][0],"kind":"image","content":"https://unknown.example"}]})
+    with pytest.raises(HTTPException):
+        build(CoverDraft.model_validate({**valid,"layers":[{**valid["layers"][0],"x":50}]}),Mock())
+
+def test_amendment_retains_existing_results(monkeypatch):
+    from app.api import work_agent as wa
+    monkeypatch.setattr(ai_work,"audit",lambda *args:None)
+    monkeypatch.setattr(wa,"save",lambda db,s,r:setattr(s,"agent_history",[dict(r)]))
+    s=SimpleNamespace(agent_history=[])
+    r={"id":"r","actor_id":1,"instruction":"选20题","state":"running","steps":[{"tool":"question_search","state":"done","result":{"total":50}}]}
+    body=wa.Start(instruction="改为30题")
+    result=ai_work.revise(Mock(),s,r,body,SimpleNamespace(id=1))
+    assert result["steps"][0]["result"]["total"]==50
+    assert result["needs_replan"] and "改为30题" in ai_work.later_prompt(r)
