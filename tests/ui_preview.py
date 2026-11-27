@@ -380,7 +380,7 @@ with sync_playwright() as p:
                     assert page.get_by_label("录入批次名称").input_value()==source["title"]
                     capture(page,path=str(OUT/"21-source-reuse.png"),full_page=False)
                 if name=="17-intake-knowledge":
-                    assert page.get_by_role("button",name="知识单元",exact=True).get_attribute("aria-pressed")=="true"
+                    assert page.get_by_role("button",name="知识点",exact=True).get_attribute("aria-pressed")=="true"
                 if name=="05-chat":
                     assert page.locator("#mode-more-panel .reasoning-effort").count()==0
                     page.get_by_role("button",name="打开模型选择",exact=True).click()
@@ -736,7 +736,7 @@ with sync_playwright() as p:
                     expect(page.locator(".manual-word-editor")).to_have_count(0)
                     outline.first.click()
                     expect(page.locator(".manual-word-editor")).to_have_count(1)
-                    page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
+                    page.get_by_role("button",name="微调原题 / 知识点",exact=True).click()
                     page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
                     page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
                     page.get_by_role("button",name="取消微调",exact=True).click()
@@ -1078,7 +1078,7 @@ with sync_playwright() as p:
             page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
             page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
             page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
-            page.get_by_role("button",name="选择已有知识点",exact=True).click()
+            page.get_by_role("button",name="选择已有知识标签",exact=True).click()
             catalog=page.locator(".manual-tag-catalog")
             catalog.locator(".manual-tag-category").wait_for()
             assert catalog.get_by_role("button",name="导数",exact=True).count()==0
@@ -1087,13 +1087,13 @@ with sync_playwright() as p:
             catalog.get_by_role("button",name="展开 一元函数微分学",exact=True).click()
             catalog.get_by_role("button",name="导数",exact=True).click()
             assert catalog.get_by_role("button",name="定积分",exact=True).count()==0
-            page.get_by_label("搜索已有知识点").fill("定积分")
+            page.get_by_label("搜索已有知识标签").fill("定积分")
             catalog.get_by_role("button",name="定积分",exact=False).first.wait_for()
 
-            page.get_by_label("知识点",exact=True).fill("新知识点")
-            page.get_by_role("button",name="新增知识点",exact=True).click()
-            expect(page.get_by_role("button",name="移除知识点 新知识点",exact=True)).to_be_visible()
-            expect(page.get_by_role("button",name="移除知识点 导数",exact=True)).to_be_visible()
+            page.get_by_label("知识标签",exact=True).fill("新知识点")
+            page.get_by_role("button",name="新增知识标签",exact=True).click()
+            expect(page.get_by_role("button",name="移除知识标签 新知识点",exact=True)).to_be_visible()
+            expect(page.get_by_role("button",name="移除知识标签 导数",exact=True)).to_be_visible()
             page.get_by_role("button",name="下一条 · 新增",exact=True).click()
             page.get_by_role("button",name="＋ 综合题",exact=True).click()
             page.get_by_label("题目",exact=True).fill("测试查重")

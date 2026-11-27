@@ -351,7 +351,10 @@ def source_overview(id:str,db:Session=Depends(get_db)):
     linked=or_(TeachingResource.source_id==id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==id)))
     counts=dict(db.execute(select(TeachingResource.kind,func.count()).where(linked,TeachingResource.archived==False,TeachingResource.kind.in_(("question","knowledge"))).group_by(TeachingResource.kind)).all())
     batches=list(db.scalars(select(TeachingDocument).where(TeachingDocument.source_id==id,TeachingDocument.kind=="intake",TeachingDocument.archived==False).order_by(TeachingDocument.created_at,TeachingDocument.id)))
-    return {"questions":counts.get("question",0),"knowledge":counts.get("knowledge",0),"batches":[{"id":d.id,"title":d.title,"revision":d.revision,"pending":any(b.get("kind") in ("question","knowledge") for b in d.blocks)} for d in batches]}
+    tag_rows=select(ResourceKnowledgeLink.knowledge_id).join(TeachingResource,TeachingResource.id==ResourceKnowledgeLink.resource_id).where(linked,TeachingResource.archived==False,TeachingResource.kind.in_(("question","knowledge")))
+    tag_count=db.scalar(select(func.count()).select_from(tag_rows.distinct().subquery()))
+    question_tag_count=db.scalar(select(func.count()).select_from(tag_rows.where(TeachingResource.kind=="question").distinct().subquery()))
+    return {"questions":counts.get("question",0),"knowledge":counts.get("knowledge",0),"knowledge_tags":tag_count,"question_knowledge_tags":question_tag_count,"batches":[{"id":d.id,"title":d.title,"revision":d.revision,"pending":any(b.get("kind") in ("question","knowledge") for b in d.blocks)} for d in batches]}
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)): return view(existing(db,id))

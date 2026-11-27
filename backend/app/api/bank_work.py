@@ -190,8 +190,8 @@ def status(db,r,body):
         point=db.get(P,v);link=db.get(K,(r.id,v))
         if action=="knowledge_add":
             if link:return "unchanged","已关联"
-            if not point or point.status!="active" or point.subject!=r.subject:return "skip","知识点不可用或科目不同"
-            if db.scalar(select(func.count()).select_from(K).where(K.resource_id==r.id))>=20:return "skip","已达20个知识点"
+            if not point or point.status!="active" or point.subject!=r.subject:return "skip","知识标签不可用或科目不同"
+            if db.scalar(select(func.count()).select_from(K).where(K.resource_id==r.id))>=20:return "skip","已达20个知识标签"
         elif not link:return "unchanged","未关联"
     if action=="source_add":
         src=db.get(R,v)

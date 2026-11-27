@@ -37,6 +37,20 @@ def test_migration_and_login(tmp_path, monkeypatch):
         setup=client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"卷头说明"})
         assert setup.status_code==200,setup.text
         created_doc=setup.json()
+        catalog_url="/api/source-catalog/sources/"+created_doc["source_id"]
+        old_catalog=client.get(catalog_url).json()
+        assert old_catalog["revision"]==0 and old_catalog["intake_status"]=="unknown"
+        metadata={"revision":0,"category":"院校真题","institution":"测试院校","subject_code":"601","subjects":["高数","线性代数"],"intake_status":"in_progress"}
+        saved=client.put(catalog_url,headers=origin,json=metadata)
+        assert saved.status_code==200,saved.text
+        assert saved.json()["subjects"]==["高等数学","线性代数"]
+        assert client.put(catalog_url,headers=origin,json=metadata).status_code==409
+        found=client.get("/api/source-catalog/sources",params={"institutions":"测试院校","years":"2026"}).json()
+        assert found["total"]==1 and found["items"][0]["source_id"]==created_doc["source_id"]
+        assert len(client.get(catalog_url+"/history").json()["items"])==1
+        actual=client.get("/api/resources/"+created_doc["source_id"]+"/source-overview").json()
+        assert actual["questions"]==actual["knowledge"]==actual["knowledge_tags"]==0
+        assert "total_questions" not in actual
         assert created_doc["blocks"][0]["content"]=="卷头说明"
         assert created_doc["subject"]==""
         assert client.get("/api/resources/"+created_doc["source_id"]).json()["subject"]==""

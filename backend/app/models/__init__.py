@@ -142,6 +142,21 @@ class SourceVersion(Base):
     snapshot: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[int] = mapped_column(BigInteger)
 
+class SourceCatalogDetail(Base):
+    """Independent metadata: never infer institution, completion or subject coverage from file text."""
+    __tablename__ = "source_catalog_details"
+    source_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
+    category: Mapped[str] = mapped_column(String(60),default="",server_default="")
+    institution: Mapped[str] = mapped_column(String(120),default="",server_default="")
+    subject_code: Mapped[str] = mapped_column(String(40),default="",server_default="")
+    subjects: Mapped[list] = mapped_column(JSON,default=list,server_default="[]")
+    author: Mapped[str] = mapped_column(String(180),default="",server_default="")
+    publisher: Mapped[str] = mapped_column(String(180),default="",server_default="")
+    intake_status: Mapped[str] = mapped_column(String(20),default="unknown",server_default="unknown")
+    revision: Mapped[int] = mapped_column(Integer,default=1,server_default="1")
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (Index("ix_source_catalog_group","category","institution","subject_code"),Index("ix_source_catalog_school","institution"),CheckConstraint("intake_status IN ('unknown','not_started','in_progress','completed','stopped')",name="ck_source_catalog_status"))
+
 class KnowledgePointCatalog(Base):
     __tablename__ = "knowledge_point_catalog"
     id: Mapped[str] = mapped_column(String(36),primary_key=True)
