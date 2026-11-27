@@ -1,4 +1,5 @@
 import type {Layout} from './documentLayout'
+import {dimensions,sectionName} from './documentLayout'
 
 export type PaginationResult={pages:number;error:string}
 const el=(tag:string,cls:string,text?:string)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n}
@@ -25,9 +26,14 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
  if(!article||!body)return {pages:0,error:'文档内容尚未加载'}
  const sheets:{sheet:HTMLElement;columns:HTMLElement[];header:HTMLElement;footer:HTMLElement;chapter:string}[]=[]
  const contents=Array.from(body.children),headings:{id:string;title:string;level:number;page:number}[]=[]
- let current=0,col=0,chapter='',error='',chapterNumber=0,equationNumber=0
+ let current=0,col=0,chapter='',error='',chapterNumber=0,equationNumber=0,sectionKey=''
  const addPage=(withTitle=false,toc=false)=>{
+  const key=toc?'':sectionKey
+  const geometry={...layout,...(key?layout.sectionPages[key]:{})}
+  const [w,h]=dimensions(geometry)
   const sheet=el('article','print-document layout-sheet')
+  for(const [name,value] of Object.entries(pageVariables(geometry,w,h)))sheet.style.setProperty(name,String(value))
+  if(key)sheet.style.setProperty('page',sectionName(layout,key))
   const header=el('div','layout-page-header',layout.header?'占位':'')
   const footer=el('div','layout-page-footer',layout.footer?'占位':'')
   if(!layout.header)header.hidden=true
@@ -35,13 +41,13 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   sheet.append(header)
   if(withTitle){for(const n of Array.from(article.children).filter(n=>n.matches('h1,.print-subtitle')))sheet.append(copy(n))}
   const cols=el('div','layout-sheet-columns')
-  const columns=Array.from({length:toc?1:layout.columns},()=>el('div','layout-sheet-column'))
+  const columns=Array.from({length:toc?1:geometry.columns},()=>el('div','layout-sheet-column'))
   columns.forEach(n=>cols.append(n));sheet.append(cols,footer);target.append(sheet)
   sheets.push({sheet,columns,header,footer,chapter});return sheets.length-1
  }
  current=addPage(true)
  const active=()=>sheets[current].columns[col]
- const next=()=>{if(col+1<layout.columns)col++;else{current=addPage();col=0}}
+ const next=()=>{if(col+1<sheets[current].columns.length)col++;else{current=addPage();col=0}}
  const newPage=()=>{if(sheets[current].columns.some(n=>n.childElementCount)){current=addPage();col=0}}
  function appendPart(part:HTMLElement,uid:string,attempt=0):boolean{
   let dest=active();dest.append(part);fitOptions(part)
@@ -71,7 +77,20 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   const level=Number((item as HTMLElement).dataset.layoutLevel??0)
   const pageBreak=(item as HTMLElement).dataset.layoutBreak
   if(pageBreak==='before'||pageBreak==='alone')newPage()
-  if(level===1){chapterNumber++;if(layout.equationNumbering==='chapter')equationNumber=0;chapter=item.textContent?.trim()??'';if(layout.chapterNewPage&&sheets[current].columns.some(n=>n.childElementCount))newPage()}
+  if(level===1){
+   chapterNumber++;if(layout.equationNumbering==='chapter')equationNumber=0
+   const newChapter=item.textContent?.trim()??''
+   const key=Object.hasOwn(layout.sectionPages,uid)?uid:''
+   const changed=key!==sectionKey
+   if(changed){
+    sectionKey=key;chapter=newChapter
+    if(sheets[current].columns.every(n=>!n.childElementCount)){
+     const withTitle=current===0
+     sheets.pop()?.sheet.remove();current=addPage(withTitle);col=0
+    }else{current=addPage();col=0}
+   }else if(layout.chapterNewPage&&sheets[current].columns.some(n=>n.childElementCount)){chapter=newChapter;newPage()}
+   chapter=newChapter
+  }
   const node=copy(item)
   if(node.id)node.removeAttribute('id')
   node.dataset.layoutUid=uid
