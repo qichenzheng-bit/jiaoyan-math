@@ -172,8 +172,8 @@ def build_snapshot(scope, identity, request, db):
         result.append(block)
     return {**data, "blocks": result}
 
-def resolve_images(db, data):
-    ids = set()
+def resolve_images(db, data, layout=None):
+    ids = {fid for fid in (layout.coverFileId,layout.backCoverFileId) if fid} if layout else set()
     for block in data["blocks"]:
         if block.get("kind") == "image" and block.get("file_id"):
             ids.add(block["file_id"])
@@ -191,7 +191,7 @@ def resolve_images(db, data):
 def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
                db: Session = Depends(get_db), user: User = Depends(current_user)):
     data = build_snapshot(scope, identity, body, db)
-    images = resolve_images(db, data)
+    images = resolve_images(db, data, body.layout)
     payload = {"doc": data, "layout": body.layout.model_dump(), "stem": body.stem,
                "answerOnly": body.answerOnly, "source": scope == "source", "page_ranges":body.page_ranges, "preview_pages":body.preview_pages}
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
