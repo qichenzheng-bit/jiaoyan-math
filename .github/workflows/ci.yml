@@ -309,7 +309,7 @@ jobs:
         if: matrix.group == 'desktop'
         run: python tests/pdf_preview.py
       - uses: actions/upload-artifact@v6
-        if: failure() || github.event_name == 'workflow_dispatch' || (github.head_ref == 'refactor/f4-4-creation' || github.ref_name == 'refactor/f4-4-creation')
+        if: failure() || matrix.group == 'mobile' || github.event_name == 'workflow_dispatch' || (github.head_ref == 'refactor/f4-4-creation' || github.ref_name == 'refactor/f4-4-creation')
         continue-on-error: true
         with:
           name: clean-workspace-screenshots-${{ matrix.group }}

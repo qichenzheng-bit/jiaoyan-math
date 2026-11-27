@@ -182,6 +182,7 @@ def answer(route):
     if p=="/files" and route.request.method=="POST":
         name=q.get("name",["demo.tex"])[0]
         result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}
+    if p=="/source-catalog/statistics/scopes":result={"items":[]}
     if p=="/files/agent-pdf/document-preview":result={"total_units":100}
     if p=="/files/agent-pdf/document-preview/page":
         import base64
@@ -1164,7 +1165,7 @@ with sync_playwright() as p:
             preview.get_by_role("button",name="放大 Word",exact=True).click()
             expect(preview.get_by_role("button",name="150%",exact=True)).to_be_visible()
             assert uploads==[], "Preview must not upload local files"
-            capture(page,path=str(OUT/"phone-word-local-preview.png"),full_page=False)
+            page.screenshot(path=str(OUT/"phone-word-local-preview.png"),full_page=False)
             preview.get_by_role("button",name="关闭预览").click()
             page.get_by_role("button",name="移除 预览.docx").click()
             page.remove_listener("request",track_upload)
@@ -1210,7 +1211,8 @@ with sync_playwright() as p:
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), label
                     assert page.locator(".workspace > .topbar").evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1}"),label
                     if width==393:
-                        capture(page,path=str(OUT/("phone-module-"+label+".png")),full_page=False)
+                        page.evaluate("document.fonts.ready")
+                        page.screenshot(path=str(OUT/("phone-module-"+label+".png")),full_page=False)
             print('UI case: compact phone composition and production navigation',flush=True)
             page.set_viewport_size({"width":393,"height":873})
             visit(page,"/work?job=review-clean&review=1",".wg-review-editor .katex")
