@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react'
 import type {CSSProperties,ReactNode} from 'react'
-import {dimensions,layoutError} from './documentLayout'
+import {dimensions,layoutError,pageRules} from './documentLayout'
 import type {Layout} from './documentLayout'
 import {paginateDocument,pageVariables} from './documentPagination'
 import type {PaginationResult} from './documentPagination'
@@ -36,7 +36,7 @@ export default function PagedPreview({layout,title,subject,children,version,onRe
  const [w,h]=dimensions(layout)
  const style={...pageVariables(layout,w,h),'--layout-title-size':layout.titleSize+'pt','--layout-heading-size':layout.headingSize+'pt'} as CSSProperties
  return <div className="layout-work" style={style} data-pdf-state={measuring?'pending':status.error?'failed':status.pages?'ready':'pending'} data-pdf-pages={status.pages}>
-  <style>{'@page{size:'+w+'mm '+h+'mm;margin:0}'}</style>
+  <style>{pageRules(layout)}</style>
   {measuring&&<div className="layout-measure" aria-hidden="true" ref={source}>{children}</div>}
   <div className="layout-pages" data-ready={!measuring&&!status.error?"1":"0"} ref={target}/>
   {status.error&&<p className="print-controls" role="alert">{status.error}</p>}
