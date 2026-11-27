@@ -116,3 +116,114 @@ def backup_run(db: Session = Depends(get_db), user: User = Depends(current_user)
     audit(db, "backup.request", user.id)
     db.commit()
     return {"accepted": True}
+
+
+# F4.6: versioned, declarative, user-scoped layout profiles. No document contents,
+# HTML, CSS or scripts may be supplied by the browser.
+from typing import Literal
+import hashlib
+import json
+from pydantic import ConfigDict, model_validator
+from app.models import TeachingDocument, TeachingResource
+
+class DocumentLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper: Literal["A4","A3","A5","B5","A6","custom"]="A4"
+    width: float=Field(default=210,ge=50,le=1000)
+    height: float=Field(default=297,ge=50,le=1000)
+    landscape: bool=False
+    top: float=Field(default=20,ge=0,le=100)
+    bottom: float=Field(default=20,ge=0,le=100)
+    left: float=Field(default=20,ge=0,le=100)
+    right: float=Field(default=20,ge=0,le=100)
+    columns: Literal[1,2,3]=1
+    gap: float=Field(default=8,ge=3,le=30)
+    font: Literal["serif","sans"]="serif"
+    size: float=Field(default=10.5,ge=6,le=36)
+    lineHeight: float=Field(default=1.5,ge=1,le=3)
+    paragraphGap: float=Field(default=6,ge=0,le=50)
+    keepQuestions: bool=True
+    originalNumbers: bool=False
+    answerSpace: float=Field(default=0,ge=0,le=180)
+    header: str=Field(default="",max_length=200)
+    footer: str=Field(default="",max_length=200)
+
+    @model_validator(mode="after")
+    def printable_area(self):
+        dims={"A4":(210,297),"A3":(297,420),"A5":(148,210),"B5":(176,250),"A6":(105,148)}
+        w,h=sorted(dims.get(self.paper,(self.width,self.height)))
+        if self.landscape:w,h=h,w
+        if w-self.left-self.right-(self.columns-1)*self.gap<self.columns*20 or h-self.top-self.bottom<25:
+            raise ValueError("页面有效排版空间不足")
+        return self
+
+class DocumentLayoutTemplate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    id: str=Field(min_length=1,max_length=80,pattern=r"^[A-Za-z0-9_-]+$")
+    name: str=Field(min_length=1,max_length=80)
+    kind: Literal["paper","handout","textbook","all"]
+    layout: DocumentLayout
+
+class LayoutUpdate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revision: int=Field(ge=0)
+    value: DocumentLayout
+
+class TemplateUpdate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revision: int=Field(ge=0)
+    value: list[DocumentLayoutTemplate]=Field(max_length=100)
+
+    @model_validator(mode="after")
+    def unique_ids(self):
+        ids=[t.id for t in self.value]
+        if len(set(ids))!=len(ids) or set(ids)&{"paper","paper-double","handout","textbook","general"}:
+            raise ValueError("模板编号重复或与系统模板冲突")
+        if any(not t.name.strip() for t in self.value):
+            raise ValueError("模板名称不能为空")
+        return self
+
+def _layout_key(user,scope,identity):
+    return "layout:"+str(user.id)+":"+hashlib.sha256((scope+":"+identity).encode()).hexdigest()
+
+def _layout_record(db,key,fallback=None):
+    setting=db.get(Setting,key)
+    return json.loads(setting.value) if setting else {"revision":0,"value":fallback,"history":[]}
+
+def _layout_save(db,user,key,revision,value,fallback=None):
+    # Serialize writes even for a profile not yet present in the settings table.
+    db.scalar(select(User).where(User.id==user.id).with_for_update())
+    old=_layout_record(db,key,fallback)
+    if old["revision"]!=revision:
+        raise HTTPException(409,"排版配置已被其他设备更新，请重新读取后保存")
+    if old["value"]==value:return old
+    history=([{"revision":old["revision"],"value":old["value"]}]+old["history"])[:2] if old["revision"] else []
+    record={"revision":revision+1,"value":value,"history":history}
+    db.merge(Setting(key=key,value=json.dumps(record,ensure_ascii=False)))
+    audit(db,"document.layout.update",user.id)
+    db.commit()
+    return record
+
+def _check_layout_target(db,scope,identity):
+    model=TeachingDocument if scope=="doc" else TeachingResource
+    target=db.get(model,identity)
+    if not target or (scope=="source" and target.kind!="source"):
+        raise HTTPException(404,"排版资料不存在")
+
+@router.get("/document-layout/{scope}/{identity}")
+def read_document_layout(scope:Literal["doc","source"],identity:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,scope,identity)
+    return _layout_record(db,_layout_key(user,scope,identity))
+
+@router.put("/document-layout/{scope}/{identity}",dependencies=[Depends(require_origin)])
+def update_document_layout(scope:Literal["doc","source"],identity:str,body:LayoutUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,scope,identity)
+    return _layout_save(db,user,_layout_key(user,scope,identity),body.revision,body.value.model_dump())
+
+@router.get("/document-templates")
+def read_document_templates(db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return _layout_record(db,_layout_key(user,"templates","all"),[])
+
+@router.put("/document-templates",dependencies=[Depends(require_origin)])
+def update_document_templates(body:TemplateUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return _layout_save(db,user,_layout_key(user,"templates","all"),body.revision,[t.model_dump() for t in body.value],[])
