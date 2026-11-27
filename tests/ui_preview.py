@@ -34,6 +34,8 @@ layout_profiles={}
 video_test_enabled=False
 video_jobs=[]
 video_demo={"id":"video-preview","resource_id":items[0]["id"],"resource_revision":1,"source_snapshot":{"title":items[0]["title"],"problem":items[0]["content"],"answer":items[0]["answer"],"reference_solution":items[0]["solution"],"fps":60},"engine_id":"a"*32,"work_id":None,"created_at":1}
+finished_demo={"id":"work-preview","title":"高等数学讲义成品","kind":"handout","subject":"高等数学","origin_scope":"doc","origin_id":"demo","current_version":2,"created_at":1,"updated_at":2}
+finished_version={"number":2,"created_at":2,"files":[{"role":"body","filename":"高等数学讲义.pdf","pages":3,"size_bytes":2048,"media_type":"application/pdf"}]}
 def answer(route):
     from urllib.parse import urlsplit,parse_qs
     u=urlsplit(route.request.url);p=u.path.removeprefix("/api");q=parse_qs(u.query)
@@ -46,6 +48,16 @@ def answer(route):
       "/studio/presets":{"bilibili":[1200,900,7,7,7,7],"bilibili_wide":[1920,1080,8,8,8,8],"douyin":[1080,1440,9,12,8,8],"douyin_wide":[1440,1080,8,8,8,8],"douyin_full":[1080,1920,13,21,8,12],"xiaohongshu":[1080,1440,8,10,8,8],"wechat_channels":[1080,1260,8,10,8,8],"wechat_channels_wide":[1920,1080,8,8,8,8],"wechat_top":[900,383,6,8,28.72,28.72],"wechat_sub":[500,500,8,8,8,8]},
       "/qoder/usage/refresh":{"available":True,"source":"sdk","updated_at":1795656773,"packs":[{"kind":"userQuota","label":"套餐额度","total":100,"used":25,"remaining":75,"unit":"credits","available":True}]},"/studio/qoder-checkin":{"round":"2026-11-26","timezone":"Asia/Shanghai","accounts":[]},"/qiandao/state":{"enabled":False,"configured":False,"reason":"pat_missing","round":"2026-11-26","next_round":"2026-11-27T10:00:00+08:00","current":None,"history":[]},"/studio":{"items":[],"total":0},"/video/status":{"available":False,"detail":"隔离预览：未配置视频引擎","source_revision":"preview"},"/video/projects":[],"/tasks":[],"/files/stats":{"count":0,"bytes":0,"max_file_bytes":20971520}
     }.get(p)
+    if p=="/teaching-works":
+        rows=[finished_demo] if (not q.get("kind") or q["kind"][0]=="handout") and (not q.get("q") or q["q"][0] in finished_demo["title"]) else []
+        result={"items":rows,"total":len(rows)}
+    if p=="/teaching-works/subjects":result=["高等数学"]
+    if p=="/teaching-works/work-preview":result={**finished_demo,"versions":[finished_version,{**finished_version,"number":1}],"pending_cover":None}
+    if p=="/teaching-works/work-preview/versions/2/questions":
+        result={"items":[{"uid":"q1","title":items[0]["title"],"content":items[0]["content"],"answer":items[0]["answer"],"solution":items[0]["solution"],"chapter":"极限"}],"total":1,"question_count":1,"knowledge_points":["重要极限"],"knowledge_tags":["微积分"],"source_count":1,"partial_pages":False}
+    if p.startswith("/teaching-works/work-preview/versions/2/files/body/pages/"):
+        import base64
+        route.fulfill(status=200,content_type="image/png",body=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII="));return
     if p=="/intelligence/jobs/review-agent-match":result={**review_job,"id":"review-agent-match","reviewed_uids":[]}
     if p=="/intelligence/jobs/review-agent-match/supplements":result=[]
     if p=="/workspaces/agent-work-demo/agent/matching":
@@ -1448,8 +1460,25 @@ with sync_playwright() as p:
             expect(page.get_by_role("checkbox",name="选择 QDEMO0001",exact=True)).to_be_checked()
             expect(page.locator(".question-bank-selection")).to_contain_text("已选 1 道")
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-            visit(page,"/works",".studio-library")
-            expect(page.locator(".studio-library")).to_be_visible()
+            visit(page,"/works",".finished-list")
+            expect(page.locator(".finished-open")).to_have_count(1)
+            page.get_by_role("button",name="筛选",exact=False).click()
+            expect(page.get_by_label("知识点",exact=True)).to_be_visible()
+            expect(page.get_by_label("知识标签",exact=True)).to_be_visible()
+            page.get_by_role("button",name="筛选",exact=False).click()
+            page.locator(".finished-open").first.click()
+            expect(page.locator(".finished-files")).to_be_visible()
+            page.get_by_role("button",name="预览",exact=True).click()
+            expect(page.locator(".finished-reader-page img")).to_be_visible()
+            page.get_by_role("button",name="下一页",exact=True).click()
+            expect(page.get_by_label("跳转页码")).to_have_value("2")
+            page.get_by_role("button",name="关闭",exact=True).click()
+            page.get_by_role("button",name="关联信息",exact=True).click()
+            expect(page.locator(".finished-question .katex").first).to_be_visible()
+            page.get_by_role("button",name="返回作品列表",exact=True).click()
+            expect(page.locator(".finished-list")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            visit(page,"/works?legacy=1",".studio-library")
             page.get_by_role("button",name="新建",exact=True).click()
             expect(page.locator(".clean-studio .resource-form")).to_be_visible()
             expect(page.locator(".studio-library")).to_be_hidden()
