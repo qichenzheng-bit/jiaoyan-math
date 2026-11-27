@@ -8,7 +8,7 @@ from app.core.resource_context import ref
 from app.api import qoder
 
 PREFIX="[[WG_QUERY:"
-MAX_CALLS=6
+MAX_CALLS=12
 
 def key(mid):return "ai.chat.active."+mid
 

@@ -1,3 +1,4 @@
+from typing import Literal
 """Persistent file workspaces. Each explicit batch is bounded and resumable one unit at a time."""
 import re
 import shutil
@@ -172,11 +173,21 @@ def library_row(db,f):
 def original_query():
     return select(StoredFile).where(StoredFile.generated==False,StoredFile.media_type.in_(SUPPORTED))
 @router.get("/library")
-def library(q:str=Query("",max_length=255),archived:bool=False,offset:int=Query(0,ge=0),limit:int=Query(50,ge=1,le=100),db:Session=Depends(get_db)):
+def library(q:str=Query("",max_length=255),archived:bool=False,offset:int=Query(0,ge=0),limit:int=Query(50,ge=1,le=100),db:Session=Depends(get_db),progress_filter:Literal["all","done","todo"]="all"):
     stmt=original_query().where(StoredFile.archived==archived,(StoredFile.purged_at.is_(None)) | (StoredFile.purge_pending==True))
     if q.strip():stmt=stmt.where(StoredFile.name.contains(q.strip(),autoescape=True))
-    total=db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    return {"items":library_details(db,db.scalars(stmt.order_by(StoredFile.created_at.desc(),StoredFile.id).offset(offset).limit(limit)))[0],"total":total}
+    ordered=stmt.order_by(StoredFile.created_at.desc(),StoredFile.id)
+    if progress_filter=="all":
+        total=db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        return {"items":library_details(db,db.scalars(ordered.offset(offset).limit(limit)))[0],"total":total}
+    # Completion is derived from authoritative registration state; filter before pagination.
+    items=[];total=0
+    for part in chunks(db.scalars(ordered),size=100):
+        for row in library_details(db,part)[0]:
+            if row["complete"]!=(progress_filter=="done"):continue
+            if offset<=total<offset+limit:items.append(row)
+            total+=1
+    return {"items":items,"total":total}
 @router.get("/library/resolve")
 def resolve_library(instruction:str=Query(min_length=1,max_length=500),db:Session=Depends(get_db)):
     # Full filenames or unambiguous complete stems only. Never pick a file by model guess.

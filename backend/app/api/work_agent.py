@@ -240,14 +240,15 @@ def cancel(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(c
 @router.post("/{ident}/agent/retry",dependencies=[Depends(require_origin)])
 def retry(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
     from app.api import workspaces as w
-    from app.core.ai_work import later_prompt
+    from app.core.ai_work import later_prompt, MAX_TOTAL_STEPS
     s=w.workspace(db,ident,True);r=current(s)
     if not r or r["id"]!=body.plan_id or not r.get("auto") or r["state"]!="failed":
         raise HTTPException(409,"仅失败的自动工作支持继续")
     if r.get("actor_id")!=user.id:raise HTTPException(403,"无权操作")
     if r.get("phase")=="executing":raise HTTPException(409,"上次写入结果不明确，请先在业务模块核对")
     r=dict(r)
-    if len(r.get("steps",[]))>=48:raise HTTPException(409,"当前工作已达安全步骤上限，请另开工作并引用历史成果")
+    if len(r.get("steps",[]))>=MAX_TOTAL_STEPS:raise HTTPException(409,"当前工作已达总安全步骤上限，请另开工作并引用历史成果")
+    r["stage_start"]=len(r.get("steps",[]))
     if r.get("child"):
         r.update(state="running",phase="business",phase_at=now(),detail="重新查询原业务任务，不重复提交")
     else:

@@ -1,35 +1,23 @@
-# 微光数学 · 教研工作台
+# 微光数学 · 教研工作台 V1
 
-个人考研数学教研与创作系统。视频引擎暂不接入。
-
-## 当前阶段：01.01–01.09 基础代码
-前后端、导航、数据库迁移、认证、公共文件服务、数学公式预览、基础设置及部署脚本已提交。具体教研业务与完整数学编辑器尚未开发，CI 和服务器验收仍需验证。
+个人数学教研与创作系统。包含 AI 聊天与工作、手动和智能录入、原始资料库、题库与查重、知识库与知识标签图谱、来源统计、组卷、讲义、教材、排版与 PDF 导出、视频制作、封面、教学作品、Qoder CN 账号与签到、系统设置。内容发布、商品售卖及运营统计不属于 V1 范围。
 
 ## 本地开发
-需要 Python 3.12、Node.js 22、PostgreSQL。先创建专用数据库及非超级用户，配置环境变量 DATABASE_URL（postgresql+psycopg://...）、APP_ORIGIN=http://localhost:5173、COOKIE_SECURE=false（仅本机 HTTP 开发）。生产必须使用 HTTPS 和 COOKIE_SECURE=true。文件服务还需要绝对路径 STORAGE_ROOT。.env.example 仅为配置样例，程序从进程环境读取，不自动加载。
-
-后端（在 backend 目录）：
+生产及 CI 基线 Python 3.10、Node.js 22、PostgreSQL 16（独立视频引擎使用自己的 Python >=3.11 环境）。配置 DATABASE_URL、APP_ORIGIN=http://localhost:5173、COOKIE_SECURE=false（仅本机 HTTP）、绝对路径 STORAGE_ROOT。生产必须使用 HTTPS 和 COOKIE_SECURE=true。程序读取进程环境，不自动加载 .env。
 ```sh
+cd backend
 python -m venv .venv
-# Linux: source .venv/bin/activate
-# Windows: .venv\Scripts\activate
+# 激活虚拟环境后
 python -m pip install -r requirements-dev.txt
 python -m alembic upgrade head
 python -m app.admin create
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-管理员密码通过终端隐藏输入，不写入仓库。忘记密码使用 python -m app.admin reset。
+在另一终端进入 frontend，安装依赖并执行 npm run dev。管理员密码只通过终端隐藏输入；重置使用 python -m app.admin reset。
 
-前端（在 frontend 目录）：
-```sh
-npm install
-npm run dev
-```
-访问 http://localhost:5173（须与 APP_ORIGIN 一致）。
-
-## 测试
-backend：python -m pytest -q
-frontend：npm run build
-
-## 部署
-见 deploy/README.md 和 docs/phase-01.md。使用已有 self-hosted Runner，须首次配置服务器及 HTTPS 并启用 ENABLE_DEPLOY。禁止用开发服务器作为公开生产服务。
+## 运行与验收
+- 原始文件单文件上传上限 200 MiB；完整文档导出数据上限 200 MB。
+- 数学公式使用 LaTeX。AI 工作可自动执行非破坏性工具，正式录入、导出和视频审核仍由用户确认。
+- 测试：backend 下 python -m pytest -q；frontend 下 npm run build；GitHub Actions 负责自动化、浏览器测试、PDF 和检索基准及部署。
+- 生产部署与恢复：[部署说明](deploy/README.md)、[加密仓库备份](docs/business-backup.md)、[视频引擎](docs/video-migration.md)。
+- V1 是固定产品版本名称；提交 SHA 用于精确定位实际部署。CI 通过不等于真实模型、视频或数据恢复通过。

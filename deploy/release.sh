@@ -87,9 +87,10 @@ switch_to() {
 before=$(psql -X -d jiaoyan -tAc "SELECT to_regclass('public.alembic_version')" )
 if [[ -n "$before" ]]; then before=$(psql -X -d jiaoyan -tAc 'SELECT version_num FROM alembic_version'); fi
 # Once configured, verify an encrypted remote backup before a schema change.
-if [[ -n "$before" && -f "$base/config/backup.json" ]]; then
+if [[ -n "$before" ]]; then
   target_heads=$(cd "$release/backend" && "$release/venv/bin/python" -m alembic heads | awk '{print $1}')
   if [[ "$before" != "$target_heads" ]]; then
+    test -f "$base/config/backup.json" || { echo "Encrypted repository backup must be configured before schema migration"; exit 1; }
     test -f "$old/deploy/backup.py" || { echo "Enable and verify backup service before migrating"; exit 1; }
     "$old/venv/bin/python" "$old/deploy/backup.py" backup
   fi
@@ -123,5 +124,5 @@ if [[ -n "$old" && "$before" == "$after" ]]; then
 else
   echo "Schema changed or no prior release; service remains stopped. No local deployment backup exists; administrator must review recovery options."
 fi
-echo "Deployment failed. Automatic backups disabled; migration command completed: $migrated"
+echo "Deployment failed. Migration command completed: $migrated"
 exit 1
