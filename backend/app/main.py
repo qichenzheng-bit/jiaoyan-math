@@ -28,11 +28,13 @@ from app.api.teaching_works import router as teaching_works_router
 from app.api.video import router as video_router
 from app.api.qiandao import router as qiandao_router, scheduler as qiandao_scheduler
 
+from app.core.ai_work import work_loop
+
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop()), asyncio.create_task(pdf_maintenance_loop())]
+    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop()), asyncio.create_task(pdf_maintenance_loop()), asyncio.create_task(work_loop())]
     try:
         yield
     finally:
