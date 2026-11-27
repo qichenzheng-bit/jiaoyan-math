@@ -41,7 +41,7 @@ export const workspaceGroups:WorkspaceGroup[]=[
  {id:'creation',name:'教学制作',icon:'media',sections:[
   {id:'creation',name:'制作与导出',entries:[entry('/videos'),entry('/papers'),entry('/handouts'),entry('/textbooks')]},
  ]},
- {id:'publishing',name:'内容发布',icon:'publishing',sections:[{id:'release',name:'作品与封面',entries:[entry('/covers'),entry('/works','作品管理')]}]},
+ {id:'publishing',name:'内容发布',icon:'publishing',sections:[{id:'release',name:'作品与封面',entries:[entry('/covers'),entry('/works','作品管理'),{path:'/publishing',name:'发布准备',icon:'publishing'}]}]},
  {id:'sales',name:'商品售卖',icon:'works',sections:[{id:'store',name:'商品与交易',entries:[entry('/products','商品售卖')]}]},
 ]
 
@@ -57,6 +57,7 @@ export function workspaceParent(path:string,search:string):string{
  if(path==='/intake-single')return '/intake'
  if(path==='/work'&&params.has('job')&&params.has('review'))return '/work?job='+encodeURIComponent(params.get('job')!)
  if(path==='/work'&&(params.has('job')||params.has('history')))return '/work'
+ if(path==='/publishing')return '/project/publishing'
  if(path==='/works')return params.has('work')||params.has('legacy')?'/works':'/project/publishing'
  const group=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path===path)))
  return group?'/project/'+group.id:'/'

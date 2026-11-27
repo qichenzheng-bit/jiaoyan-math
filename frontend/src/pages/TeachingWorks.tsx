@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
-import {useLocation,useSearchParams} from 'react-router-dom'
+import {useLocation,useSearchParams,useNavigate} from 'react-router-dom'
 import {api} from '../auth'
 import {Icon} from '../components/Icon'
 import FinishedMediaPreview from '../components/FinishedMediaPreview'
@@ -13,7 +13,7 @@ type Asset={role:string;filename:string;pages:number;size_bytes:number;media_typ
 type Version={number:number;created_at:number;files:Asset[]}
 type EditContext={origin_scope:string;origin_id:string;kind:string;version:number;edition:{chapter?:string|null;stem?:boolean;answerOnly?:boolean}}
 type Facets={subjects?:string[];knowledge_points?:string[];knowledge_tags?:string[];sources?:{id:string;title:string;type:string;year:string;institution:string}[]}
-type Detail=Work&{facets?:Facets;versions:Version[];pending_cover:{filename:string;created_at:number}|null;video?:{project_id:string;cover_file_id:string|null;resource_id:string}}
+type Detail=Work&{handoffs?:{id:string;purpose:string;version:number|null}[];facets?:Facets;versions:Version[];pending_cover:{filename:string;created_at:number}|null;video?:{project_id:string;cover_file_id:string|null;resource_id:string}}
 type Question={uid:string;title:string;content:string;answer:string;solution:string;analysis:string;proof:string;chapter:string}
 type Related={items:Question[];total:number;question_count:number;knowledge_points:string[];knowledge_tags:string[];source_count:number;partial_pages:boolean}
 const kinds=[['','全部'],['paper','试卷'],['handout','讲义'],['textbook','教材'],['video','视频'],['source','来源文档']]
@@ -26,7 +26,7 @@ const errorText=(e:unknown)=>e instanceof Error?e.message:'读取失败'
 const pageSize=20
 
 export default function TeachingWorks(){
- const [params,setParams]=useSearchParams(),location=useLocation(),id=params.get('work')??''
+ const [params,setParams]=useSearchParams(),location=useLocation(),navigate=useNavigate(),id=params.get('work')??''
  const [q,setQ]=useState(params.get('q')??''),[kind,setKind]=useState(params.get('kind')??''),[subject,setSubject]=useState(''),[scope,setScope]=useState(''),[sort,setSort]=useState('recent')
  const [advancedTerms,setAdvancedTerms]=useState({source_type:'',institution:'',year:'',knowledge_point:'',knowledge_tag:'',subjects_all:''})
  const [from,setFrom]=useState(''),[to,setTo]=useState(''),[advanced,setAdvanced]=useState(false),[page,setPage]=useState(0)
@@ -35,6 +35,7 @@ export default function TeachingWorks(){
  const [related,setRelated]=useState<Related>(),[relatedError,setRelatedError]=useState(''),[questionPage,setQuestionPage]=useState(0),[questionQuery,setQuestionQuery]=useState('')
  const [menu,setMenu]=useState(''),[preview,setPreview]=useState<{url:string;name:string;video?:boolean;pages?:number;pageUrl?:string}>()
  const [actionBusy,setActionBusy]=useState(false),[actionMessage,setActionMessage]=useState(''),[edit,setEdit]=useState<EditContext>()
+ const [selected,setSelected]=useState<Work[]>([]),[multi,setMulti]=useState(false),[renaming,setRenaming]=useState(false),[newName,setNewName]=useState('')
  const scroll=useRef(0),returnScroll=useRef(false)
  const activeVersion=(tab==='related'?detail?.versions.find(v=>v.number===version):detail?.versions.find(v=>v.number===detail.current_version))??detail?.versions[0]
  const detailReady=detail?.id===id
@@ -53,7 +54,7 @@ export default function TeachingWorks(){
   returnScroll.current=false;requestAnimationFrame(()=>document.querySelector('.main-content')?.scrollTo(0,scroll.current))
  },[id,busy])
  useEffect(()=>{
-  setDetail(undefined);setDetailError('');setVersion(undefined);setTab('files');setPreview(undefined);setRelated(undefined);setMenu('');setEdit(undefined);setActionMessage('')
+  setDetail(undefined);setDetailError('');setVersion(undefined);setTab('files');setPreview(undefined);setRelated(undefined);setMenu('');setEdit(undefined);setActionMessage('');setRenaming(false)
   if(!id)return
   const c=new AbortController()
   api<Detail>('/teaching-works/'+encodeURIComponent(id),{signal:c.signal}).then(v=>{if(!c.signal.aborted){setDetail(v);setVersion(v.current_version??undefined)}}).catch(e=>{if(!c.signal.aborted)setDetailError(errorText(e))})
@@ -72,6 +73,27 @@ export default function TeachingWorks(){
  useWorkspaceBack(()=>{if(preview){setPreview(undefined);return true}if(id){closeWork();return true}return false},20)
  function filter(fn:()=>void){fn();setPage(0);setMenu('')}
  function clear(){filter(()=>{setQ('');setKind('');setSubject('');setScope('');setSort('recent');setFrom('');setTo('');setAdvancedTerms({source_type:'',institution:'',year:'',knowledge_point:'',knowledge_tag:'',subjects_all:''})})}
+ function choices(ws:Work[]){return {items:ws.map(w=>({id:w.id,version:w.current_version}))}}
+ function toggle(w:Work){setSelected(old=>old.some(x=>x.id===w.id)?old.filter(x=>x.id!==w.id):old.length>=100?old:[...old,w])}
+ async function manage(ws:Work[],action:'delete'|'zip'|'publish'|'product'){
+  if(!ws.length||actionBusy)return
+  if(action==='delete'&&!await confirmAction('移除 '+ws.length+' 项作品？文档成品及历史版本将删除，原题库和制作项目保留。视频仅归档，不删除引擎文件。','删除作品','确认删除'))return
+  setActionBusy(true);setActionMessage('')
+  try{
+   if(action==='delete'){
+    await api('/teaching-works/manage/delete',{method:'POST',body:JSON.stringify(choices(ws))})
+    setSelected([]);setMulti(false);setPage(0);if(id)closeWork();setReload(n=>n+1)
+   }else if(action==='zip'){
+    const response=await fetch('/api/teaching-works/manage/zip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(choices(ws))})
+    if(!response.ok){const e=await response.json();throw Error(e.detail||'打包失败')}
+    const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='教学作品.zip';a.click();window.setTimeout(()=>URL.revokeObjectURL(url),60000)
+   }else{
+    const result=await api<{id:string}>('/teaching-works/handoffs/create',{method:'POST',body:JSON.stringify({...choices(ws),purpose:action})})
+    navigate((action==='publish'?'/publishing':'/products')+'?handoff='+encodeURIComponent(result.id))
+   }
+  }catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}
+ }
+ async function saveName(){if(!detail||!newName.trim()||actionBusy)return;setActionBusy(true);try{await api('/teaching-works/'+encodeURIComponent(detail.id)+'/name',{method:'PATCH',body:JSON.stringify({title:newName,expected_updated:detail.updated_at})});setRenaming(false);setReload(n=>n+1)}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
  function openFile(f:Asset,v:Version){if(detail){const url=fileUrl(detail.id,v.number,f.role);setPreview({url,name:f.filename,pages:f.pages,pageUrl:url+'/pages'})}}
  async function restore(v:Version){if(!detail||!detail.current_version||actionBusy)return;if(!await confirmAction('将 V'+v.number+' 恢复为新的正式版本？原制作草稿与已发布内容不变。','恢复历史版本','确认恢复'))return;setActionBusy(true);setActionMessage('');try{await api('/teaching-works/'+encodeURIComponent(detail.id)+'/versions/'+v.number+'/restore',{method:'POST',body:JSON.stringify({expected_version:detail.current_version})});setReload(n=>n+1)}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
  async function openEdit(){if(!detail||actionBusy)return;setActionBusy(true);setActionMessage('');try{setEdit(await api<EditContext>('/teaching-works/'+encodeURIComponent(detail.id)+'/edit-context'))}catch(e){setActionMessage(errorText(e))}finally{setActionBusy(false)}}
@@ -82,6 +104,9 @@ export default function TeachingWorks(){
    <h1><MathText compact content={detail.title}/></h1>
    <p className="muted">{label(detail.kind)} · {detail.kind==='video'?'引擎已归档':detail.current_version?'V'+detail.current_version:'待匹配正文'} · {day(detail.updated_at)}</p>
    {actionMessage&&<p className="inline-error" role="alert">{actionMessage}</p>}
+   {!preview&&<div className="finished-actions"><button disabled={actionBusy} onClick={()=>{setNewName(detail.title);setRenaming(true)}}>重命名</button>{detail.kind!=='video'&&Boolean(detail.current_version)&&<button disabled={actionBusy} onClick={()=>void manage([detail],'zip')}>下载全部文件</button>}<button disabled={actionBusy||detail.current_version===0} onClick={()=>void manage([detail],'publish')}>去发布</button><button disabled={actionBusy||detail.current_version===0} onClick={()=>void manage([detail],'product')}>去售卖</button><button disabled={actionBusy} onClick={()=>void manage([detail],'delete')}>{detail.kind==='video'?'归档视频':'删除作品'}</button></div>}
+   {renaming&&!preview&&<form className="panel finished-actions" onSubmit={e=>{e.preventDefault();void saveName()}}><label>作品名称<input value={newName} maxLength={200} onChange={e=>setNewName(e.target.value)}/></label><button className="primary" disabled={actionBusy||!newName.trim()}>保存</button><button type="button" onClick={()=>setRenaming(false)}>取消</button><small>不改变 PDF 或视频内容。</small></form>}
+   {!preview&&Boolean(detail.handoffs?.length)&&<section className="panel"><h2>关联准备单</h2>{detail.handoffs?.map(h=><p key={h.id}><Link to={(h.purpose==='publish'?'/publishing':'/products')+'?handoff='+encodeURIComponent(h.id)}>{h.purpose==='publish'?'发布准备':'商品准备'} · {h.version===null?'视频引擎': 'V'+h.version}</Link></p>)}</section>}
    {preview?<FinishedMediaPreview key={preview.url} file={preview} onClose={()=>setPreview(undefined)}/>:<>
     {detail.video?<section className="panel finished-video">
       {detail.video.cover_file_id&&<img src={'/api/files/'+encodeURIComponent(detail.video.cover_file_id)+'/preview'} alt="视频封面" loading="lazy"/>}
@@ -111,10 +136,12 @@ export default function TeachingWorks(){
   <div className="finished-search"><div className="finished-search-field"><Icon name="search"/><input aria-label="搜索作品名称" placeholder="搜索作品名称" value={q} maxLength={200} onChange={e=>filter(()=>setQ(e.target.value))}/></div><button type="button" aria-expanded={advanced} onClick={()=>setAdvanced(x=>!x)}>筛选 <Icon name="chevron-down" size={15}/></button></div>
   <div className="finished-tabs" role="group" aria-label="作品类型">{kinds.map(([v,n])=><button key={v} aria-pressed={kind===v} onClick={()=>filter(()=>setKind(v))}>{n}</button>)}</div>
   {advanced&&<section className="panel finished-filters"><label>科目<select value={subject} onChange={e=>filter(()=>setSubject(e.target.value))}><option value="">全部科目</option>{subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>制作来源<select value={scope} onChange={e=>filter(()=>setScope(e.target.value))}><option value="">全部</option><option value="doc">自编教学资料</option><option value="source">来源库</option><option value="video">视频引擎</option></select></label><label>创建起始<input type="date" value={from} onChange={e=>filter(()=>setFrom(e.target.value))}/></label><label>创建截止<input type="date" value={to} onChange={e=>filter(()=>setTo(e.target.value))}/></label>{([["source_type","来源类型代码","如 exam、textbook"],["institution","来源院校","如 郑州大学"],["year","来源年份","如 2026"],["knowledge_point","知识点","录入的知识点名称"],["knowledge_tag","知识标签","知识图谱标签名称"],["subjects_all","同时包含科目","多个名称用逗号分隔"]] as const).map(([k,n,h])=><label key={k}>{k==='source_type'?'来源类型':n}{k==='source_type'?<select value={advancedTerms[k]} onChange={e=>filter(()=>setAdvancedTerms(v=>({...v,[k]:e.target.value})))}><option value="">全部来源类型</option><option value="exam">试卷</option><option value="handout">讲义</option><option value="textbook">教材</option><option value="other">其他来源</option></select>:<input maxLength={500} placeholder={h} value={advancedTerms[k]} onChange={e=>filter(()=>setAdvancedTerms(v=>({...v,[k]:e.target.value})))}/>}</label>)}<button onClick={clear}>重置筛选</button></section>}
+  {actionMessage&&<p role="alert" className="inline-error">{actionMessage}</p>}
+  <div className="finished-actions"><button onClick={()=>{setMulti(v=>!v);setSelected([])}}>{multi?'退出批量管理':'批量管理'}</button>{multi&&<><button disabled={busy} onClick={()=>setSelected(old=>rows.every(r=>old.some(x=>x.id===r.id))?old.filter(x=>!rows.some(r=>r.id===x.id)):[...old,...rows.filter(r=>!old.some(x=>x.id===r.id))].slice(0,100))}>选择/取消本页</button><span>已选 {selected.length} / 100 项</span><button disabled={actionBusy||!selected.length||selected.some(w=>w.kind==='video'||!w.current_version)} onClick={()=>void manage(selected,'zip')}>批量下载 PDF</button><button disabled={actionBusy||!selected.length} onClick={()=>void manage(selected,'delete')}>批量删除</button><button disabled={actionBusy||!selected.length||selected.some(w=>w.current_version===0)} onClick={()=>void manage(selected,'publish')}>去发布</button><button disabled={actionBusy||!selected.length||selected.some(w=>w.current_version===0)} onClick={()=>void manage(selected,'product')}>去售卖</button></>}</div>
   <div className="finished-meta"><small>{busy?'正在读取…':'共 '+total+' 个作品'}</small><select aria-label="作品排序" value={sort} onChange={e=>filter(()=>setSort(e.target.value))}><option value="recent">最近更新</option><option value="old">最早创建</option><option value="name">名称排序</option></select></div>
   {error?<p className="inline-error" role="alert">{error}</p>:<section className="panel finished-list" aria-busy={busy}>
    {!busy&&!rows.length&&<p className="muted finished-empty">没有符合条件的作品。正式导出的 PDF 或已归档视频将在这里显示。</p>}
-   {!busy&&rows.map(w=><article className="finished-row" key={w.id}><button className="finished-open" type="button" onClick={()=>openWork(w)}><span className="finished-icon"><Icon name={w.kind==='video'?'film':w.kind==='textbook'?'book':'works'} size={24}/></span><span className="finished-name"><strong><MathText compact content={w.title}/></strong><small>{label(w.kind)} · {w.kind==='video'?'MP4': 'PDF'} · {w.subject||'未记录科目'}</small></span><span className="finished-status">{w.kind==='video'?'已归档':w.current_version?'V'+w.current_version:'待正文'}</span><span className="finished-date">{day(w.updated_at)}</span></button><button className="finished-more" aria-label={'操作 '+w.title} aria-expanded={menu===w.id} onClick={()=>setMenu(x=>x===w.id?'':w.id)}><Icon name="more"/></button>{menu===w.id&&<div className="finished-menu"><button onClick={()=>openWork(w)}>作品详情</button>{w.kind==='video'?<Link to={'/videos?project='+encodeURIComponent(w.origin_id)}>原视频项目</Link>:<Link to={(w.origin_scope==='source'?'/source-print/':'/print/')+encodeURIComponent(w.origin_id)}>打开排版</Link>}</div>}</article>)}
+   {!busy&&rows.map(w=><article className="finished-row" key={w.id}>{multi&&<input type="checkbox" aria-label={"选择 "+w.title} checked={selected.some(x=>x.id===w.id)} onChange={()=>toggle(w)}/>}<button className="finished-open" type="button" onClick={()=>multi?toggle(w):openWork(w)}><span className="finished-icon"><Icon name={w.kind==='video'?'film':w.kind==='textbook'?'book':'works'} size={24}/></span><span className="finished-name"><strong><MathText compact content={w.title}/></strong><small>{label(w.kind)} · {w.kind==='video'?'MP4': 'PDF'} · {w.subject||'未记录科目'}</small></span><span className="finished-status">{w.kind==='video'?'已归档':w.current_version?'V'+w.current_version:'待正文'}</span><span className="finished-date">{day(w.updated_at)}</span></button><button className="finished-more" aria-label={'操作 '+w.title} aria-expanded={menu===w.id} onClick={()=>setMenu(x=>x===w.id?'':w.id)}><Icon name="more"/></button>{menu===w.id&&<div className="finished-menu"><button onClick={()=>openWork(w)}>作品详情</button>{w.kind==='video'?<Link to={'/videos?project='+encodeURIComponent(w.origin_id)}>原视频项目</Link>:<Link to={(w.origin_scope==='source'?'/source-print/':'/print/')+encodeURIComponent(w.origin_id)}>打开排版</Link>}</div>}</article>)}
   </section>}
   <div className="finished-actions finished-pagination"><button disabled={busy||page===0} onClick={()=>setPage(x=>x-1)}>上一页</button><small>第 {page+1} 页</small><button disabled={busy||(page+1)*pageSize>=total} onClick={()=>setPage(x=>x+1)}>下一页</button></div>
   <details className="finished-legacy"><summary>旧版作品记录</summary><p className="muted">此前手工登记的非成品记录仍保留在原工作台，未自动复制到成品库。</p><Link to="/works?legacy=1">打开旧版作品记录</Link></details>

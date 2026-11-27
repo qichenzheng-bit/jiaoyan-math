@@ -21,6 +21,7 @@ import Intake from './pages/Intake'
 import DocumentPrint from './pages/DocumentPrint'
 import Studio from './pages/Studio'
 import TeachingWorks from './pages/TeachingWorks'
+import WorkHandoffs from './pages/WorkHandoffs'
 import Checkin from './pages/Checkin'
 import Cover from './pages/Cover'
 import VideoWork from './pages/VideoWork'
@@ -85,7 +86,7 @@ export default function App(){
     <Route path="/research" element={<Navigate to="/intake" replace/>}/>
     <Route path="/work" element={<Work/>}/>
     <Route path="/tasks" element={<Navigate to="/work" replace/>}/>
-    <Route path="/publishing" element={<Navigate to="/project/publishing" replace/>}/>
+    <Route path="/publishing" element={<WorkHandoffs key="publish" purpose="publish"/>}/>
     <Route path="/analytics" element={<Navigate to="/project/publishing" replace/>}/>
     <Route path="/resource-edit/:id" element={<ResourceEdit/>}/>
     <Route path="/source-catalog/statistics" element={<SourceStatistics/>}/>

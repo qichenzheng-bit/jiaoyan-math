@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.api import teaching_works as api
-from app.models import User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject
+from app.models import User, TeachingWork, TeachingWorkVersion, StudioItem, VideoProject, WorkHandoff
 
 
 def test_catalogue_combines_real_video_records_and_documents():
