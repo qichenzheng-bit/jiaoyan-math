@@ -363,3 +363,45 @@ def update_resource_search_features(session,flush_context,instances):
         if isinstance(row,TeachingResource) and (row in session.new or any(inspect(row).attrs[k].history.has_changes() for k in ("content","answer","solution","question_type","question_data"))):
             from app.core.bank_filter_facts import filter_facts
             row.bank_facts=filter_facts(row.content,row.answer or "",row.solution or "",row.question_type or "",row.question_data) if row.kind=="question" else {}
+
+
+class TeachingWork(Base):
+    """A durable finished work; origin and variant identify a logical work."""
+    __tablename__ = "teaching_works"
+    __table_args__ = (
+        UniqueConstraint("user_id", "origin_scope", "origin_id", "variant", name="uq_work_origin_variant"),
+        Index("ix_teaching_works_user_updated", "user_id", "updated_at", "id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    origin_scope: Mapped[str] = mapped_column(String(16))
+    origin_id: Mapped[str] = mapped_column(String(36))
+    variant: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(20))
+    title: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(40), default="")
+    current_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class TeachingWorkVersion(Base):
+    __tablename__ = "teaching_work_versions"
+    work_id: Mapped[str] = mapped_column(ForeignKey("teaching_works.id", ondelete="CASCADE"), primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+from sqlalchemy import ForeignKeyConstraint
+
+class TeachingWorkAsset(Base):
+    __tablename__ = "teaching_work_assets"
+    __table_args__ = (ForeignKeyConstraint(["work_id", "version"], ["teaching_work_versions.work_id", "teaching_work_versions.number"], ondelete="CASCADE"),)
+    work_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role: Mapped[str] = mapped_column(String(20), primary_key=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    pages: Mapped[int] = mapped_column(Integer)

@@ -24,6 +24,7 @@ from app.api.workspaces import router as workspace_router
 from app.api.intake_records import router as intake_records_router
 from app.api.tasks import router as task_router
 from app.api.studio import router as studio_router
+from app.api.teaching_works import router as teaching_works_router
 from app.api.video import router as video_router
 from app.api.qiandao import router as qiandao_router, scheduler as qiandao_scheduler
 
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(intake_records_router, prefix="/api")
     app.include_router(task_router, prefix="/api")
     app.include_router(studio_router, prefix="/api")
+    app.include_router(teaching_works_router, prefix="/api")
     app.include_router(video_router, prefix="/api")
     app.include_router(qiandao_router, prefix="/api")
 
