@@ -59,6 +59,10 @@ class QuestionData(BaseModel):
             raise ValueError("含小问题目不得设置公共答案或解析")
         if self.blanks and (self.answer or self.stem.count(BLANK)!=len(self.blanks)):
             raise ValueError("空位和答案不一致")
+        for group in (self.methods,*(part.methods for part in self.subquestions)):
+            eligible=[m for m in group if m.body.strip()]
+            preferred=next((m for m in eligible if m.recommended),eligible[0] if eligible else None)
+            for method in group:method.recommended=method is preferred
         return self
 
 def digest(content,answer,solution,question_type=""):
