@@ -91,3 +91,9 @@ def test_amendment_retains_existing_results(monkeypatch):
     result=ai_work.revise(Mock(),s,r,body,SimpleNamespace(id=1))
     assert result["steps"][0]["result"]["total"]==50
     assert result["needs_replan"] and "改为30题" in ai_work.later_prompt(r)
+
+def test_child_tracking_uses_real_job_id():
+    assert ai_work.child_task("video_generate",{"ident":"p"},{"id":"job","status":"queued"})=={"kind":"video","project":"p","id":"job"}
+    assert ai_work.child_task("video_edit",{"ident":"p"},{"job":{"id":"edit-job"}})["id"]=="edit-job"
+    assert ai_work.child_task("question_search",{},{"id":"question"}) is None
+    assert ai_work.child_task("intake_text",{},{"id":"intake","state":"running"})=={"kind":"intake","id":"intake"}

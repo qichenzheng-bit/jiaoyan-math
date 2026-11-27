@@ -161,6 +161,13 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
 def history(ident: str, db: Session = Depends(get_db)):
     return engine.call("GET", f"/videos/{remote(row_for(db,ident))}/edits/history")
 
+def job_read(ident:str,job_id:str,db:Session=Depends(get_db)):
+    row=row_for(db,ident)
+    job=engine.call("GET",f"/jobs/{engine.engine_id(job_id)}")
+    if not isinstance(job,dict) or job.get("lesson_id")!=remote(row):
+        raise HTTPException(404,"任务不属于当前视频项目")
+    return {k:job.get(k) for k in ("id","lesson_id","kind","status","phase","overall","error")}
+
 @router.get("/projects/{ident}/code")
 def code(ident: str, db: Session = Depends(get_db)):
     return engine.call("GET", f"/lessons/{remote(row_for(db,ident))}/code")

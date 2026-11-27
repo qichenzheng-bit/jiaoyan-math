@@ -225,6 +225,11 @@ class Tool:
             elif value.default is not inspect.Parameter.empty:
                 params[name] = value.default
         if self.name=="intake_text":params.update(model=model or "Auto",effort=effort or "default")
+        if self.name=="video_edit":
+            from app.core.ai_preferences import context
+            extra=context(db,user,"video")
+            if len(params["instruction"]+extra)>12000:raise HTTPException(422,"视频微调要求及补充提示词过长")
+            params["instruction"]+=extra
         # Model selection is controlled by the task, not by generated arguments.
         if self.name in ("video_generate", "video_edit"):
             if self.name == "video_generate":
@@ -280,6 +285,7 @@ register("work_read", "读取教学作品实际版本", teaching_works.detail, (
 register("video_search", "查询视频项目", video.listing)
 register("video_read", "查询视频实际状态与任务", video.detail, ("ident",))
 register("video_code", "读取视频实际Manim源码",video.code,("ident",))
+register("video_job_read","读取指定视频项目中的真实制作任务状态",video.job_read,("ident","job_id"))
 register("video_history", "读取视频微调记录", video.history, ("ident",))
 register("cover_templates", "读取封面和其他模板素材目录",studio.listing,("q","limit","offset"),fixed={"kind":"asset","category":"template","archived":False})
 register("cover_presets", "查询现有封面预设", studio.presets)
@@ -298,7 +304,8 @@ register("template_apply", "应用真实用户排版模板，需要当前排版r
 register("document_patch", "按真实文档块编号局部修改创作文档，不修改题库原件；需要当前版本", patch_document, ("id","body"), write=True)
 register("layout_update", "修改指定文档或来源排版配置，必须使用最新revision；不自动正式导出", settings.update_document_layout, ("scope","identity","body"), write=True)
 register("video_create", "根据题库原题和已有推荐解析创建视频项目", video.create, ("body",), write=True)
-register("video_generate", "提交指定视频的代码生成任务，不代表渲染完成", video.produce, ("ident",), fixed={"action":"generate"}, write=True)
+register("video_generate", "提交指定视频的代码生成任务；原引擎生成校验成功后自动渲染，不重复提交渲染", video.produce, ("ident",), fixed={"action":"generate"}, write=True)
+register("video_retry","重试已失败或取消的指定视频任务；引擎决定是否复用代码",video.job_action,("ident","job_id"),fixed={"action":"retry"},write=True)
 register("video_render", "提交指定视频的渲染任务，不代表成片完成", video.produce, ("ident",), fixed={"action":"render"}, write=True)
 register("video_edit", "提交指定视频的局部微调任务", video.edit, ("ident",),
          custom={"instruction":(str,Field(min_length=1,max_length=12000))}, write=True)
