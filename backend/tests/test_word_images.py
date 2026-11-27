@@ -95,7 +95,7 @@ def test_word_image_queue_has_no_four_image_limit_and_resumes(tmp_path,monkeypat
     assert saved["text"]=="".join(f"{i}:$x_{{{i}}}$" for i in range(1,18))
     assert calls==list(range(1,10))+list(range(9,18))
 
-def test_failed_image_can_be_retried_locally_or_explicitly_deferred(tmp_path,monkeypatch):
+def test_failed_image_can_be_retried_with_ai_or_explicitly_deferred(tmp_path,monkeypatch):
     path=many_images(tmp_path,3)
     monkeypatch.setattr(vision.storage,"file_path",lambda f:path)
     f=SimpleNamespace(media_type=imp.DOCX)
@@ -106,11 +106,8 @@ def test_failed_image_can_be_retried_locally_or_explicitly_deferred(tmp_path,mon
     first=vision.word_step(f,1,{},"Auto")
     failed=vision.word_step(f,1,first,"Auto")
     assert failed["state"]=="failed" and failed["image_completed"]==1
-    monkeypatch.setattr(vision,"local_word_image",lambda *a:{"text":"OCR","method":"image_ocr","warnings":[]})
     retried=vision.word_step(f,1,failed)
-    assert retried["state"]=="partial" and retried["image_completed"]==2
-    done=vision.word_step(f,1,retried,"Auto")
-    assert done["state"]=="done" and done["text"]=="1:formula2:OCR3:formula"
+    assert retried["state"]=="failed" and retried["image_completed"]==1
     deferred=vision.word_step(f,1,failed,manual_review=True)
     assert deferred["state"]=="partial" and deferred["image_review"]==1
     done=vision.word_step(f,1,deferred,"Auto")

@@ -12,7 +12,7 @@ from pydantic.fields import FieldInfo
 
 from app.api import resources, knowledge, source_catalog, documents, settings, video, workspaces, bank_work, studio, qiandao, qoder, teaching_works
 from app.models import TeachingResource, StoredFile, ChatSession, ChatMessage, WorkSession
-from app.services import material_import
+from app.services import material_import, material_vision, storage
 from sqlalchemy import select, func
 from app.core import ai_cover
 from app.core.search_features import search_features
@@ -156,12 +156,16 @@ class ReadOriginal(StrictBody):
     mode: Literal["text","ocr"]="text"
 
 
-def read_original(body: ReadOriginal, db):
+def read_original(body: ReadOriginal, db, model="Auto", effort="default"):
     if body.end<body.start or body.end-body.start>=10:
         raise HTTPException(422,"单批最多读取10页或段")
     f=db.scalar(workspaces.original_query().where(StoredFile.id==body.file_id,StoredFile.archived==False))
     if not f:raise HTTPException(404,"原始资料不存在")
-    result=material_import.extract(f,body.mode,body.start,body.end)
+    if f.media_type in storage.IMAGE_TYPES or f.media_type=="application/pdf":
+        # Long visual batches must use the checkpointed recognize action.
+        if body.start!=body.end:raise HTTPException(422,"多页资料请使用recognize流程，逐页AI识别并合并，不要调用original_read")
+        result=material_vision.recognize_range(f,body.start,body.end,model,effort)
+    else:result=material_import.extract(f,"text",body.start,body.end)
     return {**result,"file_id":f.id,"name":f.name,"verified":False}
 
 
@@ -224,7 +228,7 @@ class Tool:
                 params[name] = value.default.default
             elif value.default is not inspect.Parameter.empty:
                 params[name] = value.default
-        if self.name=="intake_text":params.update(model=model or "Auto",effort=effort or "default")
+        if self.name in ("intake_text","original_read"):params.update(model=model or "Auto",effort=effort or "default")
         # Model selection is controlled by the task, not by generated arguments.
         if self.name in ("video_generate", "video_edit"):
             if self.name == "video_generate":
@@ -266,7 +270,7 @@ register("source_read", "读取来源信息", source_catalog.read, ("id",))
 register("source_questions", "读取指定来源的题目", bank_work.source_questions, ("id","offset","limit"))
 register("source_statistics", "按来源、年份、院校等统计实际已录入知识点", source_catalog.statistics, ("body",))
 register("original_search", "查询原始资料库与识别进度", workspaces.library, ("q","limit","offset"), fixed={"archived":False})
-register("original_read", "读取原始文件指定页或段，返回未核对原文与警告", read_original, ("body",))
+register("original_read", "读取单页原图（AI视觉）或文本段；多页/试卷录入必须使用recognize流程", read_original, ("body",))
 register("history_search", "按关键词查询历史聊天及工作记录", history_search, ("body",))
 register("intake_text", "从用户提供的文字创建待人工审核的录入任务，不正式入库", intake_text, ("body",), write=True)
 register("intake_status", "查看录入任务实际状态", intake_status, ("id",))

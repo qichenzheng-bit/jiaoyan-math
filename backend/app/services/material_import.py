@@ -1,4 +1,4 @@
-"""Bounded material import; OCR is local text recognition, never mathematical verification."""
+"""Bounded native text and Word extraction; all visual recognition uses AI."""
 import shutil
 import subprocess
 import tempfile
@@ -18,39 +18,12 @@ M="{http://schemas.openxmlformats.org/officeDocument/2006/math}"
 MAX_TEXT=24000
 
 def capabilities():
-    commands={name:shutil.which(name) for name in ("prlimit","tesseract","pdftotext","pdftoppm")}
-    languages=[]
-    if commands["tesseract"]:
-        try:
-            result=subprocess.run([commands["tesseract"],"--list-langs"],capture_output=True,timeout=5,check=False)
-            if result.returncode==0:
-                raw=result.stdout.decode("utf-8",errors="replace") if isinstance(result.stdout,bytes) else str(result.stdout or "")
-                languages=[line.strip() for line in raw.splitlines()
-                           if line.strip() and not line.lstrip().lower().startswith("list of available languages")]
-        except (OSError,subprocess.SubprocessError):
-            languages=[]
-    image_missing=[]
-    if not commands["prlimit"]:image_missing.append("util-linux（prlimit）")
-    if not commands["tesseract"]:image_missing.append("tesseract-ocr")
-    elif "chi_sim" not in languages:image_missing.append("tesseract-ocr-chi-sim（中文语言包）")
-    if commands["tesseract"] and "eng" not in languages:image_missing.append("tesseract-ocr-eng（英文语言包）")
-    pdf_missing=list(image_missing)
-    if not commands["pdftoppm"]:pdf_missing.append("poppler-utils（pdftoppm）")
-    pdf_text_missing=[]
-    if not commands["prlimit"]:pdf_text_missing.append("util-linux（prlimit）")
-    if not commands["pdftotext"]:pdf_text_missing.append("poppler-utils（pdftotext）")
-    return {
-        "text":True,"docx":True,
-        "pdf_text":not pdf_text_missing,
-        "image_ocr":not image_missing,
-        "pdf_ocr":not pdf_missing,
-        "commands":{name:bool(path) for name,path in commands.items()},
-        "languages":languages,
-        "image_ocr_missing":image_missing,
-        "pdf_ocr_missing":pdf_missing,
-        "pdf_text_missing":pdf_text_missing,
-        "repair_command":"sudo bash ~/jiaoyan-app/current/deploy/repair-ocr.sh",
-    }
+    commands={name:shutil.which(name) for name in ("prlimit","pdftotext","pdftoppm")}
+    missing=[]
+    if not commands["prlimit"]:missing.append("util-linux（prlimit）")
+    if not commands["pdftotext"]:missing.append("poppler-utils（pdftotext）")
+    return {"text":True,"docx":True,"pdf_text":not missing,"image_ocr":False,"pdf_ocr":False,
+            "image_ocr_missing":[],"pdf_ocr_missing":[],"pdf_text_missing":missing,"commands":{k:bool(v) for k,v in commands.items()}}
 
 def latex(node,depth=0):
     if depth>32:raise ValueError("nested formula")
@@ -150,22 +123,7 @@ def bounded_command(args,timeout,output=None):
         raise HTTPException(422,"本地识别超时或无法启动")
 
 def ocr(path,pdf,page):
-    cap=capabilities()
-    capability="pdf_ocr" if pdf else "image_ocr"
-    if not cap.get(capability):
-        missing=cap.get(capability+"_missing") or ["OCR 组件或语言包"]
-        label="扫描版 PDF OCR" if pdf else "图片 OCR"
-        raise HTTPException(503,f"{label}暂不可用，缺少：{'、'.join(missing)}。修复命令：sudo bash ~/jiaoyan-app/current/deploy/repair-ocr.sh")
-    with tempfile.TemporaryDirectory(prefix="jiaoyan-ocr-") as tmp:
-        if pdf:
-            prefix=str(Path(tmp)/"page")
-            bounded_command([shutil.which("pdftoppm"),"-f",str(page),"-l",str(page),"-singlefile","-scale-to","2500","-png",str(path),prefix],12)
-            path=Path(prefix+".png")
-            if not path.is_file():raise HTTPException(422,"PDF页码不存在")
-        with tempfile.TemporaryFile() as output:
-            bounded_command([shutil.which("tesseract"),str(path),"stdout","-l","chi_sim+eng","--psm","3"],20,output)
-            output.seek(0)
-            return output.read(262145).decode("utf-8",errors="replace").strip()
+    raise HTTPException(410,"普通OCR已停用，请使用AI视觉识别")
 
 def extract(file,mode,start,end):
     if file.archived:raise HTTPException(422,"文件已归档")
@@ -190,10 +148,8 @@ def extract(file,mode,start,end):
     elif media=="application/pdf" and mode=="text":
         text=extract_pdf(file,start,end);method="pdf_text"
         warnings=["PDF文字层可能丢失公式、图形和阅读顺序，必须核对原页；混合扫描页请另选OCR"]
-    elif mode=="ocr" and (media=="application/pdf" or media in storage.IMAGE_TYPES):
-        if start!=end or (media!="application/pdf" and start!=1):raise HTTPException(422,"OCR每次只识别一张图片或一页PDF")
-        text=ocr(path,media=="application/pdf",start);method="pdf_ocr" if media=="application/pdf" else "image_ocr"
-        warnings=["OCR仅识别文字，数学公式、上下标、图形和表格可能失真；逐项对照原件，不得当成已核验答案"]
+    elif mode=="ocr":
+        raise HTTPException(410,"普通OCR已停用，请使用AI视觉识别")
     else:raise HTTPException(415,"此文件格式不支持所选提取方式")
     if not text.strip():raise HTTPException(422,"未提取到文字，请改用OCR或手动录入")
     if len(text)>MAX_TEXT or "\x00" in text:raise HTTPException(422,"每批最多24000字，请缩小范围")

@@ -24,6 +24,7 @@ class Create(BaseModel):
     title:str=Field(min_length=1,max_length=200)
 class Attach(BaseModel):
     file_ids:list[str]=Field(min_length=1,max_length=20)
+    image_sequence:bool=False
 class Range(BaseModel):
     start:int=Field(ge=1,le=10000)
     end:int=Field(ge=1,le=10000)
@@ -331,7 +332,13 @@ def read(ident:str,db:Session=Depends(get_db)):
 def attach(ident:str,body:Attach,db:Session=Depends(get_db),user:User=Depends(current_user)):
     s=workspace(db,ident,True)
     existing={m.file_id for m in db.scalars(select(WorkMaterial).where(WorkMaterial.session_id==s.id))}
-    for fid in sorted(set(body.file_ids)):
+    ids=list(dict.fromkeys(body.file_ids))
+    sequence_id=None
+    if body.image_sequence and len(ids)>1:
+        from app.services.image_sequence import create_sequence
+        sequence_id=create_sequence(db,ids,user.id)
+        ids=[sequence_id]
+    for fid in ids:
         if fid in existing:continue
         f=db.scalar(original_query().where(StoredFile.id==fid).with_for_update())
         if not f or f.archived:raise HTTPException(404,"文件不存在")
@@ -340,7 +347,9 @@ def attach(ident:str,body:Attach,db:Session=Depends(get_db),user:User=Depends(cu
         m=WorkMaterial(id=str(uuid4()),session_id=s.id,file_id=f.id,total_units=total,created_at=now());db.add(m)
         storage.link_file(db,f.id,"work_material",m.id)
     s.updated_at=now();audit(db,"work.attach",user.id);db.commit()
-    return read(ident,db)
+    result=read(ident,db)
+    if sequence_id:result["sequence_material_id"]=next(m["id"] for m in result["materials"] if m["file"]["id"]==sequence_id)
+    return result
 @router.post("/{ident}/materials/{mid}/batches",dependencies=[Depends(require_origin)])
 def create_batch(ident:str,mid:str,body:Range,db:Session=Depends(get_db),user:User=Depends(current_user)):
     s=workspace(db,ident,True);m=material(db,s,mid);f=file_for(db,m,True)
@@ -369,22 +378,15 @@ def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_
         raise HTTPException(409,"当前没有可标记为人工核对的失败图片")
     try:
         if f.media_type==imp.DOCX:
-            u=vision.word_step(f,n,previous,model,effort,manual_review)
+            u=vision.word_step(f,n,previous,model or "Auto",effort,manual_review)
             existing[n]=u;b.units=sorted(existing.values(),key=lambda x:x["unit"]);b.updated_at=now();s.updated_at=now();db.commit()
             return batch_view(db,b,True)
-        if f.media_type in storage.IMAGE_TYPES:
-            result=vision.recognize(f,n,model,effort) if model else imp.extract(f,"ocr",n,n)
-        elif f.media_type=="application/pdf":
-            if model:result=vision.recognize(f,n,model,effort)
-            else:
-                try:result=imp.extract(f,"text",n,n)
-                except HTTPException as exc:
-                    if exc.status_code!=422 or not imp.capabilities()["pdf_ocr"]:raise
-                    result=imp.extract(f,"ocr",n,n)
+        if f.media_type in storage.IMAGE_TYPES or f.media_type=="application/pdf":
+            result=vision.recognize(f,n,model or "Auto",effort)
         else:result=imp.extract(f,"text",n,n)
         u={"unit":n,"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
     except HTTPException as exc:
-        u={**previous,"unit":n,"state":"failed","error":str(exc.detail)[:400]}
+        u={**previous,"unit":n,"state":"failed","attempts":previous.get("attempts",0)+1,"error":str(exc.detail)[:400]}
     existing[n]=u;b.units=sorted(existing.values(),key=lambda x:x["unit"]);b.updated_at=now();s.updated_at=now();db.commit()
     return batch_view(db,b,True)
 @router.post("/{ident}/batches/{bid}/verify",dependencies=[Depends(require_origin)])

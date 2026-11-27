@@ -47,7 +47,9 @@ def decode_reply(raw):
         text=value["text"]
         if not isinstance(text,str) or not text.strip() or len(text)>imp.MAX_TEXT or "\x00" in text:
             raise ValueError()
-    except (ValueError,TypeError,KeyError): raise HTTPException(422,"视觉模型未返回有效转录正文，请重试或使用本地OCR")
+    except (ValueError,TypeError,KeyError): raise HTTPException(422,"视觉模型未返回有效转录正文，请重新选择支持视觉的AI模型并重试")
+    if "【无法辨认】" in text or "OCR失真" in text or "OCR 失真" in text:
+        raise HTTPException(422,"AI视觉转录存在无法辨认的内容，需重新识别原图")
     return text.strip()
 
 def recognize_bytes(media,raw,model,effort=None,timeout=38):
@@ -75,41 +77,23 @@ def recognize_bytes(media,raw,model,effort=None,timeout=38):
 
 def extract(file,page,model,effort=None):
     media,raw=attachment(file,page)
-    timeout=25 if getattr(file,"media_type",None)=="application/pdf" else 38
+    timeout=50
     return recognize_bytes(media,raw,model,effort,timeout)
 
-def recognize(file,page,model,effort=None):
-    """Vision first for every PDF page and image. Preserve explicit local fallbacks."""
-    started=time.monotonic()
-    try: return extract(file,page,model,effort)
-    except HTTPException as exc:
-        if exc.status_code==409: raise
-        reason=str(exc.detail)[:180]
-        if getattr(file,"media_type",None)=="application/pdf":
-            try:
-                result=imp.extract(file,"text",page,page)
-            except HTTPException as text_error:
-                # The reverse proxy allows 60 seconds. Do not start another potentially
-                # 32-second raster/OCR operation when the request has little time left.
-                if time.monotonic()-started>24:
-                    raise HTTPException(504,"AI视觉识别："+reason+"；PDF文字提取："+str(text_error.detail)[:120]+"；请重试本页或选择本地识别")
-            else:
-                result["warnings"]=["AI视觉识别未成功，已使用PDF文字层："+reason,*result.get("warnings",[])]
-                return result
-        try: result=imp.extract(file,"ocr",page,page)
-        except HTTPException as fallback: raise HTTPException(fallback.status_code,"AI视觉识别："+reason+"；本地OCR："+str(fallback.detail)[:180])
-        result["warnings"]=["AI视觉识别未成功，已使用本地OCR："+reason,*result.get("warnings",[])]
-        return result
+def recognize(file,page,model="Auto",effort=None):
+    """AI-only visual recognition: never report degraded OCR as success."""
+    return extract(file,page,model or "Auto",effort)
 
-def local_word_image(media,raw):
-    suffix={"image/png":".png","image/jpeg":".jpg","image/webp":".webp","image/gif":".gif"}[media]
-    with tempfile.TemporaryDirectory(prefix="word-image-ocr-") as tmp:
-        path=Path(tmp)/("image"+suffix)
-        path.write_bytes(raw)
-        text=imp.ocr(path,False,1)
-    if not text.strip() or len(text)>imp.MAX_TEXT or "\x00" in text:
-        raise HTTPException(422,"本地OCR未返回有效原文")
-    return {"text":text,"method":"image_ocr","warnings":["本地OCR数学公式可能失真，必须对照原图"]}
+def recognize_range(file,start,end,model="Auto",effort=None):
+    if not 1<=start<=end or end-start>=10:
+        raise HTTPException(422,"AI视觉识别每批最多10页")
+    if file.media_type in storage.IMAGE_TYPES and (start,end)!=(1,1):
+        raise HTTPException(422,"图片只包含一页")
+    rows=[]
+    for page in range(start,end+1):
+        rows.append(recognize(file,page,model,effort))
+    return {"text":"\n\n".join("【原文位置 "+str(page)+"】\n"+r["text"] for page,r in zip(range(start,end+1),rows)),
+            "method":"qoder_vision","start":start,"end":end,"total_units":None,"warnings":[w for r in rows for w in r.get("warnings",[])]}
 
 def word_step(file,unit,previous,model=None,effort=None,manual_review=False):
     """At most one unresolved image per call; caller commits the checkpoint."""
@@ -135,7 +119,7 @@ def word_step(file,unit,previous,model=None,effort=None,manual_review=False):
             return marker
         try:
             media,raw=loader()
-            result=recognize_bytes(media,raw,model,effort,38) if model else local_word_image(media,raw)
+            result=recognize_bytes(media,raw,model or "Auto",effort,50)
             if not result.get("text","").strip():raise HTTPException(422,"图片未返回有效正文")
             records[key]={"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
             current=None
@@ -156,7 +140,7 @@ def word_step(file,unit,previous,model=None,effort=None,manual_review=False):
     text=result["text"]
     if state=="done" and (not text.strip() or len(text)>imp.MAX_TEXT or "\x00" in text):
         state="failed";error="Word单段正文为空或超过24000字，需拆分原始文档后重新识别"
-    method="docx_vision" if any(r.get("method")=="qoder_vision" for r in records.values()) else "docx_ocr" if any(r.get("method")=="image_ocr" for r in records.values()) else "docx"
+    method="docx_vision" if any(r.get("method")=="qoder_vision" for r in records.values()) else "docx"
     return {"unit":unit,"state":state,"text":text if state=="done" else "",
             "method":method,"warnings":list(dict.fromkeys(warnings)),"image_results":records,
             "image_total":total,"image_completed":completed,"image_review":review,"image_current":current,

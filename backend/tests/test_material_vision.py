@@ -11,13 +11,12 @@ def test_invalid_replies(raw):
     with pytest.raises(HTTPException):
         v.decode_reply(raw)
 
-def test_ocr_fallback_is_labeled(monkeypatch):
+def test_vision_failure_never_falls_back(monkeypatch):
     def fail(*args): raise HTTPException(503,"worker old")
     monkeypatch.setattr(v,"extract",fail)
-    monkeypatch.setattr(v.imp,"extract",lambda *a:{"text":"OCR","method":"image_ocr","warnings":[]})
-    result=v.recognize(None,1,"Auto")
-    assert result["method"]=="image_ocr"
-    assert "worker old" in result["warnings"][0]
+    monkeypatch.setattr(v.imp,"extract",lambda *a:pytest.fail("unexpected fallback"))
+    with pytest.raises(HTTPException) as e:v.recognize(None,1,"Auto")
+    assert e.value.status_code==503
 
 def test_busy_does_not_fall_back(monkeypatch):
     def fail(*args): raise HTTPException(409,"busy")
@@ -41,24 +40,19 @@ def test_vision_calls_real_attachment_endpoint(monkeypatch):
     assert calls[1][2]["attachment"]=={"media_type":"image/png","base64":"dGVzdA=="}
     assert calls[1][2]["model"]=="DeepSeek-Flash"
 
-def test_pdf_vision_precedes_text_and_uses_text_fallback(monkeypatch):
+def test_pdf_vision_failure_is_not_reported_as_success(monkeypatch):
     from types import SimpleNamespace
-    f=SimpleNamespace(media_type="application/pdf")
-    calls=[]
-    def extract(*args):
-        calls.append("vision")
-        raise HTTPException(422,"vision failed")
-    def local(file,mode,start,end):
-        calls.append(mode)
-        return {"text":"pdf text","method":"pdf_text","warnings":[]}
-    monkeypatch.setattr(v,"extract",extract)
-    monkeypatch.setattr(v.imp,"extract",local)
-    result=v.recognize(f,2,"DeepSeek-Flash")
-    assert calls==["vision","text"]
-    assert result["method"]=="pdf_text" and "vision failed" in result["warnings"][0]
+    def fail(*args):raise HTTPException(422,"vision failed")
+    monkeypatch.setattr(v,"extract",fail)
+    monkeypatch.setattr(v.imp,"extract",lambda *a:pytest.fail("unexpected fallback"))
+    with pytest.raises(HTTPException):v.recognize(SimpleNamespace(media_type="application/pdf"),2,"Auto")
 
 def test_pdf_vision_success_does_not_extract_text(monkeypatch):
     from types import SimpleNamespace
     monkeypatch.setattr(v,"extract",lambda *a:{"text":"$x^2$","method":"qoder_vision","warnings":[]})
     monkeypatch.setattr(v.imp,"extract",lambda *a:pytest.fail("text layer must not override vision"))
     assert v.recognize(SimpleNamespace(media_type="application/pdf"),1,"Auto")["method"]=="qoder_vision"
+
+@pytest.mark.parametrize("raw",['{"text":"题目【无法辨认】"}','{"text":"OCR失真"}'])
+def test_incomplete_vision_is_not_success(raw):
+    with pytest.raises(HTTPException):v.decode_reply(raw)

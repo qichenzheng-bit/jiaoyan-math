@@ -31,34 +31,4 @@ label="independent video service active"; report systemctl is-active --quiet jia
 
 label="PDF text extraction"; report command -v pdftotext
 label="PDF page rasterizer"; report command -v pdftoppm
-label="OCR executable"; report command -v tesseract
-label="OCR Chinese and English languages"; report bash -c 'tesseract --list-langs 2>/dev/null | grep -qx chi_sim && tesseract --list-langs 2>/dev/null | grep -qx eng'
-
-
-printf '\nOCR dependency details:\n'
-ocr_missing=0
-for tool in prlimit tesseract pdftotext pdftoppm; do
-  if command -v "$tool" >/dev/null 2>&1; then
-    printf 'OK: %s\n' "$tool"
-  else
-    printf 'MISSING: %s\n' "$tool"
-    ocr_missing=1
-  fi
-done
-if command -v tesseract >/dev/null 2>&1; then
-  languages="$(tesseract --list-langs 2>/dev/null || true)"
-  for language in chi_sim eng; do
-    if grep -qx "$language" <<<"$languages"; then
-      printf 'OK: Tesseract language %s\n' "$language"
-    else
-      printf 'MISSING: Tesseract language %s\n' "$language"
-      ocr_missing=1
-    fi
-  done
-fi
-if [[ "$ocr_missing" == 0 ]]; then
-  echo "OCR status: ready for Chinese/English images and scanned PDFs."
-else
-  echo "OCR status: incomplete."
-  echo "Repair: sudo bash \"$base/current/deploy/repair-ocr.sh\""
-fi
+label="resource limiter"; report command -v prlimit
