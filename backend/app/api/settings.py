@@ -167,6 +167,7 @@ class DocumentLayout(BaseModel):
     mirrorMargins: bool=False
     titleSize: float=Field(default=18,ge=8,le=36)
     headingSize: float=Field(default=14,ge=8,le=36)
+    equationNumbering: Literal["off","continuous","chapter"]="off"
     subtitle: str=Field(default="",max_length=200)
     examTime: str=Field(default="",max_length=200)
     showScore: bool=True
