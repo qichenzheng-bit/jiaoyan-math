@@ -138,3 +138,52 @@
  .nav-record-sheet .nav-record-rename{margin:0;padding:10px}
  .nav-record-sheet .nav-record-rename button{min-height:40px;font-size:14px}
 }
+
+@media screen and (max-width:760px){
+ .shell.legacy-shell.clean-workspace .agent-conversation-head{gap:8px;padding:0 0 7px}
+ .agent-conversation-head h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+ .agent-conversation-head>button{white-space:nowrap;font-size:12px;padding:5px 9px}
+ .agent-conversation .agent-composer{padding:8px 10px!important;gap:3px!important}
+ .agent-conversation .agent-composer>textarea{min-height:34px!important;max-height:90px}
+ .agent-conversation .agent-user-message .wg-attachment-strip{max-height:64px}
+ .phone-plan-detail{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+ .phone-plan-detail summary{cursor:pointer}
+ .agent-assistant-message>.muted{font-size:12px}
+ .phone-work-progress{gap:8px}
+ .phone-work-progress details>summary{font-size:12px;color:var(--muted)}
+ .phone-work-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;text-align:center;background:var(--subtle);padding:10px 4px;border-radius:8px}
+ .phone-work-counts>div{display:grid;gap:3px}
+ .phone-work-counts strong{font-size:22px}
+ .phone-work-counts small{font-size:12px;color:var(--muted)}
+ .phone-review-enter{display:block;text-align:center;padding:12px}
+ .phone-work-material-sheet.agent-workspace-panel{position:fixed!important;inset:auto 0 0!important;box-sizing:border-box;width:100%;max-width:100%;max-height:85dvh;height:auto!important;min-height:0!important;margin:0;padding:0;border:0;border-radius:20px 20px 0 0;background:var(--surface);color:var(--ink);overflow:auto}
+ .phone-work-material-sheet::backdrop{background:rgba(0,0,0,.32)}
+ .phone-work-material-sheet .agent-manual{padding:16px 14px max(14px,env(safe-area-inset-bottom));display:grid;gap:12px;min-height:0}
+ .phone-work-material-sheet .persistent-materials button{display:grid;justify-content:stretch;min-width:0;overflow:hidden}
+ .phone-work-material-sheet .persistent-materials button> :first-child{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
+ .phone-work-material-sheet .persistent-page{height:32dvh;overflow:auto}
+ .phone-transcript-preview{max-height:42dvh;overflow:auto;padding:8px;border:1px solid var(--line);border-radius:8px}
+ .phone-material-actions{display:grid;gap:8px}
+ .phone-material-actions .button-row{display:flex;gap:8px}
+ .review-image-tools{display:flex;align-items:center;justify-content:center;gap:6px}
+ .review-image-scroll{overflow:auto;overscroll-behavior:contain;background:var(--subtle);min-height:100px}
+ .review-image-height{display:flex;align-items:center;font-size:12px;gap:6px}
+ .review-image-height input{flex:1;min-width:0}
+ .review-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .phone-single-review .wg-review-header{padding:2px 0}
+ .phone-single-review .wg-review-header h2{font-size:15px;max-height:2.8em;overflow:hidden}
+ .phone-single-review .wg-review-grid[data-tab=compare]>.wg-review-side{position:sticky;top:0;z-index:2;background:var(--bg);max-height:54dvh;overflow:auto}
+ .phone-single-review .wg-review-grid[data-tab=compare]>.wg-review-side>.wg-review-source{max-height:54dvh;padding:8px;gap:5px}
+ .phone-single-review .wg-review-grid[data-tab=compare]>.wg-review-editor{padding:12px;gap:10px}
+ .phone-single-review .wg-review-meta{font-size:12px}
+ .phone-single-review .wg-item-actions>button:not(:first-child){display:none}
+ .phone-single-review .wg-review-footer{gap:6px;padding:7px}
+ .phone-single-review .wg-review-footer .phone-review-navigation{display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:5px;width:100%}
+ .phone-single-review .phone-review-navigation button{min-height:40px}
+ .phone-single-review .wg-review-footer>div:last-child{justify-content:space-between}
+}
+@media screen and (min-width:761px){.phone-review-navigation{display:none!important}}
+.review-image-tools{display:flex;gap:6px}
+.review-image-scroll{overflow:auto;background:var(--subtle)}
+.review-image-height{display:flex;align-items:center;gap:8px}
+.review-image-height input{flex:1}

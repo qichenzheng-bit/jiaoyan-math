@@ -67,7 +67,7 @@ function WorkComposer(){
          if(!result.ok)throw Error(f.name+' 上传失败：'+result.status)
          ids.push((await result.json()).id)
        }await api(base+'/materials',{method:'POST',body:JSON.stringify({file_ids:ids})})}
-       await api(base+'/agent',{method:'POST',body:JSON.stringify({instruction,model,effort,chat_session_id:params.get('chatSession')})})
+       await api(base+'/agent',{method:'POST',body:JSON.stringify({instruction,model,effort,single_review:true,chat_session_id:params.get('chatSession')})})
        window.dispatchEvent(new Event('wg-recent-changed'));navigate('/work?workspace='+encodeURIComponent(s.id));return
      }
      if(file&&!imported){

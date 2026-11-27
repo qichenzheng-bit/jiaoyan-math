@@ -103,7 +103,7 @@ def batch_states(db,batches):
     """Bulk load retry chains and registration evidence without repeated per-batch queries."""
     roots={b.job_id for b in batches if b.job_id}
     jobs={};successors={}
-    cols=(IntakeJob.id,IntakeJob.retry_of,IntakeJob.state,IntakeJob.document_id,IntakeJob.items)
+    cols=(IntakeJob.id,IntakeJob.retry_of,IntakeJob.state,IntakeJob.document_id,IntakeJob.items,IntakeJob.provenance)
     for ids in chunks(roots):
         for j in db.execute(select(*cols).where(IntakeJob.id.in_(ids))):jobs[j.id]=j
     pending=set(jobs);visited=set()
@@ -130,10 +130,14 @@ def batch_states(db,batches):
     saved={bid for bid,j in latest.items() if j and j.state=="converted" and j.document_id in refs and j.items and all(b.get("uid") in refs[j.document_id] and b.get("uid") in history.get(j.document_id,set()) for b in j.items)}
     return latest,saved
 
+def reviewed_batch(j):
+    return bool(j and j.state=="converted" and (j.provenance or {}).get("single_review"))
+
 def progress(db,f,batches,total,states=None):
-    done={n for b in batches if b.verified_text is not None for n in range(b.start,b.end+1)}
+    states=states if states is not None else batch_states(db,batches)
+    done={n for b in batches if b.verified_text is not None or reviewed_batch(states[0].get(b.id)) for n in range(b.start,b.end+1)}
     recognized={u["unit"] for b in batches for u in b.units if u.get("state")=="done"}
-    registered_ids=(states if states is not None else batch_states(db,batches))[1]
+    registered_ids=states[1]
     saved={n for b in batches if b.id in registered_ids for n in range(b.start,b.end+1)}
     next_unit=1
     while next_unit in done:next_unit+=1
@@ -338,7 +342,7 @@ def create_batch(ident:str,mid:str,body:Range,db:Session=Depends(get_db),user:Us
     for b in rows:
         if b.start==body.start and b.end==body.end:return batch_view(db,b,True)
         if b.start<=body.end and body.start<=b.end:raise HTTPException(409,"范围与已有批次重叠，请打开已有批次")
-        if b.verified_text is None:raise HTTPException(409,"请先完成此资料的上一批核对")
+        if b.verified_text is None and not reviewed_batch(latest_job(db,b)):raise HTTPException(409,"请先完成此资料的上一批核对")
     b=WorkBatch(id=str(uuid4()),material_id=m.id,start=body.start,end=body.end,units=[],created_at=now(),updated_at=now());db.add(b);s.updated_at=now();db.commit()
     return batch_view(db,b,True)
 @router.get("/{ident}/batches/{bid}")
@@ -395,6 +399,28 @@ def organize(ident:str,bid:str,body:Organize,db:Session=Depends(get_db),user:Use
     provenance={**ai.build_provenance(db,start),"workspace_id":m.session_id,"work_batch_id":b.id,"work_material_id":m.id,"file_media_type":f.media_type,"reviewed_uids":[]}
     s.updated_at=now()
     return ai.launch(db,user,start,provenance,work_batch=b)
+def organize_unverified(ident,bid,body,db,user):
+    """Create a draft from a complete machine transcription. Never assert human verification."""
+    s=workspace(db,ident,True);b=batch(db,s,bid,True)
+    if b.job_id:return ai.view(latest_job(db,b),True)
+    if b.verified_text is not None:return organize(ident,bid,body,db,user)
+    if {u["unit"] for u in b.units if u.get("state")=="done"}!=set(range(b.start,b.end+1)):
+        raise HTTPException(409,"请先完成本批识别")
+    m=db.get(WorkMaterial,b.material_id);f=file_for(db,m,True)
+    raw="\n\n".join("【原文位置 "+str(u["unit"])+"】\n"+u.get("text","") for u in sorted(b.units,key=lambda x:x["unit"]))
+    if not raw.strip() or len(raw)>24000:raise HTTPException(422,"原文过长或为空，请缩小批次")
+    warnings=sorted({w for u in b.units for w in u.get("warnings",[])})
+    metadata={"method":"work_batch","start":b.start,"end":b.end,"total_units":m.total_units,"warnings":warnings}
+    record=IntakeImport(id=str(uuid4()),file_id=f.id,text=raw,metadata_json=metadata,created_at=now());db.add(record);db.flush()
+    b.import_id=record.id;s.updated_at=now()
+    draft=ai.Start(title=(f.name+" · "+str(b.start)+"–"+str(b.end))[:200],subject=body.subject,text=raw,model=body.model,effort=body.effort,source_id=body.source_id,intent=body.intent)
+    provenance={"kind":"file_import","intent":body.intent,"import_id":record.id,"file_id":f.id,"file_name":f.name,"sha256":f.sha256,"edited":False,"import_reviewed":False,**metadata,"workspace_id":m.session_id,"work_batch_id":b.id,"work_material_id":m.id,"file_media_type":f.media_type,"reviewed_uids":[],"single_review":True}
+    return ai.launch(db,user,draft,provenance,work_batch=b)
+
+@router.post("/{ident}/batches/{bid}/draft",dependencies=[Depends(require_origin)])
+def draft_batch(ident:str,bid:str,body:Organize,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return organize_unverified(ident,bid,body,db,user)
+
 @router.get("/{ident}/materials/{mid}/page")
 def page(ident:str,mid:str,unit:int=Query(ge=1,le=10000),db:Session=Depends(get_db)):
     m=material(db,workspace(db,ident),mid);f=file_for(db,m)

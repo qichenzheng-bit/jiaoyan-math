@@ -27,7 +27,7 @@ export function AttachmentStrip({items,onRemove,disabled=false}:{items:Attachmen
  if(!items.length)return null
  return <><div className="wg-attachment-strip" aria-label="已添加资料">{items.map(f=><div className={'wg-attachment-tile'+(isImage(f)?' image':'')} key={f.key}><button type="button" className="wg-attachment-open" title={f.name} aria-label={'查看 '+f.name} onClick={()=>setCurrent(f.key)}><Thumbnail item={f}/></button>{onRemove&&<button type="button" className="wg-attachment-remove" aria-label={'移除 '+f.name} disabled={disabled} onClick={()=>onRemove(f.key)}><Icon name="close" size={13}/></button>}</div>)}</div>{index>=0&&<AttachmentPreview key={items[index].key} item={items[index]} index={index} count={items.length} onClose={()=>setCurrent(undefined)} onMove={n=>setCurrent(items[index+n]?.key??current)}/>}</>
 }
-function AttachmentPreview({item,index,count,onClose,onMove}:{item:AttachmentItem;index:number;count:number;onClose:()=>void;onMove:(n:number)=>void}){
+export function AttachmentPreview({item,index,count,onClose,onMove}:{item:AttachmentItem;index:number;count:number;onClose:()=>void;onMove:(n:number)=>void}){
  const phone=usePhoneLayout()
  const url=useFileURL(item),[zoom,setZoom]=useState(1),[failed,setFailed]=useState(false)
  const dialog=useRef<HTMLDialogElement>(null),touch=useRef<{x:number;y:number;distance:number;zoom:number}>({x:0,y:0,distance:0,zoom:1})

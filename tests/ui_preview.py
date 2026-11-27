@@ -962,10 +962,7 @@ with sync_playwright() as p:
             expect(page.get_by_label("继续识别指令")).to_be_visible()
             expect(page.locator(".agent-manual")).to_have_count(0)
             if GROUP=="mobile":
-                summary=page.locator(".phone-material-summary")
-                expect(summary).to_contain_text("已关联 1 份资料")
-                expect(summary.locator(".wg-attachment-strip")).not_to_be_visible()
-                summary.locator("summary").click()
+                summary=page.locator(".agent-user-message .wg-attachment-strip").last
                 summary.get_by_role("button",name="查看 高等数学.pdf").click()
                 preview=page.get_by_role("dialog",name="原始资料预览")
                 expect(preview.get_by_alt_text("PDF 第 1 页")).to_be_visible()
@@ -974,13 +971,12 @@ with sync_playwright() as p:
                 preview.get_by_role("button",name="放大 PDF").click()
                 expect(preview.get_by_role("button",name="150%")).to_be_visible()
                 preview.get_by_role("button",name="关闭预览").click()
-                summary.locator("summary").click()
             page.get_by_role("button",name="资料与识别").first.click()
             expect(page.locator(".agent-manual")).to_be_visible()
             expect(page.locator(".agent-workspace-body")).to_have_attribute("data-panel-open","true")
             expect(page.locator(".agent-workspace-panel")).to_be_visible()
             if GROUP=="mobile":
-                assert page.locator(".agent-workspace-panel").evaluate("(el)=>getComputedStyle(el).position")=="absolute"
+                assert page.locator(".agent-workspace-panel").evaluate("(el)=>getComputedStyle(el).position")=="fixed"
             else:
                 chat_box=page.locator(".agent-chat-column").bounding_box()
                 panel_box=page.locator(".agent-workspace-panel").bounding_box()
