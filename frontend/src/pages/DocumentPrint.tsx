@@ -4,6 +4,7 @@ import {useEffect,useState,useRef,useMemo,Fragment} from 'react'
 import PagedPreview from './PagedPreview'
 import BlockStyleEditor from './BlockStyleEditor'
 import SectionPageEditor from './SectionPageEditor'
+import DocumentCoverEditor from './DocumentCoverEditor'
 import PdfJobs from './PdfJobs'
 import type {CSSProperties} from 'react'
 import {defaults,builtins,dimensions,layoutError,sanitizeLayout,readLocal,writeLocal,readTemplates,templateLayout,sanitizeRule} from './documentLayout'
@@ -101,6 +102,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
    const chosen=new Set(applyParts.flatMap(part=>groups[part]??[]))
    for(const key of Object.keys(next) as (keyof Layout)[])if(!chosen.has(key))Object.assign(next,{[key]:layout[key]})
   }
+  next.coverFileId=layout.coverFileId;next.backCoverFileId=layout.backCoverFileId
   if(applyMode!=='replace'){next.blockStyles=layout.blockStyles;next.chapterStyles=layout.chapterStyles;next.sectionPages=layout.sectionPages}
   setLayout(next);setConfirmed(false);setReady(false);setEditing(true);setMessage('已应用模板，原始教学内容保持不变。')
  }
@@ -248,6 +250,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
      {num('填空横线长度 (mm，0 保留原样)','blankWidth',0,100)}</>}
      <label>题号规则<select value={layout.numbering} onChange={e=>patch({numbering:e.target.value as Layout['numbering']})}><option value="continuous">连续编号</option><option value="section">按章或题型重新编号</option></select></label>
     </div></details>
+    {doc.kind!=='paper'&&<DocumentCoverEditor layout={layout} onChange={patch}/>}
     <SectionPageEditor doc={doc} layout={layout} onChange={patch}/>
     <BlockStyleEditor doc={doc} layout={layout} onChange={patch} picked={picked}/>
     <details><summary>分页、目录与页眉页脚</summary><div className="layout-fields">
@@ -322,6 +325,8 @@ export function PrintableDocument({doc,stem=false,answerOnly=false,source=false,
  return <article className={"print-document"+(layout?" configured-print":"")}>
   <h1><MathText compact content={doc.title}/></h1>
   <div className="print-subtitle"><MathText compact content={layout?.subtitle??''}/>{layout?.subtitle&&<br/>}{doc.subject}{doc.kind==='paper'&&(!source||score>0)&&layout?.showScore!==false&&' · 总分 '+score}{layout?.examTime&&' · 考试时间：'+layout.examTime}</div>
+  {layout?.coverFileId&&<img hidden data-layout-cover="front" src={'/api/files/'+layout.coverFileId+'/preview'} alt="封面"/>}
+  {layout?.backCoverFileId&&<img hidden data-layout-cover="back" src={'/api/files/'+layout.backCoverFileId+'/preview'} alt="封底"/>}
   <div className="layout-body">{rows.map(({b,v,question,role,roleNumber,rule,number,section,group,qtype})=>{
    if(b.kind==='pagebreak')return <div key={b.uid} className="print-break"/>
    const common={style:blockCss(rule),'data-layout-uid':b.uid,'data-layout-break':rule.pageBreak}
