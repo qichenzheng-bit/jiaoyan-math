@@ -22,7 +22,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
     assert settings.database_url.startswith("postgresql+psycopg://")
     assert engine().url.database == "jiaoyan_ci", "Use a dedicated CI database"
     command.upgrade(Config("alembic.ini"), "head")
-    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "chat_sessions", "chat_messages", "resource_source_links", "resource_source_versions", "knowledge_point_catalog", "resource_knowledge_links", "alembic_version"} <= set(inspect(engine()).get_table_names())
+    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "teaching_document_versions", "chat_sessions", "chat_messages", "resource_source_links", "resource_source_versions", "knowledge_point_catalog", "resource_knowledge_links", "alembic_version"} <= set(inspect(engine()).get_table_names())
     with TestClient(create_app(), base_url="https://testserver") as client:
         assert client.get("/api/ready").status_code == 503
         assert client.get("/api/system").status_code == 401
@@ -172,6 +172,28 @@ def test_migration_and_login(tmp_path, monkeypatch):
         updated=client.put("/api/documents/"+d["id"],headers=origin,json={**rd,"title":"修订标题"})
         assert updated.status_code==200,updated.text
         assert updated.json()["blocks"][0]["snapshot"]==rd["blocks"][0]["snapshot"]
+        textbook_payload={"title":"教材章节测试","kind":"textbook","subject":"高等数学","source_id":created_doc["source_id"],"blocks":[
+            {"uid":"early-section","kind":"heading","heading_level":2,"title":"错误顺序的小节"}]}
+        assert client.post("/api/documents",headers=origin,json=textbook_payload).status_code==422
+        textbook_payload["blocks"]=[
+            {"uid":"chapter-1","kind":"heading","heading_level":1,"title":"第一章 函数"},
+            {"uid":"section-1","kind":"heading","heading_level":2,"title":"第一节 极限"},
+            {"uid":"body-1","kind":"text","content":"教材正文"},
+            {"uid":"chapter-2","kind":"heading","heading_level":1,"title":"第二章 导数"}]
+        textbook=client.post("/api/documents",headers=origin,json=textbook_payload)
+        assert textbook.status_code==200,textbook.text
+        textbook=textbook.json()
+        versions=client.get("/api/documents/"+textbook["id"]+"/versions").json()
+        assert versions["current_revision"]==1 and versions["items"][0]["revision"]==1
+        edited=client.put("/api/documents/"+textbook["id"],headers=origin,json={**textbook,"title":"教材章节测试·修订"})
+        assert edited.status_code==200,edited.text
+        edited=edited.json()
+        versions=client.get("/api/documents/"+textbook["id"]+"/versions").json()
+        assert [v["revision"] for v in versions["items"]]==[2,1]
+        restored=client.post("/api/documents/"+textbook["id"]+"/versions/1/restore",headers=origin,json={"revision":edited["revision"]})
+        assert restored.status_code==200,restored.text
+        assert restored.json()["title"]=="教材章节测试" and restored.json()["revision"]==3
+        assert client.post("/api/documents/"+textbook["id"]+"/versions/2/restore",headers=origin,json={"revision":edited["revision"]}).status_code==409
         # Full-library stem matching and transactional registration.
         batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[
             {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法","question_type":"综合题"},

@@ -14,7 +14,7 @@ from app.core.solution_methods import normalize_subject, parse_methods, format_m
 from app.core.content_normalization import canonical_text, question_fingerprint
 from app.core import question_matching as matching
 from difflib import SequenceMatcher
-from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink, Setting
+from app.models import TeachingDocument as Doc, DocumentResourceReference as Ref, TeachingResource as Resource, StoredFile, FileReference, User, IntakeJob, IntakeSupplement, DocumentAiEdit, DocumentRegistration, TeachingDocumentVersion, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, ResourceSourceLink, Setting
 from app.services import storage
 from app.services.inline_images import image_ids,validate_images,protect_resource_images
 from app.api import resources as bank, qoder
@@ -75,6 +75,15 @@ def summary(d):return {k:getattr(d,k) for k in ("id","title","kind","subject","s
 def public(d):
     blocks=[{**b,"question_data":resolve(b.get("content",""),b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data")).model_dump()} if b.get("kind")=="question" else b for b in d.blocks]
     return {**summary(d),"blocks":blocks}
+def record_version(db,d):
+    if d.kind not in ("paper","handout","textbook"):return
+    if db.get(TeachingDocumentVersion,(d.id,d.revision)):return
+    snapshot={"title":d.title,"kind":d.kind,"subject":d.subject,"source_id":d.source_id,"blocks":d.blocks}
+    db.add(TeachingDocumentVersion(document_id=d.id,revision=d.revision,snapshot=snapshot,created_at=d.updated_at))
+    db.flush()
+    stale=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==d.id).order_by(TeachingDocumentVersion.revision.desc()).offset(30)))
+    for version in stale:db.delete(version)
+
 def intake_summary(db,d):
     src=db.get(Resource,d.source_id) if d.source_id else None
     counts={k:sum(b.get("kind")==k or (b.get("kind")=="reference" and (b.get("snapshot") or {}).get("kind")==k) for b in d.blocks) for k in ("question","knowledge")}
@@ -86,6 +95,13 @@ def validate(db,body,previous,*,allow_reference_edits=False):
         src=db.get(Resource,body.source_id)
         if not src or src.kind!="source" or src.archived:raise HTTPException(422,"来源资料无效")
     if len({b.uid for b in body.blocks})!=len(body.blocks):raise HTTPException(422,"文档块编号重复")
+    if any(b.kind!="heading" and b.heading_level is not None for b in body.blocks):raise HTTPException(422,"只有标题条目可以设置章/节层级")
+    if body.kind=="textbook":
+        has_chapter=False
+        for block in body.blocks:
+            if block.kind=="heading" and block.heading_level==1:has_chapter=True
+            elif block.kind=="heading" and block.heading_level==2 and not has_chapter:
+                raise HTTPException(422,"教材的小节必须放在所属章节之后")
     total=sum(len(b.content)+len(b.solution)+len(b.answer)+len(b.proof)+len(b.analysis) for b in body.blocks)
     if total>500000:raise HTTPException(422,"文档过长，请拆分")
     old={b["uid"]:b for b in previous}
@@ -148,7 +164,7 @@ def listing(q:str=Query("",max_length=200),archived:bool=False,kind:Literal["int
 def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user)
     d=Doc(id=str(uuid4()),title=body.title.strip(),kind=body.kind,subject=normalize_subject(body.subject),source_id=body.source_id,blocks=validate(db,body,[]),revision=1,archived=False,created_at=now(),updated_at=now())
-    db.add(d);db.flush();references(db,d);audit(db,"document.create",user.id);db.commit();return public(d)
+    db.add(d);db.flush();references(db,d);record_version(db,d);audit(db,"document.create",user.id);db.commit();return public(d)
 def assemble_source_export(source, documents, resources, *, latest=False):
     """Read-only export: preserve saved batch order and block snapshots."""
     blocks=[]
@@ -219,6 +235,7 @@ def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),
     selected=set(body.uids)
     available={b["uid"] for b in doc.blocks if b["kind"]=="reference"}
     if not selected or not selected<=available:raise HTTPException(422,"请选择有效引用")
+    record_version(db,doc)
     blocks=[]
     for b in doc.blocks:
         item=dict(b)
@@ -230,7 +247,7 @@ def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),
                 item["subquestion_scores"]=[]
         blocks.append(item)
     doc.blocks=blocks;doc.revision+=1;doc.updated_at=now()
-    references(db,doc);audit(db,"document.refresh_references",user.id);db.commit()
+    references(db,doc);record_version(db,doc);audit(db,"document.refresh_references",user.id);db.commit()
     return public(doc)
 
 @router.get("/{id}/export")
@@ -258,8 +275,36 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     bank.admin_lock(db,user);d=row(db,id)
     if d.archived or d.revision!=body.revision:raise HTTPException(409,"文档版本冲突或已归档，请重新加载")
     if d.kind=="intake" and (body.kind!=d.kind or body.source_id!=d.source_id):raise HTTPException(409,"请通过来源绑定入口处理录入文档")
+    record_version(db,d)
     d.blocks=validate(db,body,d.blocks);d.title=body.title.strip();d.subject=normalize_subject(body.subject);d.source_id=body.source_id;d.kind=body.kind
-    d.revision+=1;d.updated_at=now();references(db,d);audit(db,"document.update",user.id);db.commit();return public(d)
+    d.revision+=1;d.updated_at=now();references(db,d);record_version(db,d);audit(db,"document.update",user.id);db.commit();return public(d)
+class VersionRestore(BaseModel):
+    revision:int=Field(ge=1)
+
+@router.get("/{id}/versions")
+def document_versions(id:str,db:Session=Depends(get_db)):
+    d=row(db,id)
+    if d.kind=="intake":raise HTTPException(409,"录入草稿使用入库记录，不适用创作版本历史")
+    rows=list(db.scalars(select(TeachingDocumentVersion).where(TeachingDocumentVersion.document_id==id).order_by(TeachingDocumentVersion.revision.desc()).limit(30)))
+    items=[{"revision":v.revision,"created_at":v.created_at,"title":v.snapshot.get("title",d.title),"blocks_count":len(v.snapshot.get("blocks",[])),"current":v.revision==d.revision} for v in rows]
+    if not any(v["revision"]==d.revision for v in items):
+        items.insert(0,{"revision":d.revision,"created_at":d.updated_at,"title":d.title,"blocks_count":len(d.blocks),"current":True})
+    return {"current_revision":d.revision,"items":items}
+
+@router.post("/{id}/versions/{version}/restore",dependencies=[Depends(require_origin)])
+def restore_document_version(id:str,version:int,body:VersionRestore,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.archived or d.kind=="intake" or d.revision!=body.revision:raise HTTPException(409,"文档已归档或当前版本已变化，请重新加载")
+    target=db.get(TeachingDocumentVersion,(id,version))
+    if not target:raise HTTPException(404,"指定历史版本不存在或已超出保留范围")
+    if version==d.revision:return public(d)
+    snapshot=target.snapshot
+    draft=Draft(title=snapshot["title"],kind=snapshot["kind"],subject=snapshot["subject"],source_id=snapshot.get("source_id"),blocks=snapshot["blocks"])
+    record_version(db,d)
+    d.blocks=validate(db,draft,snapshot["blocks"]);d.title=draft.title;d.subject=draft.subject;d.source_id=draft.source_id;d.kind=draft.kind
+    d.revision+=1;d.updated_at=now();references(db,d);record_version(db,d)
+    audit(db,"document.version.restore",user.id);db.commit();return public(d)
+
 @router.post("/{id}/archive",dependencies=[Depends(require_origin)])
 def archive(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     bank.admin_lock(db,user);d=row(db,id);d.archived=True;d.revision+=1;d.updated_at=now();audit(db,"document.archive",user.id);db.commit();return public(d)
@@ -276,11 +321,12 @@ def promote(id:str,body:Register,db:Session=Depends(get_db),user:User=Depends(cu
     bank.admin_lock(db,user);d=row(db,id)
     if d.archived or d.revision!=body.revision or d.kind not in ("paper","handout","textbook") or not d.blocks:raise HTTPException(409,"文档不可转正或版本冲突")
     if d.source_id:return public(d)
+    record_version(db,d)
     text="自编"+{"paper":"试卷","handout":"讲义","textbook":"教材"}[d.kind]+"；对应文档编号 "+d.id
     data=bank.clean(bank.Draft(kind="source",title=d.title,subject=d.subject,content=text,source_type={"paper":"exam","handout":"handout","textbook":"textbook"}[d.kind],authority_tier="internal_handout"),db)
     r=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
     db.add(r);db.flush();bank.snapshot(db,r)
-    d.source_id=r.id;d.revision+=1;d.updated_at=now();references(db,d)
+    d.source_id=r.id;d.revision+=1;d.updated_at=now();references(db,d);record_version(db,d)
     audit(db,"document.promote",user.id);db.commit();return public(d)
 
 class SetupRequest(BaseModel):
@@ -451,7 +497,8 @@ def ai_edit_apply(id:str,ident:str,body:AiEditApply,db:Session=Depends(get_db),u
         updated.append(result)
     if seen!=set(patches):raise HTTPException(409,"目标文档块不存在")
     draft=Draft(title=d.title,kind=d.kind,subject=d.subject,source_id=d.source_id,blocks=updated)
-    d.blocks=validate(db,draft,d.blocks);d.revision+=1;d.updated_at=now()
+    record_version(db,d)
+    d.blocks=validate(db,draft,d.blocks);d.revision+=1;d.updated_at=now();record_version(db,d)
     e.accepted=body.indices;e.state="accepted";e.updated_at=now()
     # No resource registration or reference modification in this path.
     audit(db,"document.ai.apply",user.id);db.commit();return public(d)
