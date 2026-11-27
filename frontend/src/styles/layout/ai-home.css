@@ -24,3 +24,7 @@
 @media(max-height:480px){.shell.legacy-shell.clean-workspace .ai-home[data-chat-layout="v3"]{justify-content:safe center;gap:8px}.shell.legacy-shell.clean-workspace .ai-home .chat-home-heading h1{font-size:20px}}
 
 @media(max-height:480px){.shell.legacy-shell.clean-workspace .ai-home>.ai-home-shortcuts{flex-shrink:1}.shell.legacy-shell.clean-workspace .ai-home>.chat-scroll{min-height:0}}
+
+/* Work home: keep composer at the bottom on mobile and keep shortcuts above it. */
+@media(max-width:760px){.shell.legacy-shell.clean-workspace .work-chat.ai-home[data-chat-layout="v3"]{justify-content:flex-end;overflow:hidden;min-height:0}.shell.legacy-shell.clean-workspace .work-chat.ai-home[data-chat-layout="v3"]>.chat-scroll{flex:1;min-height:0;display:flex;justify-content:center;align-items:center}.shell.legacy-shell.clean-workspace .work-chat.ai-home[data-chat-layout="v3"]>.ai-home-shortcuts{order:1;flex:none}.shell.legacy-shell.clean-workspace .work-chat.ai-home[data-chat-layout="v3"]>.compact-composer{order:2;flex:none;margin-bottom:env(safe-area-inset-bottom)}html[data-composer-keyboard=true] .shell.legacy-shell.clean-workspace .work-chat.ai-home[data-chat-layout="v3"]>.chat-scroll{display:none}}
+.work-manual-config{max-height:28dvh;overflow:auto}.work-manual-config>label{display:flex;gap:8px;align-items:center;margin-top:6px}.work-manual-config>label input,.work-manual-config>label select{min-width:0;flex:1}

@@ -1,0 +1,52 @@
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode,type ChangeEvent} from 'react'
+import {createPortal} from 'react-dom'
+import {Icon} from './Icon'
+import {api} from '../auth'
+import {MathText} from './MathText'
+import './ComposerAttachments.css'
+
+export type AttachmentItem={key:string;name:string;media_type?:string;file?:File;id?:string}
+export const isImage=(f:AttachmentItem)=>Boolean(f.media_type?.startsWith('image/')||f.file?.type.startsWith('image/')||/\.(png|jpe?g|webp|gif)$/i.test(f.name))
+const isPdf=(f:AttachmentItem)=>f.media_type==='application/pdf'||/\.pdf$/i.test(f.name)
+function useFileURL(item:AttachmentItem){
+ const [local,setLocal]=useState('')
+ useEffect(()=>{if(!item.file){setLocal('');return}const url=URL.createObjectURL(item.file);setLocal(url);return()=>URL.revokeObjectURL(url)},[item.file])
+ return item.file?local:item.id?'/api/files/'+encodeURIComponent(item.id)+(isImage(item)?'/preview':'/download'):''
+}
+function Thumbnail({item}:{item:AttachmentItem}){
+ const url=useFileURL(item),[failed,setFailed]=useState(false)
+ useEffect(()=>setFailed(false),[url])
+ return isImage(item)&&url&&!failed?<img src={url} alt={item.name} loading="lazy" onError={()=>setFailed(true)}/>:<><Icon name={isImage(item)?'media':'works'} size={25}/><span>{item.name}</span></>
+}
+export function AttachmentStrip({items,onRemove,disabled=false}:{items:AttachmentItem[];onRemove?:(key:string)=>void;disabled?:boolean}){
+ const [current,setCurrent]=useState<string>()
+ const index=items.findIndex(f=>f.key===current)
+ if(!items.length)return null
+ return <><div className="wg-attachment-strip" aria-label="已添加资料">{items.map(f=><div className={'wg-attachment-tile'+(isImage(f)?' image':'')} key={f.key}><button type="button" className="wg-attachment-open" title={f.name} aria-label={'查看 '+f.name} onClick={()=>setCurrent(f.key)}><Thumbnail item={f}/></button>{onRemove&&<button type="button" className="wg-attachment-remove" aria-label={'移除 '+f.name} disabled={disabled} onClick={()=>onRemove(f.key)}><Icon name="close" size={13}/></button>}</div>)}</div>{index>=0&&<AttachmentPreview key={items[index].key} item={items[index]} index={index} count={items.length} onClose={()=>setCurrent(undefined)} onMove={n=>setCurrent(items[index+n]?.key??current)}/>}</>
+}
+function AttachmentPreview({item,index,count,onClose,onMove}:{item:AttachmentItem;index:number;count:number;onClose:()=>void;onMove:(n:number)=>void}){
+ const url=useFileURL(item),[zoom,setZoom]=useState(1),[failed,setFailed]=useState(false)
+ const dialog=useRef<HTMLDialogElement>(null),touch=useRef<{x:number;y:number;distance:number;zoom:number}>({x:0,y:0,distance:0,zoom:1})
+ useEffect(()=>{dialog.current?.showModal()},[])
+ const step=(n:number)=>setZoom(v=>Math.min(5,Math.max(1,v+n)))
+ return createPortal(<dialog ref={dialog} className="wg-attachment-preview" aria-label="原始资料预览" onCancel={e=>{e.preventDefault();onClose()}} onKeyDown={e=>{if(e.key==='ArrowLeft'&&index>0)onMove(-1);if(e.key==='ArrowRight'&&index+1<count)onMove(1)}}><header><button type="button" aria-label="关闭预览" onClick={onClose}><Icon name="close"/></button><span>{index+1} / {count} · {item.name}</span><a href={url||undefined} download={item.name}>原件</a></header><div className="wg-attachment-stage" onWheel={e=>{if(e.ctrlKey)step(e.deltaY>0?-.25:.25)}} onTouchStart={e=>{const a=e.touches[0],b=e.touches[1];touch.current={x:a.clientX,y:a.clientY,distance:b?Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY):0,zoom}}} onTouchMove={e=>{const a=e.touches[0],b=e.touches[1];if(b&&touch.current.distance)setZoom(Math.min(5,Math.max(1,touch.current.zoom*Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)/touch.current.distance)))}} onTouchEnd={e=>{const a=e.changedTouches[0],t=touch.current;if(zoom===1&&!t.distance&&Math.abs(a.clientX-t.x)>60&&Math.abs(a.clientY-t.y)<50){if(a.clientX<t.x&&index+1<count)onMove(1);if(a.clientX>t.x&&index>0)onMove(-1)}}}>{isImage(item)&&url&&!failed?<img src={url} alt={item.name} style={{width:zoom===1?'auto':zoom*100+'%',maxWidth:zoom===1?'100%':'none',maxHeight:zoom===1?'100%':'none'}} onDoubleClick={()=>setZoom(v=>v===1?2:1)} onError={()=>setFailed(true)}/>:isPdf(item)&&item.file&&url?<iframe title={item.name} src={url}/>:<div className="wg-attachment-fallback"><Icon name="works" size={40}/><p>{item.name}</p><p>{failed?'图片读取失败，可尝试下载原件。':'当前文件可下载原件查看。'}</p><a href={url||undefined} download={item.name}>下载原件</a></div>}</div><footer><button type="button" disabled={index===0} onClick={()=>onMove(-1)}>上一份</button>{isImage(item)&&<><button type="button" onClick={()=>step(-.5)} disabled={zoom===1}>−</button><button type="button" onClick={()=>setZoom(1)}>{Math.round(zoom*100)}%</button><button type="button" onClick={()=>step(.5)} disabled={zoom===5}>+</button></>}<button type="button" disabled={index===count-1} onClick={()=>onMove(1)}>下一份</button></footer></dialog>,document.body)
+}
+
+export function AttachmentMenu({anchor,onClose,onFiles,onLibrary,onQuestions,onKnowledge,disabled=false}:{anchor:HTMLElement|null;onClose:()=>void;onFiles:(files:FileList|null)=>void;onLibrary?:()=>void;onQuestions?:()=>void;onKnowledge?:()=>void;disabled?:boolean}){
+ const dialog=useRef<HTMLDialogElement>(null),camera=useRef<HTMLInputElement>(null),photos=useRef<HTMLInputElement>(null),files=useRef<HTMLInputElement>(null)
+ useLayoutEffect(()=>{const el=dialog.current;if(!el)return;const rect=anchor?.getBoundingClientRect();if(rect){el.style.setProperty('--attachment-left',Math.max(12,Math.min(rect.left,window.innerWidth-336))+'px');el.style.setProperty('--attachment-bottom',Math.max(12,window.innerHeight-rect.top+8)+'px')}el.showModal()},[anchor])
+ const picked=(e:ChangeEvent<HTMLInputElement>)=>{if(e.target.files?.length){onFiles(e.target.files);onClose()}e.target.value=''}
+ const action=(fn:()=>void)=>{onClose();fn()}
+ return createPortal(<dialog ref={dialog} className="wg-attachment-menu" aria-label="添加资料" onCancel={e=>{e.preventDefault();onClose()}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}><div className="wg-attachment-menu-body"><div className="wg-sheet-handle"/><header><strong>添加资料</strong><button type="button" aria-label="关闭添加菜单" onClick={onClose}><Icon name="close"/></button></header><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={picked}/><input ref={photos} type="file" accept="image/*" multiple hidden onChange={picked}/><input ref={files} type="file" accept=".pdf,.docx,.txt,.tex,.md,.csv,.png,.jpg,.jpeg,.webp,.gif" multiple hidden onChange={picked}/><div className="wg-attachment-actions"><button type="button" disabled={disabled} onClick={()=>camera.current?.click()}><Icon name="camera" size={25}/>拍照</button><button type="button" disabled={disabled} onClick={()=>photos.current?.click()}><Icon name="media" size={25}/>相册</button><button type="button" disabled={disabled} onClick={()=>files.current?.click()}><Icon name="upload" size={25}/>上传文件</button></div>{onLibrary&&<button className="wg-attachment-choice" type="button" onClick={()=>action(onLibrary)}><Icon name="files"/><span>资料库<small>选择已有教材、试卷、讲义</small></span><Icon name="chevron"/></button>}{onQuestions&&<button className="wg-attachment-choice" type="button" onClick={()=>action(onQuestions)}><Icon name="resources"/><span>题库选题<small>引用已有题目</small></span><Icon name="chevron"/></button>}{onKnowledge&&<button className="wg-attachment-choice" type="button" onClick={()=>action(onKnowledge)}><Icon name="book"/><span>知识点库<small>引用已有知识点</small></span><Icon name="chevron"/></button>}</div></dialog>,document.body)
+}
+export function AttachmentDialog({title,onClose,children}:{title:string;onClose:()=>void;children:ReactNode}){
+ const ref=useRef<HTMLDialogElement>(null)
+ useEffect(()=>{ref.current?.showModal()},[])
+ return createPortal(<dialog className="wg-attachment-picker" ref={ref} aria-label={title} onCancel={e=>{e.preventDefault();onClose()}}><header><strong>{title}</strong><button type="button" aria-label="关闭" onClick={onClose}><Icon name="close"/></button></header><div className="wg-attachment-picker-body">{children}</div></dialog>,document.body)
+}
+type Ref={id:string;code:string;kind:string;title:string}
+export function ResourceAttachmentPicker({kind,onClose,onChoose}:{kind:'question'|'knowledge';onClose:()=>void;onChoose:(refs:Ref[])=>void}){
+ const [query,setQuery]=useState(''),[rows,setRows]=useState<Ref[]>([]),[chosen,setChosen]=useState<Ref[]>([]),[status,setStatus]=useState('')
+ useEffect(()=>{if(!query.trim()){setRows([]);setStatus('');return}const c=new AbortController();setRows([]);setStatus('查询中…');const t=window.setTimeout(()=>api<Ref[]>('/chat/resource-search?q='+encodeURIComponent(query.slice(0,200)),{signal:c.signal}).then(r=>{if(!c.signal.aborted){const hits=r.filter(x=>x.kind===kind);setRows(hits);setStatus(hits.length?'':'没有匹配结果')}}).catch(e=>{if(!c.signal.aborted)setStatus(e.message)}),200);return()=>{clearTimeout(t);c.abort()}},[query,kind])
+ return <AttachmentDialog title={kind==='question'?'题库选题':'知识点库'} onClose={onClose}><input type="search" value={query} placeholder="搜索编号、标题或正文" onChange={e=>setQuery(e.target.value)}/>{status&&<p role="status">{status}</p>}{rows.map(r=><label className="original-row" key={r.id}><input type="checkbox" checked={chosen.some(x=>x.id===r.id)} disabled={chosen.length>=10&&!chosen.some(x=>x.id===r.id)} onChange={e=>setChosen(v=>e.target.checked?[...v,r]:v.filter(x=>x.id!==r.id))}/><MathText content={r.code+' '+r.title}/></label>)}<button type="button" className="primary" disabled={!chosen.length} onClick={()=>onChoose(chosen)}>添加 {chosen.length} 项引用</button></AttachmentDialog>
+}

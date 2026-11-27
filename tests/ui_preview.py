@@ -73,7 +73,8 @@ def answer(route):
         records=[{"id":"d:demo","title":doc["title"],"source_type":"exam","method":"manual","status":"registered","href":"/intake?doc=demo","action":"查看资料","actions":[{"state":"registered","label":"查看资料","href":"/intake?doc=demo"}],"progress":["4 道题"],"file_names":[],"updated_at":1,"hidden":False},{"id":"j:review-demo","title":"AI 审核示例","source_type":"uncategorized","method":"ai","status":"review","href":"/work?job=review-demo&review=1","action":"继续审核","actions":[{"state":"review","label":"继续审核","href":"/work?job=review-demo&review=1"}],"progress":["0/1 条已审核"],"file_names":[],"updated_at":2,"hidden":False}]
         records=[r for r in records if (not q.get("q") or q["q"][0] in r["title"]) and (not q.get("status") or q["status"][0]==r["status"]) and (not q.get("source_type") or q["source_type"][0]==r["source_type"]) and (not q.get("method") or q["method"][0]==r["method"])]
         result={"items":records,"total":len(records)}
-    if p=="/workspaces":result=[]
+    if p=="/workspaces":result={"id":"agent-work-demo"} if route.request.method=="POST" else []
+    if p=="/workspaces/agent-work-demo/materials" and route.request.method=="POST":result={"id":"agent-work-demo","title":"持续工作预览","materials":[]}
     if p=="/workspaces/agent-work-demo":
         result={"id":"agent-work-demo","title":"持续工作预览","materials":[{"id":"agent-material","file":{"id":"agent-pdf","name":"高等数学.pdf","media_type":"application/pdf"},"total_units":100,"verified_units":5,"next_unit":6,"batches":[{"id":"agent-batch","start":1,"end":5,"units":[],"verified":True}]}]}
     if p=="/workspaces/agent-work-demo/agent/history":
@@ -360,7 +361,7 @@ with sync_playwright() as p:
             page.unroute("**/api/chat/sessions/chat-demo",read_retry)
             visit(page,"/",".chat-home-recent")
         if GROUP in {'all','desktop','editors'}:
-            for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/project/publishing","15-works-and-covers"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+            for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/project/publishing","15-works-and-covers"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/work?manual=1","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
                 if GROUP!="all" and ((name in EDITOR_PAGES) != (GROUP=="editors")):
                     continue
                 print("UI case:",name,flush=True)
@@ -485,9 +486,9 @@ with sync_playwright() as p:
                     page.get_by_label("输入录入资料",exact=True).wait_for()
                     page.get_by_text("已带入聊天正文").wait_for()
                     assert page.get_by_label("输入录入资料",exact=True).input_value()==demo_chat["messages"][0]["content"]
-                    page.get_by_role("button",name="添加录入资料").click()
+                    page.locator(".work-manual-config summary").click()
                     assert page.get_by_label("录入目标").input_value()=="question"
-                    page.get_by_role("button",name="添加录入资料").click()
+                    page.locator(".work-manual-config summary").click()
                     capture(page,path=str(OUT/"20-intake-linked.png"),full_page=False)
                     continue
                 if name=="00-home":
@@ -525,18 +526,34 @@ with sync_playwright() as p:
                     page.get_by_label("输入录入资料").fill("")
                     expect(page.get_by_role("button",name="添加录入资料")).to_be_visible()
                     page.get_by_role("button",name="添加录入资料").click()
-                    page.get_by_role("button",name="上传图片、PDF 或 Word").wait_for()
-                    page.get_by_role("button",name="添加录入资料").click()
+                    expect(page.get_by_role("dialog",name="添加资料")).to_be_visible()
+                    expect(page.get_by_role("button",name="上传文件",exact=True)).to_be_visible()
+                    expect(page.get_by_role("button",name="相册",exact=True)).to_be_visible()
+                    expect(page.get_by_role("button",name="资料库",exact=False)).to_be_visible()
+                    page.keyboard.press("Escape")
                     page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
                     page.locator(".mode-switch").get_by_role("link",name="聊天").click()
                     page.locator(".mode-switch").get_by_role("link",name="工作").click()
-                    expect(page.get_by_role("button",name="移除资料")).to_be_visible()
-                    expect(page.locator(".work-file")).to_contain_text("demo.tex")
-                    page.get_by_role("button",name="发送资料").click()
-                    page.locator(".work-review-preview .katex").first.wait_for()
-                    page.get_by_role("button",name="移除资料").click()
-                    page.get_by_role("dialog",name="确认操作").get_by_role("button",name="确认",exact=True).click()
-                    expect(page.get_by_role("button",name="移除资料")).to_have_count(0)
+                    expect(page.get_by_role("button",name="移除 demo.tex")).to_be_visible()
+                    expect(page.locator(".wg-attachment-strip")).to_contain_text("demo.tex")
+                    # Append a second selection without losing the first; preview original image.
+                    import base64
+                    page.get_by_label("选择录入文件").set_input_files({"name":"test.png","mimeType":"image/png","buffer":base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII=")})
+                    expect(page.locator(".wg-attachment-tile")).to_have_count(2)
+                    expect(page.locator(".wg-attachment-tile.image img")).to_be_visible()
+                    page.get_by_role("button",name="查看 test.png").click()
+                    expect(page.get_by_role("dialog",name="原始资料预览")).to_be_visible()
+                    expect(page.locator(".wg-attachment-stage img")).to_be_visible()
+                    page.get_by_role("button",name="关闭预览").click()
+                    page.get_by_role("button",name="移除 test.png").click()
+                    page.get_by_role("button",name="移除 demo.tex").click()
+                    expect(page.locator(".wg-attachment-tile")).to_have_count(0)
+                    page.get_by_label("选择录入文件").set_input_files({"name":"demo.tex","mimeType":"text/plain","buffer":b"test formula"})
+                    page.get_by_label("输入录入资料").fill("识别这份资料")
+                    with page.expect_request(lambda req:req.url.endswith("/agent") and req.method=="POST") as work_submit:
+                        page.get_by_role("button",name="发送资料").click()
+                    assert work_submit.value.post_data_json["instruction"]=="识别这份资料"
+                    page.wait_for_url("**/work?workspace=agent-work-demo")
                     assert page.locator(".mode-switch").get_by_role("link",name="工作").get_attribute("aria-current")=="page"
                     page.get_by_role("button",name="更多选项",exact=True).click()
                     expect(page.locator("#mode-more-panel").get_by_role("link",name="AI 登录与模型")).to_be_visible()
@@ -925,9 +942,9 @@ with sync_playwright() as p:
             expect(page.locator(".agent-manual")).to_be_visible()
             page.locator(".agent-manual").get_by_role("button",name="收起",exact=True).click()
             page.get_by_role("button",name="添加资料",exact=True).click()
-            expect(page.get_by_role("group",name="资料工具")).to_be_visible()
+            expect(page.get_by_role("dialog",name="添加资料")).to_be_visible()
             page.keyboard.press("Escape")
-            expect(page.get_by_role("group",name="资料工具")).to_have_count(0)
+            expect(page.get_by_role("dialog",name="添加资料")).to_have_count(0)
             expect(page.get_by_role("button",name="按计划继续 AI 整理",exact=True)).to_be_enabled()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             capture(page,path=str(OUT/("31-agent-work-mobile.png" if GROUP=="mobile" else "31-agent-work-desktop.png")),full_page=False)
