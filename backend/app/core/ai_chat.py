@@ -32,7 +32,7 @@ def protocol():
 
 def begin(db,m,user,prompt,effort):
     store(db,m,{"actor":user.id,"prompt":prompt,"job":m.id,"effort":effort,
-                "steps":[],"phase":"model","at":now()})
+                "steps":[],"phase":"pending","at":now(),"next_prompt":prompt})
 
 def trace(db,m):
     state=load(db,m)
@@ -69,9 +69,12 @@ def pending(db,m,state):
     try:
         qoder.request("POST","/chat/start",{"id":state["job"],"model":m.model,"prompt":state["next_prompt"],**state["effort"]})
     except HTTPException as e:
-        if e.status_code in (409,503,504):return
+        if e.status_code==409 and "已有模型任务" in str(e.detail):return
+        if e.status_code in (503,504):
+            state["attempts"]=state.get("attempts",0)+1
+            if state["attempts"]<3:store(db,m,state);return
         m.state="failed";m.detail="模型继续执行失败";finish(db,m,state);return
-    state.update(phase="model",at=now());store(db,m,state)
+    state.update(phase="model",at=now(),attempts=0);store(db,m,state)
 
 def sync(db,m,state):
     from app.core.ai_tools import TOOLS,execute,bounded_result
