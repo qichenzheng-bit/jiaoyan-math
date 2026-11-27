@@ -366,6 +366,24 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert confirmed.json()["evaluation"]["reason"]=="连续性法更便于课堂讲解"
         assert bank_search(method_state="confirmed")==1
         assert bank_search(method_state="pending")==0
+        # Source filters may not combine the year from one source and exam from another.
+        source_a=client.post("/api/resources",headers=origin,json={"kind":"source","title":"组合筛选真题A","content":"测试","source_type":"exam","cohort_year":"2018","exam_type":"数学一","authority_tier":"official_exam"}).json()
+        source_b=client.post("/api/resources",headers=origin,json={"kind":"source","title":"组合筛选真题B","content":"测试","source_type":"exam","cohort_year":"2025","exam_type":"数学二","authority_tier":"official_exam"}).json()
+        seed=client.post("/api/resources",headers=origin,json={"kind":"question","title":"组合筛选独立题","content":"某可微函数于指定点的导数存在性","answer":"存在","solution":"泰勒公式","subject":"高等数学","question_type":"综合题","source_id":source_a["id"],"tags":["专项甲","专项乙"]}).json()
+        relation=client.get("/api/resources/"+seed["id"]+"/sources").json()
+        linked=client.put("/api/resources/"+seed["id"]+"/sources",headers=origin,json={"revision":relation["revision"],"items":[{"source_id":source_a["id"],"is_primary":True,"original_question_number":"10"},{"source_id":source_b["id"],"is_primary":False,"original_question_number":"2"}]})
+        assert linked.status_code==200,linked.text
+        def seed_search(**kw):
+            response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":seed["code"],**kw})
+            assert response.status_code==200,response.text
+            return response.json()["total"]
+        assert seed_search(origin_exam="数学一",year_from=2018,year_to=2018,source_count="multiple",method_name="泰勒展开")==1
+        assert seed_search(origin_exam="数学一",year_from=2025)==0
+        assert seed_search(source_id=source_a["id"],original_number="2")==0
+        assert seed_search(source_ids=[source_a["id"],source_b["id"]])==1
+        assert seed_search(knowledge_ids=[p["id"] for p in seed["knowledge_points"]],knowledge_mode="all")==1
+        assert seed_search(knowledge_ids=[seed["knowledge_points"][0]["id"],"missing"],knowledge_mode="all")==0
+        assert seed_search(knowledge_ids=[seed["knowledge_points"][0]["id"],"missing"],knowledge_mode="any")==1
         assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
         related_seed=client.post("/api/resources",headers=origin,json={"kind":"question","title":"关联方法专项","subject":"高等数学","content":"计算某项幂函数的定积分","answer":"1","solution":"分部积分法","tags":["相关专题"]}).json()
         related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})
