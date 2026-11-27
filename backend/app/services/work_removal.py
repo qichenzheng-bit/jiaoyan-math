@@ -47,7 +47,7 @@ def remove_jobs(db,rows):
     if not ids:return set()
     supplements=list(db.scalars(select(IntakeSupplement).where(IntakeSupplement.job_id.in_(ids)).with_for_update()))
     for j in rows:
-        if j.state=="running":stop_model(j.id,j.created_at)
+        if j.state=="running":stop_model((j.provenance or {}).get("enrichment_job_id",j.id),(j.provenance or {}).get("enrichment_started_at",j.created_at))
     for s in supplements:
         if s.state=="running":stop_model(s.id,s.created_at)
     retained={j.id for j in rows if j.document_id}

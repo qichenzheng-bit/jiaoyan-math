@@ -1271,6 +1271,33 @@ with sync_playwright() as p:
                     if width==393:
                         page.evaluate("document.fonts.ready")
                         page.screenshot(path=str(OUT/("phone-module-"+label+".png")),full_page=False)
+            print('UI case: compact single review original-only and fixed controls',flush=True)
+            compact_row={**review_clean,"id":"compact-single","reviewed_uids":[],"provenance":{"single_review":True,"auto_enrichment":True,"file_id":"agent-pdf","file_name":"高等数学.pdf","file_media_type":"application/pdf","workspace_id":"agent-work-demo","work_material_id":"agent-material","work_batch_id":"agent-batch","start":1,"end":5},"items":[{**review_clean["items"][0],"knowledge_tags":["函数极限","连续函数"],"primary_knowledge_tag":"函数极限","generated_fields":["answer","solution"]}]}
+            def compact_fixture(route):
+                if route.request.method=="PUT":
+                    data=route.request.post_data_json
+                    compact_row.update(items=data["items"],reviewed_uids=data["reviewed_uids"],revision=compact_row["revision"]+1)
+                route.fulfill(json=compact_row)
+            page.route("**/api/intelligence/jobs/compact-single",compact_fixture)
+            try:
+                page.set_viewport_size({"width":393,"height":873})
+                visit(page,"/work?job=compact-single&review=1",".compact-review-v2")
+                expect(page.get_by_text("函数极限",exact=True)).to_be_visible()
+                expect(page.get_by_role("button",name="设为主标签 函数极限")).to_have_attribute("aria-pressed","true")
+                expect(page.get_by_text("补充资料与 AI 建议",exact=True)).to_have_count(0)
+                page.get_by_role("button",name="原文对照",exact=True).click()
+                expect(page.locator(".original-only-view")).to_be_visible()
+                expect(page.get_by_alt_text("原始PDF第 1 页")).to_be_visible()
+                expect(page.locator(".compact-review-card").first).not_to_be_visible()
+                page.get_by_role("button",name="题目审核",exact=True).click()
+                expect(page.locator(".compact-review-card").first).to_be_visible()
+                assert page.locator(".compact-review-footer").evaluate("(el)=>el.getBoundingClientRect().bottom <= innerHeight+1")
+                page.get_by_role("button",name="设为主标签 连续函数").click()
+                page.get_by_role("button",name="通过并继续",exact=True).click()
+                expect(page.get_by_text("本批审核完成",exact=True)).to_be_visible()
+                assert compact_row["items"][0]["primary_knowledge_tag"]=="连续函数"
+            finally:
+                page.unroute("**/api/intelligence/jobs/compact-single",compact_fixture)
             print('UI case: compact phone composition and production navigation',flush=True)
             page.set_viewport_size({"width":393,"height":873})
             visit(page,"/work?job=review-clean&review=1",".wg-review-editor .katex")
