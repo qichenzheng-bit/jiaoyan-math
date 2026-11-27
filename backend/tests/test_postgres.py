@@ -432,6 +432,14 @@ def test_migration_and_login(tmp_path, monkeypatch):
         exported=client.post(stats_path+"/report/export",headers=origin,json=report_payload)
         assert exported.status_code==200 and "text/csv" in exported.headers["content-type"]
         assert "2018" in exported.text and "2025" in exported.text and "原件总题数未知" in exported.text
+        distribution_scope={"source_ids":[source_a["id"],source_b["id"]]}
+        for dimension,expected in (("question_type","综合题"),("method","泰勒展开"),("cooccurrence","专项乙")):
+            payload={**distribution_scope,"dimension":dimension,"knowledge_name":"专项甲","knowledge_subject":"高等数学"}
+            dist=client.post(stats_path+"/distribution",headers=origin,json=payload)
+            assert dist.status_code==200,dist.text
+            assert dist.json()["question_count"]==1
+            assert any(r["name"]==expected and r["question_count"]==1 and r["source_question_count"]==2 for r in dist.json()["items"])
+        assert client.post(stats_path+"/distribution",headers=origin,json={**distribution_scope,"dimension":"cooccurrence"}).status_code==422
         scope_payload={"name":"组合统计测试","scope":{"source_ids":[source_a["id"],source_b["id"]]}}
         stored=client.post(stats_path+"/scopes",headers=origin,json=scope_payload)
         assert stored.status_code==200,stored.text

@@ -390,3 +390,66 @@ def file_progress(id:str,db:Session=Depends(get_db)):
                 row["unverified_ranges"]=compact_ranges(set(range(1,total+1))-units) if total is not None and 0<total<=10000 else None
         items.append(row)
     return {"items":items,"original_question_total":None}
+
+
+class DistributionRequest(StatisticsRequest):
+    dimension:Literal["question_type","method","cooccurrence"]="question_type"
+    knowledge_name:str=Field(default="",max_length=180)
+    knowledge_subject:str=Field(default="",max_length=40)
+
+@router.post("/statistics/distribution",dependencies=[Depends(require_origin)])
+def distribution(body:DistributionRequest,db:Session=Depends(get_db)):
+    cte,params=statistics_scope(body)
+    name=body.knowledge_name.strip()
+    if body.dimension=="cooccurrence" and not name:
+        raise HTTPException(422,"请选择知识点")
+    params.update(focus_name=name,focus_subject=body.knowledge_subject)
+    focus="""
+    , focus AS (
+        SELECT question_id FROM questions
+        WHERE :focus_name='' OR question_id IN (
+            SELECT question_id FROM names WHERE name=:focus_name AND subject=:focus_subject
+        )
+    )
+    """
+    if body.dimension=="question_type":
+        categories="""
+        SELECT q.id AS question_id,'' AS subject,btrim(q.question_type) AS name
+        FROM focus f JOIN teaching_resources q ON q.id=f.question_id
+        """
+    elif body.dimension=="method":
+        # The existing filter index records method-name matches in solution text.
+        # These are not manually verified method classifications.
+        categories="""
+        SELECT q.id AS question_id,'' AS subject,substr(m.key,8) AS name
+        FROM focus f JOIN teaching_resources q ON q.id=f.question_id
+        CROSS JOIN LATERAL jsonb_each(
+            CASE WHEN jsonb_typeof(CAST(q.bank_facts AS jsonb))='object'
+            THEN CAST(q.bank_facts AS jsonb) ELSE '{}'::jsonb END
+        ) m
+        WHERE left(m.key,7)='method:' AND m.value='true'::jsonb
+        """
+    else:
+        categories="""
+        SELECT n.question_id,n.subject,n.name
+        FROM names n JOIN focus f ON f.question_id=n.question_id
+        WHERE NOT (n.name=:focus_name AND n.subject=:focus_subject)
+        """
+    query=cte+focus+", categories AS ("+categories+"""
+    ), counts AS (
+        SELECT c.subject,c.name,count(DISTINCT c.question_id) AS question_count,
+               count(*) AS source_question_count
+        FROM categories c JOIN pairs p ON p.question_id=c.question_id
+        GROUP BY c.subject,c.name
+    )
+    SELECT (SELECT count(*) FROM focus) AS question_count,
+           (SELECT count(DISTINCT question_id) FROM categories) AS classified_questions,
+           (SELECT count(*) FROM counts) AS total,
+           coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.question_count DESC,r.subject,r.name)
+                     FROM (SELECT * FROM counts ORDER BY question_count DESC,subject,name
+                           LIMIT :limit OFFSET :offset) r),'[]'::jsonb) AS items
+    """
+    result=dict(db.execute(text(query),params).mappings().one())
+    return {**result,"dimension":body.dimension,"offset":body.offset,"limit":body.limit,
+            "scope":"recorded_questions_only",
+            "method_basis":"derived_from_solution_text" if body.dimension=="method" else None}
