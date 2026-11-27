@@ -11,7 +11,7 @@ export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 exec 9>"$base/deploy.lock"
 flock -w 600 9 || { echo "Deployment busy"; exit 1; }
-# Owner requested no local deployment backups. Never touch live data.
+# Owner requested no local deployment archives. The explicitly authorized V1 reset below is one-time only.
 [[ -d "$base/backups" && ! -L "$base/backups" && "$(realpath "$base/backups")" == "$(realpath "$base")/backups" ]] || { echo "Unexpected backup directory"; exit 1; }
 find "$base/backups" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 release="$base/releases/$sha-$(date +%s)"
@@ -99,6 +99,21 @@ systemctl --user stop jiaoyan.service
 migrated=false
 if (cd "$release/backend" && "$release/venv/bin/python" -m alembic upgrade head); then
   migrated=true
+  # The owner explicitly authorized one clean initial V1 release. Backup before deleting.
+  reset_state=$("$release/venv/bin/python" "$release/deploy/reset_v1_data.py" status)
+  if [[ "$reset_state" != done ]]; then
+    if [[ "$reset_state" == new ]]; then
+      if ! "$release/venv/bin/python" "$release/deploy/backup.py" backup; then
+        echo "V1 reset blocked: encrypted repository backup failed; no data deleted."
+        if [[ -n "$old" && "$before" == "$target_heads" ]]; then systemctl --user start jiaoyan.service; fi
+        exit 1
+      fi
+    fi
+    # Never restart the app on a partially completed reset. The marker allows safe retry.
+    "$release/venv/bin/python" "$release/deploy/reset_v1_data.py" reset || { echo "V1 reset incomplete; service remains stopped for safe retry."; exit 1; }
+    # Update latest encrypted snapshot; the pre-reset commit remains available in Git history.
+    "$release/venv/bin/python" "$release/deploy/backup.py" backup || echo "WARNING: clean-state repository backup not yet published"
+  fi
   if switch_to "$release" && systemctl --user start jiaoyan.service; then
     for _ in $(seq 1 20); do
       if curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null && curl -fsS --max-time 2 http://127.0.0.1:8765/ >/dev/null; then

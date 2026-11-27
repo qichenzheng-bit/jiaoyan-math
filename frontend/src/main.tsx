@@ -47,6 +47,8 @@ import './styles/layout/ai-home.css'
 import './styles/layout/chat-conversation.css'
 import './styles/layout/persistent-work.css'
 
+// Remove obsolete recovery caches from earlier V1 builds; no draft JSON export.
+try{for(const key of Object.keys(sessionStorage))if(key.startsWith('wg-doc-recovery:'))sessionStorage.removeItem(key)}catch{}
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(
   <StrictMode>{window.location.pathname==='/__layout_pdf'?<PdfRender/>:<RouterProvider router={router}/>}</StrictMode>,

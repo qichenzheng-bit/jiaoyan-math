@@ -1561,6 +1561,12 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
+        # Permanent deletion removes the source message and chat without removing independent files.
+        removed=client.delete("/api/chat/sessions/"+chat_id,headers=origin)
+        assert removed.status_code==200,removed.text
+        assert client.get("/api/chat/sessions/"+chat_id).status_code==404
+        assert client.get("/api/intelligence/chat-source/"+user_message["id"]).status_code==404
+        assert client.get("/api/files/"+item["id"]+"/download").status_code==200
         invalid = client.post("/api/auth/password", headers=origin, json={"current_password":"do-not-echo-this","new_password":"short"})
         assert invalid.status_code == 422 and "do-not-echo-this" not in invalid.text
         assert client.post("/api/auth/logout", headers=origin).status_code == 200
