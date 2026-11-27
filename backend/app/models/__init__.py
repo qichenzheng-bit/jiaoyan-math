@@ -89,7 +89,7 @@ class TeachingResource(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"))
+    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"),Index("ix_source_catalog_year","kind","archived","cohort_year","exam_type"))
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
@@ -171,7 +171,7 @@ class KnowledgePointCatalog(Base):
     revision: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__=(UniqueConstraint("subject","name_key",name="uq_kp_subject_name"),CheckConstraint("status IN ('active','disabled','replaced')",name="ck_kp_status"),CheckConstraint("replaced_by_id IS NULL OR replaced_by_id <> id",name="ck_kp_not_self"))
+    __table_args__=(Index("ix_catalog_tag_subject","subject","status","chapter","name"),UniqueConstraint("subject","name_key",name="uq_kp_subject_name"),CheckConstraint("status IN ('active','disabled','replaced')",name="ck_kp_status"),CheckConstraint("replaced_by_id IS NULL OR replaced_by_id <> id",name="ck_kp_not_self"))
 
 class ResourceKnowledgeLink(Base):
     __tablename__ = "resource_knowledge_links"

@@ -72,3 +72,14 @@ def test_legacy_manifest_work_group_is_all_or_nothing(tmp_path):
 def test_original_purge_lock_matches_backup():
     from app.services import storage
     assert storage.PURGE_LOCK==backup.PURGE_LOCK
+
+def test_legacy_source_catalog_manifest(tmp_path):
+    entries={}
+    for name in (set(backup.FIXED)|set(backup.SCHEMAS))-backup.CATALOG_EXPORTS:
+        part=name+".age.0000"
+        path=tmp_path/part;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"data")
+        entries[name]={"parts":[{"path":part,"sha256":hashlib.sha256(b"data").hexdigest()}]}
+    manifest={"format":2,"entries":entries}
+    with pytest.raises(ValueError,match="incomplete"):backup.check_manifest(tmp_path,manifest)
+    backup.check_manifest(tmp_path,manifest,allow_legacy=True)
+    assert backup.CATALOG_EXPORTS=={"teaching/sources/catalog_details.csv"}
