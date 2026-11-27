@@ -174,6 +174,7 @@ def answer(route):
         result={"import_id":"import-demo","file_id":"file-demo","file_name":"demo.tex","text":r"求 $\frac{1}{x}$ 的导数。","method":"text","start":1,"end":1,"total_units":None,"warnings":[]}
     if p=="/resources":
         rows=[source] if q.get("kind")==["source"] else items
+        if q.get("bank_summary")==["true"]:rows=[{**r,"bank_summary":{"source_count":2 if i==0 else 1,"source_title":source["title"],"method_count":2 if i==0 else 1,"has_answer":bool(r.get("answer")),"has_solution":bool(r.get("solution"))}} for i,r in enumerate(rows)]
         result={"items":rows,"total":len(rows)}
     if p=="/knowledge/browse":
         pool=[p for p in points if p["subject"]==q.get("subject",[""])[0]]
@@ -615,6 +616,12 @@ with sync_playwright() as p:
                     page.get_by_role("button",name="重置",exact=True).click()
                     page.get_by_role("button",name="收起筛选").click()
                     page.locator(".bank-detail .katex").first.wait_for()
+                    expect(page.locator(".question-bank-row").first).to_contain_text("2份来源")
+                    expect(page.locator(".question-bank-row").first).to_contain_text("2种解法")
+                    page.get_by_role("checkbox",name="全选本页").check()
+                    expect(page.locator(".question-bank-selection")).to_contain_text("已选 4 道")
+                    page.get_by_role("button",name="取消选择",exact=True).click()
+                    expect(page.locator(".question-bank-selection")).to_contain_text("已选 0 道")
                     # Inline limit notation uses an under-script, not a side subscript.
                     assert page.locator(".bank-list .katex .op-limits").count()>0
                     assert page.locator(".bank-list .katex").count()>0
@@ -1230,12 +1237,17 @@ with sync_playwright() as p:
             visit(page,"/resources",".bank-row")
             page.locator(".bank-row").first.wait_for()
             expect(page.locator(".bank-detail")).to_be_hidden()
+            page.get_by_role("checkbox",name="选择 QDEMO0001",exact=True).check()
+            expect(page.locator(".question-bank-selection")).to_contain_text("已选 1 道")
             page.locator(".bank-row").first.click()
             page.locator(".bank-detail .katex").first.wait_for()
             expect(page.locator(".bank-list")).to_be_hidden()
             capture(page,path=str(OUT/"30-resource-mobile.png"),full_page=False)
             page.get_by_role("button",name="返回资源列表",exact=False).click()
             expect(page.locator(".bank-list")).to_be_visible()
+            expect(page.get_by_role("checkbox",name="选择 QDEMO0001",exact=True)).to_be_checked()
+            expect(page.locator(".question-bank-selection")).to_contain_text("已选 1 道")
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             visit(page,"/works",".studio-library")
             expect(page.locator(".studio-library")).to_be_visible()
             page.get_by_role("button",name="新建",exact=True).click()

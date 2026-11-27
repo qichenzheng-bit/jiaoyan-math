@@ -315,6 +315,10 @@ def test_migration_and_login(tmp_path, monkeypatch):
         merged_id=same_blocks[0]["resource_id"]
         assert same_blocks[1]["resource_id"]==merged_id
         merged_resource=client.get("/api/resources/"+merged_id).json()
+        bank_page=client.get("/api/resources",params={"kind":"question","q":merged_resource["code"],"bank_summary":True}).json()
+        summary=next(r["bank_summary"] for r in bank_page["items"] if r["id"]==merged_id)
+        assert summary["source_count"]==1 and summary["method_count"]==2 and summary["has_answer"] and summary["has_solution"]
+        assert summary["source_title"]
         assert "直接代入法" in merged_resource["solution"] and "连续性法" in merged_resource["solution"]
         occurrences=client.get("/api/resources/"+merged_id+"/sources").json()["items"][0]["occurrences"]
         assert {(o["original_question_number"],o["page_start"]) for o in occurrences}=={("1",2),("7",5)}
