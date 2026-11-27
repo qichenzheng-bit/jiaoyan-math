@@ -14,7 +14,7 @@ from app.models import User
 
 @pytest.mark.skipif(os.environ.get("RUN_POSTGRES_INTEGRATION") != "1",
                     reason="requires dedicated PostgreSQL test database")
-def test_migration_and_login(tmp_path, monkeypatch):
+def test_migration_and_login(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WG_RECOMMENDATION_SCHEDULER","0")
     from dataclasses import replace
     from app.services import storage
@@ -1490,7 +1490,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
             assert response.status_code==200,response.text[:500] if response.status_code!=200 else ""
             assert 195_000_000<=len(response.content)<=205_000_000
             assert response.content.count(b'"heading_level":1')==100
-            print("EXPORT_200MB",json.dumps({"source_bytes":COMPLETE_EXPORT_MAX_BYTES,"http_bytes":len(response.content),"seconds":round(elapsed,3),"peak_rss_mib":round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1),"chapters":100,"blocks":5000}),flush=True)
+            with capsys.disabled():
+                print("EXPORT_200MB",json.dumps({"source_bytes":COMPLETE_EXPORT_MAX_BYTES,"http_bytes":len(response.content),"seconds":round(elapsed,3),"peak_rss_mib":round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1),"chapters":100,"blocks":5000}),flush=True)
             assert elapsed<120,"200 MB export exceeds 120-second CI benchmark budget"
             del response
         finally:
