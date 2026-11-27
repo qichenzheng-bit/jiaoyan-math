@@ -15,7 +15,7 @@ type Content={title:string;content:string;answer:string;solution:string;analysis
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
 type SourceDraft={export_token:string;selected_uids?:string[]|null;overrides:Record<string,Partial<Content>>;stem:boolean;answerOnly:boolean;filename:string}
 type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
-export type PrintDoc={export_token?:string;parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
+export type PrintDoc={export_token?:string;export_chapter_uid?:string;parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
 
 export default function DocumentPrint({source=false}:{source?:boolean}){
  const {id}=useParams(),navigate=useNavigate(),[params]=useSearchParams(),chapterUid=params.get('chapter')
@@ -41,9 +41,9 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  useWorkspaceBack(()=>{if(!doc&&!source)return false;navigate(back);return true})
  useEffect(()=>{
   const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('');setScope([]);setScopeMode('all');setOverrides({});setEditUid('');setFilename('');setPageCount(0);setPicked('');setLayoutHistory([]);setTemplateHistory([]);setDraftRevision(null);setLocalRecovery(null)
-  api<PrintDoc>((source?'/documents/source-export/':'/documents/')+encodeURIComponent(id??'')+(source?'':'/export'),{signal:c.signal}).then(async data=>{
+  api<PrintDoc>((source?'/documents/source-export/':'/documents/')+encodeURIComponent(id??'')+(source?'':'/export'+(chapterUid?'?chapter='+encodeURIComponent(chapterUid):'')),{signal:c.signal}).then(async data=>{
    if(c.signal.aborted)return
-   if(chapterUid){
+   if(chapterUid&&data.export_chapter_uid!==chapterUid){
     if(source||!['textbook','handout'].includes(data.kind))throw Error('仅讲义和教材支持按章导出')
     const start=data.blocks.findIndex(b=>b.uid===chapterUid&&b.kind==='heading'&&b.heading_level===1)
     if(start<0)throw Error('未找到指定章节，请返回教材目录重新选择')
