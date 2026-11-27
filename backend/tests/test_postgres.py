@@ -1194,6 +1194,23 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert f["recognized_ranges"]==[[1,1]] and f["registered_ranges"]==[]
         assert client.get(catalog_url+"/file-progress").json()["items"]==[]
 
+        # File association is version-specific and non-destructive.
+        version_url="/api/source-catalog/sources/"+fixture_source["id"]+"/version-files"
+        empty_binding=client.get(version_url).json()
+        assert empty_binding["revision"]==0 and empty_binding["items"]==[]
+        binding={"revision":0,"version":empty_binding["versions"][0]["version"],"file_id":fixture_file["id"],"role":"original"}
+        bound_file=client.post(version_url,headers=origin,json=binding)
+        assert bound_file.status_code==200,bound_file.text
+        association=bound_file.json()
+        assert association["items"][0]["file_id"]==fixture_file["id"] and association["items"][0]["active"]
+        assert client.post(version_url,headers=origin,json=binding).status_code==409
+        assert client.post(version_url,headers=origin,json={**binding,"revision":association["revision"],"version":999}).status_code==422
+        unbound_file=client.post(version_url+"/"+association["items"][0]["id"]+"/unbind",headers=origin,json={"revision":association["revision"]})
+        assert unbound_file.status_code==200,unbound_file.text
+        assert not unbound_file.json()["items"][0]["active"]
+        assert client.get("/api/source-catalog/sources/"+fixture_source["id"]+"/file-progress").json()==p
+        assert client.get("/api/resources/"+fixture_source["id"]).status_code==200
+
         # Knowledge directory parent selection includes children but not similar prefixes.
         for ix,path in enumerate(("目录专项/极限","目录专项/极限/方法","目录专项/极限外")):
             r=client.post("/api/resources",headers=origin,json={"kind":"knowledge","title":"多级目录测试"+str(ix),"subject":"高等数学","chapter":path,"content":"独立目录内容"+str(ix)})

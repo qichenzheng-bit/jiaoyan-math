@@ -2,6 +2,7 @@ import {useEffect,useState,type FormEvent} from 'react'
 import {useParams} from 'react-router-dom'
 import {api} from '../auth'
 import {MathText} from '../components/MathText'
+import SourceVersionFiles from './SourceVersionFiles'
 import {WorkspaceLink as Link,useWorkspaceGuard} from '../components/WorkspaceNavigation'
 type Meta={source_id:string;title:string;code:string;source_type:string;year:string;exam_type:string;edition:string;series_key:string;archived:boolean;revision:number;category:string;institution:string;subject_code:string;subjects:string[];author:string;publisher:string;intake_status:string}
 const statuses:Record<string,string>={unknown:'未确认',not_started:'未开始',in_progress:'录入中',completed:'人工确认完成',stopped:'停止录入'}
@@ -22,7 +23,7 @@ function SourceFileProgress({id}:{id:string}){
 }
 export function SourceCatalogSummary({id,archived}:{id:string;archived:boolean}){
  const {meta,error}=useMeta(id)
- return <section className="bank-section source-catalog-summary"><div className="panel-heading"><h3>资料属性</h3>{!archived&&<Link className="button-link" to={'/source-catalog/'+encodeURIComponent(id)}>编辑资料属性</Link>}</div>{error?<small role="status">资料属性暂不可读取</small>:meta?<><p className="muted">{[meta.category||'分类未确认',meta.institution,meta.subject_code,meta.year,meta.edition].filter(Boolean).join(' · ')}</p><p>学科：{meta.subjects.join('、')||'未确认'}</p><p>录入状态：{statuses[meta.intake_status]||'未确认'}</p><small className="muted">仅统计已入库资源，不推测原件总题数。</small></>:<small>正在读取资料属性…</small>}<SourceFileProgress key={id} id={id}/></section>
+ return <section className="bank-section source-catalog-summary"><div className="panel-heading"><h3>资料属性</h3>{!archived&&<Link className="button-link" to={'/source-catalog/'+encodeURIComponent(id)}>编辑资料属性</Link>}</div>{error?<small role="status">资料属性暂不可读取</small>:meta?<><p className="muted">{[meta.category||'分类未确认',meta.institution,meta.subject_code,meta.year,meta.edition].filter(Boolean).join(' · ')}</p><p>学科：{meta.subjects.join('、')||'未确认'}</p><p>录入状态：{statuses[meta.intake_status]||'未确认'}</p><small className="muted">仅统计已入库资源，不推测原件总题数。</small></>:<small>正在读取资料属性…</small>}<SourceFileProgress key={id} id={id}/><SourceVersionFiles key={"versions:"+id} id={id}/></section>
 }
 export default function SourceCatalog(){
  const {id=''}=useParams(),{meta,setMeta,error,setError}=useMeta(id)

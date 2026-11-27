@@ -453,3 +453,78 @@ def distribution(body:DistributionRequest,db:Session=Depends(get_db)):
     return {**result,"dimension":body.dimension,"offset":body.offset,"limit":body.limit,
             "scope":"recorded_questions_only",
             "method_basis":"derived_from_solution_text" if body.dimension=="method" else None}
+
+
+
+class SourceFileBinding(BaseModel):
+    revision:int=Field(ge=0)
+    version:int=Field(ge=1)
+    file_id:str=Field(min_length=1,max_length=36)
+    role:Literal["original","supplement","correction"]="original"
+    note:str=Field(default="",max_length=300)
+
+class SourceFileUnbind(BaseModel):
+    revision:int=Field(ge=0)
+
+def binding_key(id):
+    return "source.file.versions."+id
+
+def binding_state(db,id):
+    setting=db.get(Setting,binding_key(id))
+    return json.loads(setting.value) if setting else {"revision":0,"items":[]}
+
+def store_binding_state(db,id,state):
+    setting=db.get(Setting,binding_key(id))
+    if setting is None:
+        setting=Setting(key=binding_key(id),value="{}");db.add(setting)
+    setting.value=json.dumps(state,ensure_ascii=False)
+
+def binding_view(db,r):
+    from app.models import StoredFile,SourceVersion
+    state=binding_state(db,r.id)
+    ids={x["file_id"] for x in state["items"]}
+    files={f.id:f for f in db.scalars(select(StoredFile).where(StoredFile.id.in_(ids)))} if ids else {}
+    versions=[{"version":v.version,"title":v.snapshot.get("title",r.title),"edition":v.snapshot.get("edition",""),"created_at":v.created_at}
+        for v in db.scalars(select(SourceVersion).where(SourceVersion.source_id==r.id).order_by(SourceVersion.version.desc()).limit(100))]
+    return {"revision":state["revision"],"source_revision":r.revision,"archived":r.archived,"versions":versions,
+        "items":[{**x,"file_name":files[x["file_id"]].name if x["file_id"] in files else x["file_name"],
+                   "file_archived":files[x["file_id"]].archived if x["file_id"] in files else True,
+                   "file_purged":x["file_id"] not in files or files[x["file_id"]].purged_at is not None} for x in state["items"]]}
+
+@router.get("/sources/{id}/version-files")
+def version_files(id:str,db:Session=Depends(get_db)):
+    return binding_view(db,source(db,id))
+
+@router.post("/sources/{id}/version-files",dependencies=[Depends(require_origin)])
+def bind_version_file(id:str,body:SourceFileBinding,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.models import SourceVersion,StoredFile
+    from app.api.workspaces import SUPPORTED
+    admin_lock(db,user);r=source(db,id,True);state=binding_state(db,id)
+    if r.archived or state["revision"]!=body.revision:raise HTTPException(409,"来源已归档或文件关联已变化")
+    if db.get(SourceVersion,(id,body.version)) is None:raise HTTPException(422,"资料版本不存在")
+    f=db.get(StoredFile,body.file_id)
+    if not f or f.generated or f.archived or f.purged_at is not None or f.media_type not in SUPPORTED:
+        raise HTTPException(422,"请选择原始资料库中的有效文件")
+    if any(x["version"]==body.version and x["file_id"]==f.id and x["active"] for x in state["items"]):
+        raise HTTPException(409,"此文件已关联该版本")
+    if len(state["items"])>=1000:raise HTTPException(422,"文件关联历史达到1000条上限")
+    before=state["items"][:]
+    item={"id":str(uuid4()),"version":body.version,"file_id":f.id,"file_name":f.name,
+          "role":body.role,"note":body.note.strip(),"active":True,"created_at":now(),"unbound_at":None}
+    state["items"]=[item,*before];state["revision"]+=1
+    store_binding_state(db,id,state)
+    record(db,id,"source_version_file_bind",{},item,user.id,state["revision"])
+    audit(db,"source_version_file.bind",user.id);db.commit()
+    return binding_view(db,r)
+
+@router.post("/sources/{id}/version-files/{binding_id}/unbind",dependencies=[Depends(require_origin)])
+def unbind_version_file(id:str,binding_id:str,body:SourceFileUnbind,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user);r=source(db,id,True);state=binding_state(db,id)
+    if r.archived or state["revision"]!=body.revision:raise HTTPException(409,"来源已归档或文件关联已变化")
+    item=next((x for x in state["items"] if x["id"]==binding_id and x["active"]),None)
+    if item is None:raise HTTPException(404,"有效关联不存在")
+    before=dict(item);item["active"]=False;item["unbound_at"]=now();state["revision"]+=1
+    store_binding_state(db,id,state)
+    record(db,id,"source_version_file_unbind",before,item,user.id,state["revision"])
+    audit(db,"source_version_file.unbind",user.id);db.commit()
+    return binding_view(db,r)
