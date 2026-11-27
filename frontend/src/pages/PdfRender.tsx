@@ -4,8 +4,10 @@ import type {PrintDoc} from './DocumentPrint'
 import {sanitizeLayout} from './documentLayout'
 import type {Layout} from './documentLayout'
 import PagedPreview from './PagedPreview'
+import {WrapPdf} from './PrintWrap'
+import type {WrapSettings} from './PrintWrap'
 
-type Payload={doc:PrintDoc;layout:Layout;stem:boolean;answerOnly:boolean;source:boolean}
+type Payload={doc:PrintDoc;layout:Layout;stem:boolean;answerOnly:boolean;source:boolean;wrap?:WrapSettings|null}
 // This route has no production data endpoint. The isolated PDF worker supplies
 // a single authorized snapshot through its private, intercepted browser route.
 export default function PdfRender(){
@@ -22,6 +24,7 @@ export default function PdfRender(){
  if(error)return <div data-pdf-state="failed" role="alert">{error}</div>
  if(!payload)return <div data-pdf-state="pending"/>
  const {doc,layout,stem,answerOnly,source}=payload
+ if(payload.wrap)return <WrapPdf layout={layout} wrap={payload.wrap}/>
  return <PagedPreview layout={layout} title={doc.title} subject={doc.subject??''} version={payload}>
   <PrintableDocument doc={doc} layout={layout} stem={stem} answerOnly={answerOnly} source={source}/>
  </PagedPreview>
