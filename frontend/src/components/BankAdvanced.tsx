@@ -5,7 +5,7 @@ const fields:[keyof BankFilters,string,[string,string][]][]=[
  ['origin_type','来源类别',[['','不限'],['exam','试卷'],['textbook','教材'],['handout','讲义'],['other','其他']]],
  ['origin_authority','资料等级',[['','不限'],['official_exam','官方真题'],['mock_practice','模拟练习'],['core_textbook','经典教材'],['internal_handout','自编讲义']]],
  ['origin_exam','来源考试类别',[['','不限'],['数学一','数学一'],['数学二','数学二'],['数学三','数学三']]],
- ['knowledge_mode','知识点匹配',[['any','任意一个'],['all','同时包含全部']]],
+ ['knowledge_mode','知识标签匹配',[['any','任意一个'],['all','同时包含全部']]],
  ['integrity','内容完整性',[['','不限'],['complete','答案解析完整'],['missing_answer','缺少答案'],['missing_solution','缺少解析'],['ambiguous','结构待核对']]],
  ['method_state','解法状态',[['','不限'],['single','各小问单解法'],['multi','存在多解法'],['pending','待评价或评价中'],['review','待人工确认推荐'],['failed','评价失败'],['confirmed','已确认推荐']]],
  ['source_count','来源数量',[['','不限'],['none','无来源'],['single','单来源'],['multiple','多来源']]],

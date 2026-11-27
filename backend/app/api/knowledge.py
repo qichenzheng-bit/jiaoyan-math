@@ -16,7 +16,7 @@ router=APIRouter(prefix="/knowledge",tags=["knowledge"],dependencies=[Depends(cu
 def norm(s): return unicodedata.normalize("NFKC",s).strip().casefold()
 def point(db,id):
     p=db.get(Point,id)
-    if not p: raise HTTPException(404,"知识点不存在")
+    if not p: raise HTTPException(404,"知识标签不存在")
     return p
 def public(db,p):
     return {**{k:getattr(p,k) for k in ("id","code","name","subject","chapter","description","status","replaced_by_id","revision","created_at","updated_at")},"aliases":list(db.scalars(select(Alias.alias).where(Alias.knowledge_id==p.id).order_by(Alias.normalized)))}
@@ -59,7 +59,26 @@ def list_points(q:str=Query("",max_length=180),subject:str="",include_disabled:b
         term=q.strip()
         stmt=stmt.where(or_(Point.name.contains(term,autoescape=True),Point.code.contains(term.upper(),autoescape=True),Point.id.in_(select(Alias.knowledge_id).where(Alias.normalized.contains(norm(term),autoescape=True)))))
     total=db.scalar(select(func.count()).select_from(stmt.subquery()))
-    return {"items":[public(db,p) for p in db.scalars(stmt.order_by(Point.subject,Point.chapter,Point.name,Point.id).offset(offset).limit(limit))],"total":total}
+    rows=list(db.scalars(stmt.order_by(Point.subject,Point.chapter,Point.name,Point.id).offset(offset).limit(limit)))
+    aliases={}
+    if rows:
+        for ident,alias in db.execute(select(Alias.knowledge_id,Alias.alias).where(Alias.knowledge_id.in_([p.id for p in rows])).order_by(Alias.normalized)):
+            aliases.setdefault(ident,[]).append(alias)
+    return {"items":[{**{k:getattr(p,k) for k in ("id","code","name","subject","chapter","description","status","replaced_by_id","revision","created_at","updated_at")},"aliases":aliases.get(p.id,[])} for p in rows],"total":total}
+@router.get("/points/{id}")
+def read_tag(id:str,db:Session=Depends(get_db)):
+    return public(db,point(db,id))
+
+@router.get("/tag-neighbors/{id}")
+def tag_neighbors(id:str,limit:int=Query(50,ge=1,le=200),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+    p=point(db,id)
+    stmt=select(Edge).where(or_(Edge.source_id==id,Edge.target_id==id))
+    total=db.scalar(select(func.count()).select_from(stmt.subquery()))
+    rows=list(db.scalars(stmt.order_by(Edge.relation_type,Edge.source_id,Edge.target_id).offset(offset).limit(limit)))
+    ids={x for e in rows for x in (e.source_id,e.target_id)}
+    points=list(db.scalars(select(Point).where(Point.id.in_(ids)))) if ids else []
+    return {"center":public(db,p),"items":[edge_view(e) for e in rows],"nodes":[{"id":x.id,"name":x.name,"subject":x.subject,"chapter":x.chapter,"status":x.status} for x in points],"total":total}
+
 @router.get("/browse")
 def browse(subject:str=Query(...,min_length=1,max_length=40),chapter:str|None=Query(None,max_length=120),
            parent_id:str|None=Query(None,max_length=36),q:str=Query("",max_length=180),
@@ -76,7 +95,7 @@ def browse(subject:str=Query(...,min_length=1,max_length=40),chapter:str|None=Qu
             Point.id.in_(select(Alias.knowledge_id).where(Alias.normalized.contains(norm(term),autoescape=True)))))
     elif parent_id:
         parent=point(db,parent_id)
-        if parent.subject!=subject or parent.status!="active":raise HTTPException(422,"上级知识点不属于当前有效学科")
+        if parent.subject!=subject or parent.status!="active":raise HTTPException(422,"上级知识标签不属于当前有效学科")
         stmt=stmt.where(Point.id.in_(select(Edge.target_id).where(Edge.source_id==parent_id,Edge.relation_type=="contains")))
     elif chapter is not None:
         stmt=roots.where(Point.chapter==chapter)
@@ -93,8 +112,8 @@ def browse(subject:str=Query(...,min_length=1,max_length=40),chapter:str|None=Qu
 
 def save(db,p,body):
     name=body.name.strip();subject=normalize_subject(body.subject);key=norm(name)
-    if not name or not subject or len(key)>200:raise HTTPException(422,"知识点名称和学科不能为空")
-    if db.scalar(select(Point.id).where(Point.subject==subject,Point.name_key==key,Point.id!=p.id)):raise HTTPException(409,"该学科下已存在同名知识点")
+    if not name or not subject or len(key)>200:raise HTTPException(422,"知识标签名称和学科不能为空")
+    if db.scalar(select(Point.id).where(Point.subject==subject,Point.name_key==key,Point.id!=p.id)):raise HTTPException(409,"该学科下已存在同名知识标签")
     aliases={}
     for a in body.aliases:
         if len(a)>180 or len(norm(a))>180:raise HTTPException(422,"别名过长")
@@ -117,7 +136,7 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
 @router.put("/points/{id}",dependencies=[Depends(require_origin)])
 def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
     admin_lock(db,user);p=point(db,id)
-    if p.revision!=body.revision or p.status=="replaced":raise HTTPException(409,"知识点版本冲突或已替换")
+    if p.revision!=body.revision or p.status=="replaced":raise HTTPException(409,"知识标签版本冲突或已替换")
     save(db,p,body);p.revision+=1;audit(db,"knowledge.update",user.id);db.commit();return public(db,p)
 @router.get("/relations")
 def relations(db:Session=Depends(get_db)):
@@ -126,14 +145,15 @@ def relations(db:Session=Depends(get_db)):
 @router.post("/relations",dependencies=[Depends(require_origin)])
 def add_relation(body:Relation,db:Session=Depends(get_db),user:User=Depends(current_user)):
     admin_lock(db,user);a,b,t=body.source_id,body.target_id,body.relation_type
-    if a==b or point(db,a).status!="active" or point(db,b).status!="active":raise HTTPException(422,"关系两端须为不同的有效知识点")
+    if a==b or point(db,a).status!="active" or point(db,b).status!="active":raise HTTPException(422,"关系两端须为不同的有效知识标签")
+    if t=="contains" and point(db,a).subject!=point(db,b).subject:raise HTTPException(422,"包含关系必须位于同一学科")
     if t=="related":a,b=sorted((a,b))
     old=db.get(Edge,(a,b,t))
     if old:return edge_view(old)
     rows=db.execute(select(Edge.source_id,Edge.target_id,Edge.relation_type)).all()
     if t!="related" and would_cycle(rows,a,b,t):raise HTTPException(409,"该关系会形成循环")
     # A contains edge is the hierarchy parent; one parent per child.
-    if t=="contains" and any(y==b and k=="contains" for _,y,k in rows):raise HTTPException(409,"此知识点已有上级，请先解除")
+    if t=="contains" and any(y==b and k=="contains" for _,y,k in rows):raise HTTPException(409,"此知识标签已有上级，请先解除")
     e=Edge(source_id=a,target_id=b,relation_type=t);db.add(e);audit(db,"knowledge.relation.create",user.id);db.commit();return edge_view(e)
 @router.delete("/relations",dependencies=[Depends(require_origin)])
 def remove_relation(source_id:str,target_id:str,relation_type:Literal["contains","prerequisite","related"],db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -155,11 +175,15 @@ def get_links(id:str,db:Session=Depends(get_db)):return resource_links(db,existi
 def set_links(id:str,body:ResourceLinks,db:Session=Depends(get_db),user:User=Depends(current_user)):
     admin_lock(db,user);r=existing(db,id,True)
     if r.archived or r.kind=="source" or r.revision!=body.revision:raise HTTPException(409,"资源不可编辑或版本冲突")
-    if len({i.knowledge_id for i in body.items})!=len(body.items) or sum(i.role=="core" for i in body.items)>1:raise HTTPException(422,"知识点不能重复，核心知识点最多一个")
+    if len({i.knowledge_id for i in body.items})!=len(body.items) or sum(i.role=="core" for i in body.items)>1:raise HTTPException(422,"知识标签不能重复，核心知识标签最多一个")
     previous={l.knowledge_id for l in db.scalars(select(Link).where(Link.resource_id==id))}
     for i in body.items:
-        if point(db,i.knowledge_id).status!="active" and i.knowledge_id not in previous:raise HTTPException(422,"知识点已停用")
+        if point(db,i.knowledge_id).status!="active" and i.knowledge_id not in previous:raise HTTPException(422,"知识标签已停用")
+    from app.core.bank_history import record
+    before=resource_links(db,r)
     db.execute(delete(Link).where(Link.resource_id==id))
     for i in body.items:db.add(Link(resource_id=id,**i.model_dump()))
-    r.tags=[point(db,i.knowledge_id).name for i in body.items][:20]
-    r.revision+=1;r.updated_at=now();audit(db,"resource.knowledge.update",user.id);db.commit();return resource_links(db,r)
+    # Graph mappings are independent from recorded knowledge names.
+    r.revision+=1;r.updated_at=now();db.flush()
+    after=resource_links(db,r);record(db,r.id,"knowledge_tag_mapping",before,after,user.id,r.revision)
+    audit(db,"resource.knowledge.update",user.id);db.commit();return after

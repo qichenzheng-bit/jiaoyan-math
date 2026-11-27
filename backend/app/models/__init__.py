@@ -89,7 +89,7 @@ class TeachingResource(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"))
+    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"),Index("ix_source_catalog_year","kind","archived","cohort_year","exam_type"),Index("ix_resource_source_reverse","source_id","kind","archived"),Index("ix_resource_chapter_scope","kind","archived","subject","chapter"))
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
@@ -130,6 +130,7 @@ class ResourceSourceLink(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean)
     role_verified: Mapped[bool] = mapped_column(Boolean)
     __table_args__ = (
+        Index("ix_resource_source_link_reverse","source_id","resource_id"),
         CheckConstraint("resource_id <> source_id",name="ck_resource_source_not_self"),
         CheckConstraint("provenance_role IN ('original','reproduced','adapted')",name="ck_resource_source_role"),
         CheckConstraint("(page_start IS NULL OR page_start >= 1) AND (page_end IS NULL OR page_end >= 1) AND (page_start IS NULL OR page_end IS NULL OR page_end >= page_start)",name="ck_resource_source_pages"),
@@ -141,6 +142,21 @@ class SourceVersion(Base):
     version: Mapped[int] = mapped_column(Integer,primary_key=True)
     snapshot: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[int] = mapped_column(BigInteger)
+
+class SourceCatalogDetail(Base):
+    """Independent metadata: never infer institution, completion or subject coverage from file text."""
+    __tablename__ = "source_catalog_details"
+    source_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id",ondelete="RESTRICT"),primary_key=True)
+    category: Mapped[str] = mapped_column(String(60),default="",server_default="")
+    institution: Mapped[str] = mapped_column(String(120),default="",server_default="")
+    subject_code: Mapped[str] = mapped_column(String(40),default="",server_default="")
+    subjects: Mapped[list] = mapped_column(JSON,default=list,server_default="[]")
+    author: Mapped[str] = mapped_column(String(180),default="",server_default="")
+    publisher: Mapped[str] = mapped_column(String(180),default="",server_default="")
+    intake_status: Mapped[str] = mapped_column(String(20),default="unknown",server_default="unknown")
+    revision: Mapped[int] = mapped_column(Integer,default=1,server_default="1")
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (Index("ix_source_catalog_group","category","institution","subject_code"),Index("ix_source_catalog_school","institution"),CheckConstraint("intake_status IN ('unknown','not_started','in_progress','completed','stopped')",name="ck_source_catalog_status"))
 
 class KnowledgePointCatalog(Base):
     __tablename__ = "knowledge_point_catalog"
@@ -156,7 +172,7 @@ class KnowledgePointCatalog(Base):
     revision: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__=(UniqueConstraint("subject","name_key",name="uq_kp_subject_name"),CheckConstraint("status IN ('active','disabled','replaced')",name="ck_kp_status"),CheckConstraint("replaced_by_id IS NULL OR replaced_by_id <> id",name="ck_kp_not_self"))
+    __table_args__=(Index("ix_catalog_tag_subject","subject","status","chapter","name"),UniqueConstraint("subject","name_key",name="uq_kp_subject_name"),CheckConstraint("status IN ('active','disabled','replaced')",name="ck_kp_status"),CheckConstraint("replaced_by_id IS NULL OR replaced_by_id <> id",name="ck_kp_not_self"))
 
 class ResourceKnowledgeLink(Base):
     __tablename__ = "resource_knowledge_links"

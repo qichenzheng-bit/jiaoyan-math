@@ -1,4 +1,5 @@
 import json
+import hashlib
 from typing import Literal
 from uuid import uuid4
 from difflib import SequenceMatcher
@@ -15,7 +16,7 @@ from app.core.solution_methods import normalize_subject, MATH_SUBJECTS, parse_me
 from app.core.content_normalization import question_fingerprint, unit_fingerprint, canonical_text, question_stem_key
 from app.core import question_matching as matching
 from app.core import method_recommendation as recommendation
-from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument, KnowledgeRelation, VideoProject, Setting
+from app.models import TeachingResource, User, ResourceSourceLink, SourceVersion, StoredFile, FileReference, DocumentResourceReference, IntakeJob, KnowledgePointCatalog, KnowledgeAlias, ResourceKnowledgeLink, TeachingDocument, KnowledgeRelation, VideoProject, Setting, SourceCatalogDetail
 from app.services import storage
 from app.core.bank_history import record as record_bank_history
 from app.services.inline_images import validate_images,protect_resource_images
@@ -90,18 +91,19 @@ def view(row,*,knowledge_lookup=None):
     db=object_session(row) if hasattr(row,"_sa_instance_state") else None
     if db is not None and row.kind in ("question","knowledge"):
         pts=knowledge_lookup.get(row.id,[]) if knowledge_lookup is not None else list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(ResourceKnowledgeLink.resource_id==row.id).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)))
-        data["knowledge_points"]=[{"id":p.id,"name":p.name} for p in pts]
-        if pts:data["tags"]=[p.name for p in pts][:20]
+        # Keep the legacy graph-link field for existing clients; recorded names are independent.
+        data["knowledge_tags"]=[{"id":p.id,"name":p.name} for p in pts]
+        data["knowledge_points"]=data["knowledge_tags"]
     return data
 
 def sync_knowledge_names(db,row,names):
-    # The names are an input convenience only; formal resource identity is the catalog ID.
+    # Initial intake can propose graph mappings; never delete an explicit graph mapping
+    # or replace recorded knowledge names when editing the resource.
     if row.kind not in ("question","knowledge") or not row.subject:return
     from app.api.documents import manual_knowledge
     labels,ids=manual_knowledge(db,row.subject,row.chapter,names)
-    current={l.knowledge_id:l for l in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==row.id))}
-    for ident in set(current)-set(ids):db.delete(current[ident])
-    for ident in set(ids)-set(current):db.add(ResourceKnowledgeLink(resource_id=row.id,knowledge_id=ident,role="related"))
+    current={l.knowledge_id for l in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==row.id))}
+    for ident in set(ids)-current:db.add(ResourceKnowledgeLink(resource_id=row.id,knowledge_id=ident,role="related"))
     row.tags=labels
 def existing(db,ident,lock=False):
     stmt=select(TeachingResource).where(TeachingResource.id==ident)
@@ -164,7 +166,12 @@ def snapshot(db,row):
         db.add(SourceVersion(source_id=row.id,version=row.revision,snapshot=view(row),created_at=now()))
 
 @router.get("/subjects")
-def subjects(): return list(MATH_SUBJECTS)
+def subjects(db:Session=Depends(get_db)):
+    known=set(MATH_SUBJECTS)
+    known.update(db.scalars(select(KnowledgePointCatalog.subject).where(KnowledgePointCatalog.subject!="").distinct()))
+    known.update(db.scalars(select(TeachingResource.subject).where(TeachingResource.subject!="").distinct()))
+    known.update(x["subject"] for x in directory_state(db)["items"])
+    return list(MATH_SUBJECTS)+sorted(known-set(MATH_SUBJECTS))
 
 def question_list_summaries(db,rows,data):
     ids=[r.id for r in rows if r.kind=="question"]
@@ -184,13 +191,21 @@ def question_list_summaries(db,rows,data):
         item["bank_summary"]={"source_count":len(sources[r.id]),"source_title":titles.get(r.source_id) or next((titles[s] for s in sorted(sources[r.id]) if s in titles),""),"method_count":count,"has_answer":bool(r.answer.strip()),"has_solution":bool(r.solution.strip())}
 
 @router.get("")
-def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),bank_summary:bool=False,origin_exam:str=Query("",max_length=80),origin_authority:str=Query("",max_length=24),origin_edition:str=Query("",max_length=60),year_from:int|None=Query(None,ge=1900,le=2200),year_to:int|None=Query(None,ge=1900,le=2200),original_number:str=Query("",max_length=40),original_page:int|None=Query(None,ge=1),knowledge_mode:Literal["any","all"]="any",method_name:str=Query("",max_length=60),integrity:Literal["complete","missing_answer","missing_solution","ambiguous"]|None=None,method_state:Literal["single","multi","pending","review","failed","confirmed"]|None=None,source_count:Literal["none","single","multiple"]|None=None,sort:Literal["updated","created","year","number","difficulty","sources"]="updated",selection_only:bool=False,compact:bool=False,db:Session=Depends(get_db)):
+def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),bank_summary:bool=False,origin_exam:str=Query("",max_length=80),origin_authority:str=Query("",max_length=24),origin_edition:str=Query("",max_length=60),year_from:int|None=Query(None,ge=1900,le=2200),year_to:int|None=Query(None,ge=1900,le=2200),original_number:str=Query("",max_length=40),original_page:int|None=Query(None,ge=1),knowledge_mode:Literal["any","all"]="any",method_name:str=Query("",max_length=60),integrity:Literal["complete","missing_answer","missing_solution","ambiguous"]|None=None,method_state:Literal["single","multi","pending","review","failed","confirmed"]|None=None,source_count:Literal["none","single","multiple"]|None=None,sort:Literal["updated","created","year","number","difficulty","sources"]="updated",selection_only:bool=False,compact:bool=False,catalog_institution:str=Query('',max_length=120),catalog_category:str=Query('',max_length=60),catalog_code:str=Query('',max_length=40),catalog_year:str=Query('',max_length=12),chapter_tree:bool=False,db:Session=Depends(get_db)):
     filters=[TeachingResource.archived==archived]
     if kind: filters.append(TeachingResource.kind==kind)
-    if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
+    if subject:
+        normal=normalize_subject(subject)
+        filters.append(or_(TeachingResource.subject==normal,TeachingResource.id.in_(select(SourceCatalogDetail.source_id).where(cast(SourceCatalogDetail.subjects,JSONB).contains([normal])))) if kind=="source" else TeachingResource.subject==normal)
+    if kind=="source":
+        for field,val in (("institution",catalog_institution),("category",catalog_category),("subject_code",catalog_code)):
+            if val:filters.append(TeachingResource.id.in_(select(SourceCatalogDetail.source_id).where(getattr(SourceCatalogDetail,field).contains(val.strip(),autoescape=True))))
+        if catalog_year:filters.append(TeachingResource.cohort_year==catalog_year.strip())
     for key,value in (("chapter",chapter),("question_type",question_type),("unit_type",unit_type),("exam_type",exam_type),("source_type",source_type),("authority_tier",authority_tier)):
         if key=="question_type" and value=="综合题":
             filters.append(TeachingResource.question_type.in_(("综合题","解答题","计算题","证明题")))
+        elif key=="chapter" and value and chapter_tree and kind=="knowledge":
+            filters.append(or_(TeachingResource.chapter==value,TeachingResource.chapter.startswith(value+"/",autoescape=True)))
         elif value: filters.append(getattr(TeachingResource,key)==value)
     if difficulty: filters.append(TeachingResource.difficulty==difficulty)
     if year_from and year_to and year_from>year_to:raise HTTPException(422,"起始年份不能大于结束年份")
@@ -291,7 +306,8 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
         filters.append(used if usage_state=="used" else ~used)
     if q.strip():
         term=q.strip()
-        filters.append(or_(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
+        recorded=cast(TeachingResource.tags,JSONB).contains([term])
+        filters.append(or_(recorded,TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
     total=db.scalar(select(func.count()).select_from(TeachingResource).where(*filters))
     if selection_only:
         if kind!="question" or total>2000:raise HTTPException(422,"一次最多选择2000道题，请缩小筛选范围")
@@ -342,7 +358,231 @@ def create(body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)
 def chapters(kind:Literal["question","knowledge"]="knowledge",subject:str="",db:Session=Depends(get_db)):
     stmt=select(TeachingResource.subject,TeachingResource.chapter,func.count().label("count")).where(TeachingResource.kind==kind,TeachingResource.archived==False)
     if subject:stmt=stmt.where(TeachingResource.subject==normalize_subject(subject))
-    return [{"subject":r.subject,"chapter":r.chapter,"count":r.count} for r in db.execute(stmt.group_by(TeachingResource.subject,TeachingResource.chapter).order_by(TeachingResource.subject,TeachingResource.chapter))]
+    rows={(r.subject,r.chapter):r.count for r in db.execute(stmt.group_by(TeachingResource.subject,TeachingResource.chapter))}
+    if kind=="knowledge":
+        for item in directory_state(db)["items"]:
+            if not subject or item["subject"]==normalize_subject(subject):
+                rows.setdefault((item["subject"],item["path"]),0)
+    return [{"subject":s,"chapter":p,"count":count} for (s,p),count in sorted(rows.items())]
+
+DIRECTORY_KEY="knowledge.library.directories.v1"
+
+def directory_state(db):
+    row=db.get(Setting,DIRECTORY_KEY)
+    return json.loads(row.value) if row else {"revision":0,"items":[]}
+
+def store_directories(db,state):
+    row=db.get(Setting,DIRECTORY_KEY)
+    if row is None:
+        row=Setting(key=DIRECTORY_KEY,value="{}");db.add(row)
+    row.value=json.dumps(state,ensure_ascii=False)
+
+def directory_path(raw):
+    parts=[p.strip() for p in raw.split("/")]
+    path="/".join(parts)
+    if not path or len(path)>120 or len(parts)>12 or any(not p or p in (".","..") for p in parts):
+        raise HTTPException(422,"目录名称无效，最多12级、120字")
+    return path
+
+def within(path,root):
+    return path==root or path.startswith(root+"/")
+
+class DirectoryCreate(BaseModel):
+    subject:str=Field(min_length=1,max_length=40)
+    path:str=Field(min_length=1,max_length=120)
+    revision:int=Field(ge=0)
+
+class DirectoryMove(BaseModel):
+    subject:str=Field(min_length=1,max_length=40)
+    path:str=Field(min_length=1,max_length=120)
+    target:str=Field(min_length=1,max_length=120)
+    preview_token:str|None=Field(default=None,max_length=64)
+
+@router.get("/knowledge-directories")
+def get_directories(db:Session=Depends(get_db)):
+    return directory_state(db)
+
+def directory_exists(db,state,subject,path):
+    return any(x["subject"]==subject and within(x["path"],path) for x in state["items"]) or bool(db.scalar(
+        select(TeachingResource.id).where(TeachingResource.kind=="knowledge",TeachingResource.subject==subject,
+            or_(TeachingResource.chapter==path,TeachingResource.chapter.startswith(path+"/",autoescape=True))).limit(1)))
+
+@router.post("/knowledge-directories",dependencies=[Depends(require_origin)])
+def create_directory(body:DirectoryCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    state=directory_state(db);subject=normalize_subject(body.subject);path=directory_path(body.path)
+    if not subject:raise HTTPException(422,"请输入学科")
+    if state["revision"]!=body.revision:raise HTTPException(409,"目录已变化，请重新读取")
+    if directory_exists(db,state,subject,path):raise HTTPException(409,"目录已存在")
+    if len(state["items"])>=1000:raise HTTPException(422,"独立目录最多1000个")
+    state["items"].append({"id":str(uuid4()),"subject":subject,"path":path})
+    state["revision"]+=1
+    store_directories(db,state);audit(db,"knowledge_directory.create",user.id);db.commit()
+    return state
+
+def directory_move_plan(db,body,lock=False):
+    subject=normalize_subject(body.subject);path=directory_path(body.path);target=directory_path(body.target)
+    if not subject or within(target,path) or within(path,target):
+        raise HTTPException(422,"目标不能与原目录相同，或位于原目录上下级")
+    state=directory_state(db)
+    if directory_exists(db,state,subject,target):raise HTTPException(409,"目标目录已存在，请先选择其他名称")
+    stmt=select(TeachingResource).where(TeachingResource.kind=="knowledge",TeachingResource.subject==subject,
+        or_(TeachingResource.chapter==path,TeachingResource.chapter.startswith(path+"/",autoescape=True))).order_by(TeachingResource.id).limit(2001)
+    if lock:stmt=stmt.with_for_update()
+    rows=list(db.scalars(stmt))
+    if len(rows)>2000:raise HTTPException(422,"本次迁移影响超过2000个知识单元，请分子目录操作")
+    changes=[{"id":r.id,"revision":r.revision,"before":r.chapter,"after":target+r.chapter[len(path):],"archived":r.archived} for r in rows]
+    items=[{**x,"path":target+x["path"][len(path):]} if x["subject"]==subject and within(x["path"],path) else x for x in state["items"]]
+    changed_dirs=sum(a!=b for a,b in zip(state["items"],items))
+    if not rows and not changed_dirs:raise HTTPException(404,"原目录不存在")
+    if any(len(x["after"])>120 for x in changes) or any(len(x["path"])>120 for x in items):
+        raise HTTPException(422,"迁移后目录路径超过120字")
+    digest=hashlib.sha256(json.dumps([subject,path,target,state,changes],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+    return state,items,rows,changes,changed_dirs,digest
+
+@router.post("/knowledge-directories/move-preview",dependencies=[Depends(require_origin)])
+def preview_directory_move(body:DirectoryMove,db:Session=Depends(get_db)):
+    _,_,rows,changes,n,digest=directory_move_plan(db,body)
+    return {"total":len(rows),"archived":sum(r.archived for r in rows),"directories":n,"sample":changes[:10],"preview_token":digest}
+
+@router.post("/knowledge-directories/move",dependencies=[Depends(require_origin)])
+def move_directory(body:DirectoryMove,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    state,items,rows,changes,n,digest=directory_move_plan(db,body,True)
+    if digest!=body.preview_token:raise HTTPException(409,"迁移预览已失效，请重新确认")
+    for row,change in zip(rows,changes):
+        row.chapter=change["after"];row.revision+=1;row.updated_at=now()
+        record_bank_history(db,row.id,"knowledge_directory_move",{"chapter":change["before"]},{"chapter":change["after"]},user.id,row.revision)
+    store_directories(db,{"revision":state["revision"]+1,"items":items})
+    audit(db,"knowledge_directory.move",user.id);db.commit()
+    return {"updated":len(rows),"directories":n}
+
+class RecordedKnowledgeMerge(BaseModel):
+    subject:str=Field(min_length=1,max_length=40)
+    names:list[str]=Field(min_length=1,max_length=20)
+    target:str=Field(min_length=1,max_length=60)
+    preview_token:str|None=Field(default=None,max_length=64)
+
+@router.get("/recorded-knowledge")
+def recorded_knowledge(subject:str=Query(...,min_length=1,max_length=40),q:str=Query("",max_length=60),limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+    # Only explicitly recorded knowledge, never graph-node names.
+    name=func.jsonb_array_elements_text(cast(TeachingResource.tags,JSONB)).table_valued("value").render_derived().alias("n")
+    stmt=select(name.c.value.label("name"),func.count(func.distinct(TeachingResource.id)).label("count")).select_from(TeachingResource).join(name,literal(True)).where(
+        TeachingResource.kind.in_(("question","knowledge")),TeachingResource.archived==False,
+        TeachingResource.subject==normalize_subject(subject),name.c.value!="")
+    if q.strip():stmt=stmt.where(name.c.value.contains(q.strip(),autoescape=True))
+    grouped=stmt.group_by(name.c.value).subquery()
+    total=db.scalar(select(func.count()).select_from(grouped))
+    rows=db.execute(select(grouped).order_by(grouped.c.count.desc(),grouped.c.name).offset(offset).limit(limit))
+    return {"items":[dict(r._mapping) for r in rows],"total":total}
+
+def recorded_merge_plan(db,body,lock=False):
+    subject=normalize_subject(body.subject)
+    target=body.target.strip()
+    names=sorted(set(n.strip() for n in body.names if n.strip() and n.strip()!=target))
+    if not subject or not names or not target or any(len(n)>60 for n in names):
+        raise HTTPException(422,"请选择同学科的知识点并填写有效目标名称")
+    stmt=select(TeachingResource).where(TeachingResource.kind.in_(("question","knowledge")),
+        TeachingResource.archived==False,TeachingResource.subject==subject,
+        or_(*(cast(TeachingResource.tags,JSONB).contains([n]) for n in names))).order_by(TeachingResource.id).limit(2001)
+    if lock:stmt=stmt.with_for_update()
+    rows=list(db.scalars(stmt))
+    if len(rows)>2000:raise HTTPException(422,"本次影响超过2000条资源，请缩小合并范围")
+    if not rows:raise HTTPException(409,"没有匹配的现有资源")
+    changes=[]
+    for row in rows:
+        after=list(dict.fromkeys(target if n in names else n for n in row.tags))
+        changes.append({"id":row.id,"revision":row.revision,"kind":row.kind,"before":row.tags,"after":after})
+    digest=hashlib.sha256(json.dumps([subject,names,target,changes],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    return rows,changes,digest
+
+@router.post("/recorded-knowledge/merge-preview",dependencies=[Depends(require_origin)])
+def recorded_merge_preview(body:RecordedKnowledgeMerge,db:Session=Depends(get_db)):
+    _,changes,digest=recorded_merge_plan(db,body)
+    return {"total":len(changes),"questions":sum(c["kind"]=="question" for c in changes),
+            "knowledge":sum(c["kind"]=="knowledge" for c in changes),"preview_token":digest,"sample":changes[:10]}
+
+@router.post("/recorded-knowledge/merge",dependencies=[Depends(require_origin)])
+def recorded_merge(body:RecordedKnowledgeMerge,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user)
+    rows,changes,digest=recorded_merge_plan(db,body,True)
+    if body.preview_token!=digest:raise HTTPException(409,"预览已失效，请重新预览并确认")
+    for row,change in zip(rows,changes):
+        old_rec=read_recommendation(db,row) if row.kind=="question" else None
+        row.tags=change["after"]
+        row.revision+=1;row.updated_at=now()
+        if old_rec:store_recommendation(db,row,{**old_rec,"revision":row.revision})
+        record_bank_history(db,row.id,"recorded_knowledge_merge",{"tags":change["before"]},{"tags":change["after"]},user.id,row.revision)
+    audit(db,"resource.recorded_knowledge.merge",user.id);db.commit()
+    return {"updated":len(rows)}
+
+class TeachingDetailDraft(BaseModel):
+    revision:int=Field(ge=1)
+    conditions:str=Field(default="",max_length=16000)
+    applications:str=Field(default="",max_length=16000)
+    methods:str=Field(default="",max_length=16000)
+    mistakes:str=Field(default="",max_length=16000)
+    example_ids:list[str]=Field(default_factory=list,max_length=100)
+
+DETAIL_FIELDS=("conditions","applications","methods","mistakes")
+def teaching_unit(db,id,lock=False):
+    row=existing(db,id,lock)
+    if row.kind!="knowledge":raise HTTPException(422,"请选择知识单元")
+    return row
+
+def unit_detail_key(id):
+    return "knowledge.unit.detail."+id
+
+def unit_detail_state(db,id):
+    row=db.get(Setting,unit_detail_key(id))
+    return json.loads(row.value) if row else {**{k:"" for k in DETAIL_FIELDS},"example_ids":[]}
+
+def unit_detail_view(db,row):
+    state=unit_detail_state(db,row.id)
+    ids=state["example_ids"]
+    questions={q.id:q for q in db.scalars(select(TeachingResource).where(TeachingResource.id.in_(ids),TeachingResource.kind=="question"))} if ids else {}
+    return {**state,"revision":row.revision,"archived":row.archived,"examples":[
+        {"id":id,"code":questions[id].code,"title":questions[id].title,"subject":questions[id].subject,"archived":questions[id].archived}
+        if id in questions else {"id":id,"title":"题目不可用","archived":True} for id in ids]}
+
+@router.get("/{id}/teaching-detail")
+def teaching_detail(id:str,db:Session=Depends(get_db)):
+    return unit_detail_view(db,teaching_unit(db,id))
+
+@router.put("/{id}/teaching-detail",dependencies=[Depends(require_origin)])
+def update_teaching_detail(id:str,body:TeachingDetailDraft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    admin_lock(db,user);row=teaching_unit(db,id,True)
+    if row.archived or row.revision!=body.revision:raise HTTPException(409,"知识单元已归档或版本变化，请重新读取")
+    old=unit_detail_state(db,id)
+    ids=list(dict.fromkeys(body.example_ids))
+    if len(ids)!=len(body.example_ids) or any(len(i)>36 for i in ids):raise HTTPException(422,"例题编号重复或无效")
+    added=set(ids)-set(old["example_ids"])
+    if added:
+        found=set(db.scalars(select(TeachingResource.id).where(TeachingResource.id.in_(added),TeachingResource.kind=="question",TeachingResource.archived==False)))
+        if found!=added:raise HTTPException(422,"新增例题必须为有效的未归档题目")
+    state={**{k:getattr(body,k) for k in DETAIL_FIELDS},"example_ids":ids}
+    if state==old:return unit_detail_view(db,row)
+    setting=db.get(Setting,unit_detail_key(id))
+    if setting is None:
+        setting=Setting(key=unit_detail_key(id),value="{}");db.add(setting)
+    setting.value=json.dumps(state,ensure_ascii=False)
+    row.revision+=1;row.updated_at=now()
+    record_bank_history(db,id,"knowledge_unit_detail",old,state,user.id,row.revision)
+    audit(db,"knowledge_unit.detail.update",user.id);db.commit()
+    return unit_detail_view(db,row)
+
+@router.get("/{id}/related-questions")
+def unit_related_questions(id:str,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),db:Session=Depends(get_db)):
+    row=teaching_unit(db,id)
+    names=list(dict.fromkeys(n.strip() for n in [*row.tags,row.title] if n.strip()))
+    # Exact recorded names in the same subject; not graph tags or an AI guess.
+    if not names or not row.subject:return {"items":[],"total":0,"limit":limit,"offset":offset,"basis":"recorded_names"}
+    stmt=select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.archived==False,
+        TeachingResource.subject==row.subject,or_(*(cast(TeachingResource.tags,JSONB).contains([n]) for n in names)))
+    total=db.scalar(select(func.count()).select_from(stmt.subquery()))
+    rows=db.scalars(stmt.order_by(TeachingResource.updated_at.desc(),TeachingResource.id).offset(offset).limit(limit))
+    return {"items":[{"id":q.id,"code":q.code,"title":q.title,"subject":q.subject,"question_type":q.question_type,
+        "matched_names":[n for n in names if n in q.tags]} for q in rows],"total":total,"limit":limit,"offset":offset,"basis":"recorded_names"}
 
 @router.get("/{id}/source-overview")
 def source_overview(id:str,db:Session=Depends(get_db)):
@@ -351,7 +591,10 @@ def source_overview(id:str,db:Session=Depends(get_db)):
     linked=or_(TeachingResource.source_id==id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==id)))
     counts=dict(db.execute(select(TeachingResource.kind,func.count()).where(linked,TeachingResource.archived==False,TeachingResource.kind.in_(("question","knowledge"))).group_by(TeachingResource.kind)).all())
     batches=list(db.scalars(select(TeachingDocument).where(TeachingDocument.source_id==id,TeachingDocument.kind=="intake",TeachingDocument.archived==False).order_by(TeachingDocument.created_at,TeachingDocument.id)))
-    return {"questions":counts.get("question",0),"knowledge":counts.get("knowledge",0),"batches":[{"id":d.id,"title":d.title,"revision":d.revision,"pending":any(b.get("kind") in ("question","knowledge") for b in d.blocks)} for d in batches]}
+    tag_rows=select(ResourceKnowledgeLink.knowledge_id).join(TeachingResource,TeachingResource.id==ResourceKnowledgeLink.resource_id).where(linked,TeachingResource.archived==False,TeachingResource.kind.in_(("question","knowledge")))
+    tag_count=db.scalar(select(func.count()).select_from(tag_rows.distinct().subquery()))
+    question_tag_count=db.scalar(select(func.count()).select_from(tag_rows.where(TeachingResource.kind=="question").distinct().subquery()))
+    return {"questions":counts.get("question",0),"knowledge":counts.get("knowledge",0),"knowledge_tags":tag_count,"question_knowledge_tags":question_tag_count,"batches":[{"id":d.id,"title":d.title,"revision":d.revision,"pending":any(b.get("kind") in ("question","knowledge") for b in d.blocks)} for d in batches]}
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)): return view(existing(db,id))
@@ -370,7 +613,7 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if body.difficulty is None:d.pop("difficulty",None)
     for k,v in d.items(): setattr(row,k,v)
     if row.source_id!=primary: change_primary(db,row,primary)
-    if row.kind in ("question","knowledge") and (body.tags!=before["tags"] or row.subject!=before["subject"]):sync_knowledge_names(db,row,row.tags)
+    # Recorded knowledge edits are independent from existing graph mappings.
     row.revision+=1;row.updated_at=now()
     if row.kind=="question" and (row.solution!=before["solution"] or row.answer!=before["answer"] or row.content!=before["content"]):
         enqueue_recommendation(db,row,user.id)

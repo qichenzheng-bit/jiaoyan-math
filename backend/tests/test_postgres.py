@@ -37,6 +37,23 @@ def test_migration_and_login(tmp_path, monkeypatch):
         setup=client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"卷头说明"})
         assert setup.status_code==200,setup.text
         created_doc=setup.json()
+        catalog_url="/api/source-catalog/sources/"+created_doc["source_id"]
+        old_catalog=client.get(catalog_url).json()
+        assert old_catalog["revision"]==0 and old_catalog["intake_status"]=="unknown"
+        metadata={"revision":0,"category":"院校真题","institution":"测试院校","subject_code":"601","subjects":["高数","线性代数"],"intake_status":"in_progress"}
+        saved=client.put(catalog_url,headers=origin,json=metadata)
+        assert saved.status_code==200,saved.text
+        assert saved.json()["subjects"]==["高等数学","线性代数"]
+        assert client.put(catalog_url,headers=origin,json=metadata).status_code==409
+        found=client.get("/api/source-catalog/sources",params={"institutions":"测试院校","years":"2026"}).json()
+        assert found["total"]==1 and found["items"][0]["source_id"]==created_doc["source_id"]
+        assert len(client.get(catalog_url+"/history").json()["items"])==1
+        actual=client.get("/api/resources/"+created_doc["source_id"]+"/source-overview").json()
+        assert actual["questions"]==actual["knowledge"]==actual["knowledge_tags"]==0
+        assert "total_questions" not in actual
+        no_progress=client.get(catalog_url+"/file-progress")
+        assert no_progress.status_code==200,no_progress.text
+        assert no_progress.json()=={"items":[],"original_question_total":None}
         assert created_doc["blocks"][0]["content"]=="卷头说明"
         assert created_doc["subject"]==""
         assert client.get("/api/resources/"+created_doc["source_id"]).json()["subject"]==""
@@ -133,6 +150,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         link=client.get("/api/knowledge/resources/"+rid).json()
         assert client.put("/api/knowledge/resources/"+rid,headers=origin,json={"revision":link["revision"],"items":[{"knowledge_id":k["id"],"role":"core"}]}).status_code==200
         assert client.get("/api/knowledge/points/"+k["id"]+"/resources").json()[0]["id"]==rid
+        independent=client.get("/api/resources/"+rid).json()
+        assert independent["tags"]==[] and independent["knowledge_tags"][0]["id"]==k["id"]
         doc=client.post("/api/documents",headers=origin,json={"title":"录入测试","subject":"高数","source_id":created_doc["source_id"],"blocks":[{"uid":"a","kind":"question","title":"新题","content":"求导数","answer":"1","question_type":"综合题"}]})
         assert doc.status_code==200,doc.text
         d=doc.json()
@@ -385,6 +404,73 @@ def test_migration_and_login(tmp_path, monkeypatch):
         relation=client.get("/api/resources/"+seed["id"]+"/sources").json()
         linked=client.put("/api/resources/"+seed["id"]+"/sources",headers=origin,json={"revision":relation["revision"],"items":[{"source_id":source_a["id"],"is_primary":True,"original_question_number":"10"},{"source_id":source_b["id"],"is_primary":False,"original_question_number":"2"}]})
         assert linked.status_code==200,linked.text
+        stats_path="/api/source-catalog/statistics"
+        assert client.post(stats_path,headers=origin,json={}).status_code==422
+        aggregate=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"],source_a["id"]]})
+        assert aggregate.status_code==200,aggregate.text
+        data=aggregate.json()
+        assert data["source_count"]==2 and data["question_count"]==1 and data["source_question_count"]==2
+        assert data["knowledge_count"]==2 and data["questions_with_knowledge"]==1
+        assert data["original_question_total"] is None and data["confirmed_complete_sources"]==0
+        assert {r["name"] for r in data["items"]}=={"专项甲","专项乙"}
+        assert all(r["question_count"]==1 and r["source_question_count"]==2 for r in data["items"])
+        single=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"years":["2018"]}).json()
+        assert single["source_count"]==1 and single["source_question_count"]==1
+        assert len(client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"limit":1,"offset":1}).json()["items"])==1
+        drill=client.post(stats_path+"/questions",headers=origin,json={"source_ids":[source_a["id"],source_b["id"]],"knowledge_name":"专项甲","knowledge_subject":"高等数学"})
+        assert drill.status_code==200,drill.text
+        assert drill.json()["total"]==1 and drill.json()["items"][0]["id"]==seed["id"]
+        assert drill.json()["items"][0]["source_count"]==2
+        wrong=client.post(stats_path+"/questions",headers=origin,json={"source_ids":[source_a["id"]],"knowledge_name":"专项甲","knowledge_subject":"线性代数"})
+        assert wrong.status_code==200 and wrong.json()["total"]==0
+        report_payload={"source_ids":[source_a["id"],source_b["id"]],"dimension":"year","knowledge_name":"专项甲","knowledge_subject":"高等数学"}
+        report=client.post(stats_path+"/report",headers=origin,json=report_payload)
+        assert report.status_code==200,report.text
+        assert report.json()["total"]==2
+        assert [r["group_name"] for r in report.json()["items"]]==["2018","2025"]
+        assert all(r["topic_question_count"]==1 and r["question_count"]==1 and r["source_count"]==1 for r in report.json()["items"])
+        exported=client.post(stats_path+"/report/export",headers=origin,json=report_payload)
+        assert exported.status_code==200 and "text/csv" in exported.headers["content-type"]
+        assert "2018" in exported.text and "2025" in exported.text and "原件总题数未知" in exported.text
+        distribution_scope={"source_ids":[source_a["id"],source_b["id"]]}
+        for dimension,expected in (("question_type","综合题"),("method","泰勒展开"),("cooccurrence","专项乙")):
+            payload={**distribution_scope,"dimension":dimension,"knowledge_name":"专项甲","knowledge_subject":"高等数学"}
+            dist=client.post(stats_path+"/distribution",headers=origin,json=payload)
+            assert dist.status_code==200,dist.text
+            assert dist.json()["question_count"]==1
+            assert any(r["name"]==expected and r["question_count"]==1 and r["source_question_count"]==2 for r in dist.json()["items"])
+        assert client.post(stats_path+"/distribution",headers=origin,json={**distribution_scope,"dimension":"cooccurrence"}).status_code==422
+        scope_payload={"name":"组合统计测试","scope":{"source_ids":[source_a["id"],source_b["id"]]}}
+        stored=client.post(stats_path+"/scopes",headers=origin,json=scope_payload)
+        assert stored.status_code==200,stored.text
+        assert client.get(stats_path+"/scopes").json()["items"][0]["id"]==stored.json()["id"]
+        assert client.post(stats_path+"/scopes",headers=origin,json=scope_payload).status_code==409
+        assert client.delete(stats_path+"/scopes/"+stored.json()["id"],headers=origin).json()["items"]==[]
+        # Explicit graph remapping must not modify the recorded names or statistical result.
+        old_mapping=client.get("/api/knowledge/resources/"+seed["id"]).json()
+        remapped=client.put("/api/knowledge/resources/"+seed["id"],headers=origin,json={"revision":old_mapping["revision"],"items":[{"knowledge_id":k["id"],"role":"related"}]})
+        assert remapped.status_code==200,remapped.text
+        independent_seed=client.get("/api/resources/"+seed["id"]).json()
+        assert set(independent_seed["tags"])=={"专项甲","专项乙"}
+        assert [r["id"] for r in independent_seed["knowledge_tags"]]==[k["id"]]
+        stat_after=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]]}).json()
+        assert {r["name"] for r in stat_after["items"]}=={"专项甲","专项乙"}
+        restore_mapping=client.put("/api/knowledge/resources/"+seed["id"],headers=origin,json={"revision":remapped.json()["revision"],"items":old_mapping["items"]})
+        assert restore_mapping.status_code==200,restore_mapping.text
+        recorded_url="/api/resources/recorded-knowledge"
+        catalog_names=client.get(recorded_url,params={"subject":"高等数学","q":"专项"}).json()
+        assert {r["name"] for r in catalog_names["items"]}>={"专项甲","专项乙"}
+        merge_body={"subject":"高等数学","names":["专项甲"],"target":"专项甲合并测试"}
+        preview_merge=client.post(recorded_url+"/merge-preview",headers=origin,json=merge_body)
+        assert preview_merge.status_code==200,preview_merge.text
+        assert client.post(recorded_url+"/merge",headers=origin,json=merge_body).status_code==409
+        applied_merge=client.post(recorded_url+"/merge",headers=origin,json={**merge_body,"preview_token":preview_merge.json()["preview_token"]})
+        assert applied_merge.status_code==200,applied_merge.text
+        assert "专项甲合并测试" in client.get("/api/resources/"+seed["id"]).json()["tags"]
+        assert client.get("/api/knowledge/resources/"+seed["id"]).json()["items"]==old_mapping["items"]
+        reverse_body={"subject":"高等数学","names":["专项甲合并测试"],"target":"专项甲"}
+        reverse_preview=client.post(recorded_url+"/merge-preview",headers=origin,json=reverse_body).json()
+        assert client.post(recorded_url+"/merge",headers=origin,json={**reverse_body,"preview_token":reverse_preview["preview_token"]}).status_code==200
         def seed_search(**kw):
             response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":seed["code"],**kw})
             assert response.status_code==200,response.text
@@ -436,7 +522,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})
         assert related.status_code==200,related.text
         assert related.json()["blocking"] is False
-        assert any(x["resource"]["id"]==related_seed["id"] and "共同方法名称" in x["reason"] and "共同知识点" in x["reason"] for x in related.json()["items"])
+        assert any(x["resource"]["id"]==related_seed["id"] and "共同方法名称" in x["reason"] and "共同知识标签" in x["reason"] for x in related.json()["items"])
         from app.api import qoder as chat_qoder
         worker_calls=[]
         def fake_worker(method,path,body=None):
@@ -1083,6 +1169,130 @@ def test_migration_and_login(tmp_path, monkeypatch):
         bound=client.post("/api/documents/"+unbound["id"]+"/intake-source",headers=origin,json={"revision":unbound["revision"],"source_id":created_doc["source_id"]})
         assert bound.status_code==200,bound.text
         assert bound.json()["source_id"]==created_doc["source_id"]
+
+        # Explicitly linked work batch: report only real file units and retain unknown original question total.
+        from app.models import WorkSession,WorkMaterial,WorkBatch,IntakeJob
+        from uuid import uuid4
+        fixture_file=client.post("/api/files?name=source-progress-fixture.txt",headers=origin,content=b"isolated source progress fixture").json()
+        fixture_source=client.post("/api/resources",headers=origin,json={"kind":"source","title":"原件进度专项","source_type":"exam","content":"独立测试"}).json()
+        ws,mat,batch_id,job_id=(str(uuid4()) for _ in range(4))
+        with session_factory()() as db:
+            db.add(WorkSession(id=ws,title="原件进度测试",agent_history=[],created_at=now(),updated_at=now()))
+            db.flush()
+            db.add(WorkMaterial(id=mat,session_id=ws,file_id=fixture_file["id"],total_units=1,created_at=now()))
+            db.add(IntakeJob(id=job_id,title="已识别测试",subject="",input_text="fixture",provenance={"work_batch_id":batch_id},source_id=fixture_source["id"],model="Auto",state="done",detail="",items=[],revision=1,created_at=now(),updated_at=now()))
+            db.flush()
+            db.add(WorkBatch(id=batch_id,material_id=mat,start=1,end=1,units=[{"unit":1,"state":"done"}],verified_text="fixture",job_id=job_id,created_at=now(),updated_at=now()))
+            db.commit()
+        linked_progress=client.get("/api/source-catalog/sources/"+fixture_source["id"]+"/file-progress")
+        assert linked_progress.status_code==200,linked_progress.text
+        p=linked_progress.json()
+        assert p["original_question_total"] is None and len(p["items"])==1
+        f=p["items"][0]
+        assert f["total_units"]==f["recognized_units"]==f["verified_units"]==1
+        assert f["registered_units"]==0 and f["unverified_ranges"]==[]
+        assert f["recognized_ranges"]==[[1,1]] and f["registered_ranges"]==[]
+        assert client.get(catalog_url+"/file-progress").json()["items"]==[]
+
+        # File association is version-specific and non-destructive.
+        version_url="/api/source-catalog/sources/"+fixture_source["id"]+"/version-files"
+        empty_binding=client.get(version_url).json()
+        assert empty_binding["revision"]==0 and empty_binding["items"]==[]
+        binding={"revision":0,"version":empty_binding["versions"][0]["version"],"file_id":fixture_file["id"],"role":"original"}
+        bound_file=client.post(version_url,headers=origin,json=binding)
+        assert bound_file.status_code==200,bound_file.text
+        association=bound_file.json()
+        assert association["items"][0]["file_id"]==fixture_file["id"] and association["items"][0]["active"]
+        assert client.post(version_url,headers=origin,json=binding).status_code==409
+        assert client.post(version_url,headers=origin,json={**binding,"revision":association["revision"],"version":999}).status_code==422
+        unbound_file=client.post(version_url+"/"+association["items"][0]["id"]+"/unbind",headers=origin,json={"revision":association["revision"]})
+        assert unbound_file.status_code==200,unbound_file.text
+        assert not unbound_file.json()["items"][0]["active"]
+        assert client.get("/api/source-catalog/sources/"+fixture_source["id"]+"/file-progress").json()==p
+        assert client.get("/api/resources/"+fixture_source["id"]).status_code==200
+
+        # Knowledge directory parent selection includes children but not similar prefixes.
+        for ix,path in enumerate(("目录专项/极限","目录专项/极限/方法","目录专项/极限外")):
+            r=client.post("/api/resources",headers=origin,json={"kind":"knowledge","title":"多级目录测试"+str(ix),"subject":"高等数学","chapter":path,"content":"独立目录内容"+str(ix)})
+            assert r.status_code==200,r.text
+        direct=client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限"}).json()
+        nested=client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限","chapter_tree":True}).json()
+        assert direct["total"]==1 and nested["total"]==2
+        assert {r["chapter"] for r in nested["items"]}=={"目录专项/极限","目录专项/极限/方法"}
+
+        dirs="/api/resources/knowledge-directories"
+        dir_state=client.get(dirs).json()
+        created_dir=client.post(dirs,headers=origin,json={"subject":"高等数学","path":"目录专项/极限/空目录","revision":dir_state["revision"]})
+        assert created_dir.status_code==200,created_dir.text
+        assert any(x["chapter"]=="目录专项/极限/空目录" and x["count"]==0 for x in client.get("/api/resources/chapters").json())
+        assert client.post(dirs,headers=origin,json={"subject":"高等数学","path":"旧版本创建","revision":dir_state["revision"]}).status_code==409
+        move={"subject":"高等数学","path":"目录专项/极限","target":"新目录/极限"}
+        move_preview=client.post(dirs+"/move-preview",headers=origin,json=move)
+        assert move_preview.status_code==200,move_preview.text
+        assert move_preview.json()["total"]==2 and move_preview.json()["directories"]==1
+        assert client.post(dirs+"/move",headers=origin,json=move).status_code==409
+        moved=client.post(dirs+"/move",headers=origin,json={**move,"preview_token":move_preview.json()["preview_token"]})
+        assert moved.status_code==200,moved.text
+        for old in nested["items"]:
+            saved_unit=client.get("/api/resources/"+old["id"]).json()
+            assert saved_unit["chapter"]=="新目录/极限"+old["chapter"][len("目录专项/极限"):]
+            assert saved_unit["tags"]==old["tags"]
+        assert any(x["chapter"]=="新目录/极限/空目录" and x["count"]==0 for x in client.get("/api/resources/chapters").json())
+        assert client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限外"}).json()["total"]==1
+
+        # Teaching supplement and manually chosen examples remain independent of graph labels.
+        unit_response=client.post("/api/resources",headers=origin,json={"kind":"knowledge","title":"专项甲","subject":"高等数学","content":"知识单元专项独立内容","tags":["专项甲"]})
+        assert unit_response.status_code==200,unit_response.text
+        unit=unit_response.json()
+        unit_url="/api/resources/"+unit["id"]
+        detail=client.get(unit_url+"/teaching-detail").json()
+        assert detail["example_ids"]==[] and detail["conditions"]==""
+        related=client.get(unit_url+"/related-questions").json()
+        assert any(x["id"]==seed["id"] and "专项甲" in x["matched_names"] for x in related["items"])
+        payload={"revision":detail["revision"],"conditions":"函数可微","methods":"泰勒展开","mistakes":"注意适用条件","example_ids":[seed["id"]]}
+        updated_unit=client.put(unit_url+"/teaching-detail",headers=origin,json=payload)
+        assert updated_unit.status_code==200,updated_unit.text
+        saved_detail=updated_unit.json()
+        assert saved_detail["examples"][0]["id"]==seed["id"] and saved_detail["conditions"]=="函数可微"
+        assert client.put(unit_url+"/teaching-detail",headers=origin,json=payload).status_code==409
+        assert client.get(unit_url).json()["tags"]==unit["tags"]
+        assert client.get(unit_url).json()["knowledge_tags"]==unit["knowledge_tags"]
+        assert client.put(unit_url+"/teaching-detail",headers=origin,json={**payload,"revision":saved_detail["revision"],"example_ids":[unit["id"]]}).status_code==422
+
+        # Exercise the real backup selector and PostgreSQL CSV restore format in the CI DB.
+        import csv, io, importlib.util
+        from pathlib import Path
+        from app.models import Setting
+        from sqlalchemy import text
+        backup_spec=importlib.util.spec_from_file_location("backup_contract",Path(__file__).resolve().parents[2]/"deploy"/"backup.py")
+        backup_module=importlib.util.module_from_spec(backup_spec);backup_spec.loader.exec_module(backup_module)
+        saved_scope=client.post(stats_path+"/scopes",headers=origin,json=scope_payload)
+        assert saved_scope.status_code==200,saved_scope.text
+        required={"knowledge.library.directories.v1","knowledge.unit.detail."+unit["id"],
+                  "source.file.versions."+fixture_source["id"],"source.statistics.scopes.1"}
+        with session_factory()() as db:
+            db.merge(Setting(key="ci.synthetic.excluded",value="synthetic-only"));db.flush()
+            conn=db.connection().connection.driver_connection
+            with conn.cursor() as cur:
+                selected=backup_module.business_settings(cur)
+                assert required<=set(selected)
+                assert "ci.synthetic.excluded" not in selected
+                assert any(k.startswith("bank.history.") for k in selected)
+                output=io.StringIO(newline="")
+                writer=csv.writer(output,quoting=csv.QUOTE_ALL)
+                writer.writerow(["key","value"])
+                rows={k:v for k,v in selected.items() if k!="qiandao.qoder_cn.v1"}
+                writer.writerows(rows.items())
+                cur.execute("CREATE TEMP TABLE ci_restored_preferences (key text PRIMARY KEY,value text NOT NULL) ON COMMIT DROP")
+                with cur.copy("COPY ci_restored_preferences FROM STDIN WITH (FORMAT CSV, HEADER TRUE, ENCODING 'UTF8')") as cp:
+                    cp.write(output.getvalue().encode("utf-8"))
+                cur.execute("SELECT key,value FROM ci_restored_preferences")
+                restored=dict(cur.fetchall())
+                assert restored==rows
+                assert json.loads(restored["knowledge.unit.detail."+unit["id"]])["example_ids"]==[seed["id"]]
+                assert json.loads(restored["source.file.versions."+fixture_source["id"]])["items"][0]["active"] is False
+            db.rollback()
+        assert client.delete(stats_path+"/scopes/"+saved_scope.json()["id"],headers=origin).status_code==200
 
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200

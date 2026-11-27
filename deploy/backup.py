@@ -26,13 +26,14 @@ CHUNK = 32 * 1024 * 1024
 PURGE_LOCK = 824650219
 MANIFEST = "manifests/latest.json"
 SAFE_SETTINGS = ("display_name", "theme", "ai.qoder.model", "ai.qoder.video_model",
-                 "ai.qoder.effort", "ai.qoder.video_effort", "qiandao.qoder_cn.v1")
+                 "ai.qoder.effort", "ai.qoder.video_effort", "qiandao.qoder_cn.v1", "knowledge.library.directories.v1")
 # Logical directory, table, fixed SQL predicate, deterministic ordering.
 EXPORTS = [
     ("database/alembic_version", "alembic_version", "true", "version_num"),
     ("teaching/questions/questions", "teaching_resources", "kind='question'", "id"),
     ("teaching/knowledge/units", "teaching_resources", "kind='knowledge'", "id"),
     ("teaching/sources/sources", "teaching_resources", "kind='source'", "id"),
+    ("teaching/sources/catalog_details", "source_catalog_details", "true", "source_id"),
     ("teaching/sources/links", "resource_source_links", "true", "resource_id,source_id,provenance_role"),
     ("system/versions/resource_versions", "resource_source_versions", "true", "source_id,version"),
     ("teaching/graph/points", "knowledge_point_catalog", "true", "id"),
@@ -72,6 +73,10 @@ FIXED.update({"system/settings/preferences.csv": "settings", "system/checkin/sta
               "system/versions/audit.csv": "audit_logs"})
 FILE_KEY = re.compile(r"(original|generated)/([0-9a-f-]{36})\Z")
 
+
+def business_settings(cur):
+    cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
+    return dict(cur.fetchall())
 
 def digest(path):
     h = hashlib.sha256()
@@ -163,6 +168,7 @@ def logical_allowed(name):
 
 
 WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
+CATALOG_EXPORTS={"teaching/sources/catalog_details.csv"}
 
 def check_manifest(repo, manifest, allow_legacy=False):
     if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
@@ -175,7 +181,7 @@ def check_manifest(repo, manifest, allow_legacy=False):
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
     missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
-    if missing and not (allow_legacy and missing==WORK_EXPORTS):
+    if missing and not (allow_legacy and missing in (WORK_EXPORTS,CATALOG_EXPORTS,WORK_EXPORTS|CATALOG_EXPORTS)):
         raise ValueError("incomplete database backup")
 
 
@@ -254,8 +260,7 @@ def capture(work, publish):
                 for path, table, predicate, order in EXPORTS:
                     copy_out(cur, "SELECT * FROM public." + table + " WHERE " + predicate + " ORDER BY " + order, tmp)
                     publish(path + ".csv", tmp)
-                cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) ORDER BY key", (list(SAFE_SETTINGS),))
-                settings = dict(cur.fetchall())
+                settings = business_settings(cur)
                 for name, rows in (
                     ("system/settings/preferences.csv", [(k,v) for k,v in settings.items() if k != "qiandao.qoder_cn.v1"]),
                     ("system/checkin/state.csv", [("qiandao.qoder_cn.v1", sanitize_checkin(settings["qiandao.qoder_cn.v1"]))] if "qiandao.qoder_cn.v1" in settings else []),

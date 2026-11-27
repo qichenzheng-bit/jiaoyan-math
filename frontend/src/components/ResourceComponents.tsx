@@ -11,7 +11,7 @@ export function ResourceExcerpt({resource}:{resource:ResourceDisplay}){
  return <span className="resource-compact-excerpt"><MathText compact content={resource.content||resource.title}/></span>
 }
 export function ResourceSections({resource,showKnowledge=false,sectionClass='',stemLabel}:{resource:ResourceDisplay;showKnowledge?:boolean;sectionClass?:string;stemLabel?:string}){
- const fields:[string,string|undefined][]=[['参考答案',resource.answer],['参考解析',resource.solution],['思路点拨',resource.analysis],['证明',resource.proof],...(showKnowledge?[['关联知识点',resource.knowledge_points?.map(p=>p.name).join('、')||resource.tags?.join('、')] as [string,string|undefined]]:[])]
+ const fields:[string,string|undefined][]=[['参考答案',resource.answer],['参考解析',resource.solution],['思路点拨',resource.analysis],['证明',resource.proof],...(showKnowledge?[['录入知识点',resource.tags?.join('、')] as [string,string|undefined],['关联知识标签',resource.knowledge_points?.map(p=>p.name).join('、')] as [string,string|undefined]]:[])]
  return <div className="resource-content-sections" key={resource.id}>
   {stemLabel?<details className={sectionClass} open><summary>{stemLabel}</summary><div><MathText content={resource.content||resource.title}/></div></details>:<MathText content={resource.content||resource.title}/>}
   {fields.filter(([,value])=>value).map(([label,value])=><details className={sectionClass} key={label}><summary>{label}</summary><div><MathText content={value}/></div></details>)}
@@ -35,7 +35,7 @@ export function ResourceMultiSelect({label,path,chosen,setChosen}:{label:string;
   {total>30&&<div className="button-row"><button type="button" disabled={!page||loading} onClick={()=>setPage(v=>v-1)}>上一页</button><small>{page+1}/{Math.ceil(total/30)}</small><button type="button" disabled={(page+1)*30>=total||loading} onClick={()=>setPage(v=>v+1)}>下一页</button></div>}</div></details>
 }
 export function ResourceAssociationFilters({subject,sources,points,onSources,onPoints,related,onRelated,origin=''}:{subject:string;sources:ResourceEntry[];points:ResourceEntry[];onSources:(v:ResourceEntry[])=>void;onPoints:(v:ResourceEntry[])=>void;related:boolean;onRelated:(v:boolean)=>void;origin?:string}){
- return <div className="resource-association-filters"><ResourceMultiSelect label="具体来源" path={'/resources?kind=source&source_type='+encodeURIComponent(origin)} chosen={sources} setChosen={onSources}/><ResourceMultiSelect label="知识点" path={'/knowledge/points?subject='+encodeURIComponent(subject)} chosen={points} setChosen={onPoints}/><label className="resource-related-toggle"><input type="checkbox" checked={related} onChange={e=>onRelated(e.target.checked)}/>包含下级、相关及前置知识点</label></div>
+ return <div className="resource-association-filters"><ResourceMultiSelect label="具体来源" path={'/resources?kind=source&source_type='+encodeURIComponent(origin)} chosen={sources} setChosen={onSources}/><ResourceMultiSelect label="知识标签" path={'/knowledge/points?subject='+encodeURIComponent(subject)} chosen={points} setChosen={onPoints}/><label className="resource-related-toggle"><input type="checkbox" checked={related} onChange={e=>onRelated(e.target.checked)}/>包含下级、相关及前置知识标签</label></div>
 }
 export function appendResourceFilters(query:URLSearchParams,sources:ResourceEntry[],points:ResourceEntry[],related:boolean){
  sources.forEach(r=>query.append('source_ids',r.id));points.forEach(r=>query.append('knowledge_ids',r.id));if(related&&points.length)query.set('include_related','true')

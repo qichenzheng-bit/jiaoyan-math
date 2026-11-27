@@ -139,9 +139,9 @@ def build_provenance(db,body):
 def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     if body.source_id:bank.active_source(db,body.source_id,True)
-    prompt="你是数学资料录入助手。仅依据原文提取题目与知识单元，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type,original_question_number（原文明确的题号，无法确认留空）。最多100项。题目优先使用 question_data 对象（version:1,stem,options:[{label,content}],correct_options:[字母],subquestions:[{number,content,answer,methods:[{name,body,recommended}]}],blanks:[{number,answer}],answer,methods:[{name,body,recommended}]）。使用结构时不要重复输出外层 content/answer/solution，服务端生成兼容文本；填空空位使用标准 LaTeX 下划线，无法可靠对应的原文仍可使用外层字段。小问各自有答案和解法，不设置公共答案解析。仅提取原文实际提供的答案、解析，缺失留空。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    prompt="你是数学资料录入助手。知识点是原文实际教学内容（定义、公式、定理、证明等）；知识标签是分类名称，使用 knowledge_tags 字段，二者不可混淆。仅依据原文提取题目与知识点，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type,original_question_number（原文明确的题号，无法确认留空）。最多100项。题目优先使用 question_data 对象（version:1,stem,options:[{label,content}],correct_options:[字母],subquestions:[{number,content,answer,methods:[{name,body,recommended}]}],blanks:[{number,answer}],answer,methods:[{name,body,recommended}]）。使用结构时不要重复输出外层 content/answer/solution，服务端生成兼容文本；填空空位使用标准 LaTeX 下划线，无法可靠对应的原文仍可使用外层字段。小问各自有答案和解法，不设置公共答案解析。仅提取原文实际提供的答案、解析，缺失留空。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
     intent=provenance.get("intent","mixed")
-    focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识单元及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识单元。","mixed":"按原文实际内容识别题目和知识单元。"}[intent]
+    focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识点及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识点。","mixed":"按原文实际内容识别题目和知识点。"}[intent]
     prompt+="\n【本次整理目标】"+focus
     if pdf_range(provenance):
         prompt+="\n原文中的【原文位置 N】表示PDF物理页。每条可附加source_pages对象，分别给出content、answer、solution、proof所在的物理页整数。只填写能依据页标确定的位置，跨页时填起始页；不确定则省略。不得将推测当成已确认来源。"
@@ -564,7 +564,7 @@ def supplement_start(id:str,body:SupplementStart,db:Session=Depends(get_db),user
     if body.revise and not body.instruction.strip():
         raise HTTPException(422,"请明确说明修改要求")
     payload=json.dumps({k:item.get(k,"") for k in ("kind","title","content","answer","solution","analysis","proof","chapter")},ensure_ascii=False)
-    prompt=("你是微光数学教研助手。本任务是用户明确授权的AI补充，不属于原文。只针对提供的题目或知识单元生成指定字段，不修改题干或已有答案。"
+    prompt=("你是微光数学教研助手。本任务是用户明确授权的AI补充，不属于原文。只针对提供的题目或知识点生成指定字段，不修改题干或已有答案。"
         "缺少必要图形、条件或无法确定时不要猜测；可以省略无法完成的字段。解析要完整逐步推导；备选解法必须实质不同，保留已有解法。"
         "所有公式使用LaTeX定界符，JSON正确转义。仅输出JSON对象，键只能来自指定字段，值必须为非空字符串；不输出其他字段。"
         "\n指定字段："+json.dumps(body.fields)+"\n用户补充要求："+body.instruction+"\n【已审核草稿数据】\n"+payload+"\n【数据结束】")

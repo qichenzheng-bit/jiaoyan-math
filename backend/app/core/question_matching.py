@@ -132,7 +132,7 @@ def related_questions(db,content,solution,subject="",tags=(),exclude=None,limit=
         matched={p.id:p.name for p in points if norm(p.name) in tags or p.alias and norm(p.alias) in tags}
         if matched:
             for row,kid in db.execute(select(Resource,ResourceKnowledgeLink.knowledge_id).join(ResourceKnowledgeLink,ResourceKnowledgeLink.resource_id==Resource.id).where(*scope,ResourceKnowledgeLink.knowledge_id.in_(matched)).order_by(Resource.updated_at.desc(),Resource.id).limit(200)):
-                add(row,"共同知识点："+matched[kid],3)
+                add(row,"共同知识标签："+matched[kid],3)
     if methods:
         terms=[m for m in METHOD_NAMES if METHOD_ALIASES.get(m,m) in methods]
         for row in db.scalars(select(Resource).where(*scope,or_(*(Resource.solution.contains(t,autoescape=True) for t in terms))).order_by(Resource.updated_at.desc(),Resource.id).limit(200)):

@@ -736,7 +736,7 @@ with sync_playwright() as p:
                     expect(page.locator(".manual-word-editor")).to_have_count(0)
                     outline.first.click()
                     expect(page.locator(".manual-word-editor")).to_have_count(1)
-                    page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
+                    page.get_by_role("button",name="微调原题 / 知识点",exact=True).click()
                     page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
                     page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
                     page.get_by_role("button",name="取消微调",exact=True).click()
@@ -842,6 +842,51 @@ with sync_playwright() as p:
                     page.set_viewport_size({"width":1440,"height":900})
 
                 capture(page,path=str(OUT/(name+".png")),full_page=False)
+        if GROUP in {'all','desktop','mobile'}:
+            print('UI case: source statistics scope and distribution on both screen sizes',flush=True)
+            page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
+            stats_requests=[]
+            def stats_api(route):
+                endpoint=route.request.url.split("/statistics",1)[1].split("?",1)[0]
+                if endpoint=="/scopes":
+                    route.fulfill(json={"items":[]});return
+                body=route.request.post_data_json
+                stats_requests.append((endpoint,body))
+                assert body["years"]==["2026"] and body["institutions"]==["郑州大学"]
+                if endpoint=="/distribution":
+                    name={"question_type":"综合题","method":"泰勒展开","cooccurrence":"极限运算"}[body["dimension"]]
+                    if body["dimension"]=="cooccurrence":
+                        assert body["knowledge_name"]=="重要极限" and body["knowledge_subject"]=="高等数学"
+                    result={"question_count":2,"classified_questions":1,"total":1,"limit":30,"offset":0,"items":[{"subject":"高等数学","name":name,"question_count":1,"source_question_count":2}]}
+                elif endpoint=="/questions":
+                    assert body["knowledge_name"]=="重要极限"
+                    result={"total":1,"limit":30,"offset":0,"items":[{"id":items[0]["id"],"code":items[0]["code"],"title":items[0]["title"],"subject":"高等数学","question_type":"综合题","source_count":2,"revision":1}]}
+                else:
+                    assert endpoint==""
+                    result={"source_count":2,"confirmed_complete_sources":0,"question_count":2,"source_question_count":3,"questions_with_knowledge":2,"knowledge_count":1,"limit":50,"offset":0,"items":[{"subject":"高等数学","name":"重要极限","question_count":1,"source_question_count":2}]}
+                route.fulfill(json=result)
+            statistics_route=re.compile(r".*/api/source-catalog/statistics(?:/[^?]*)?(?:\?.*)?$")
+            page.route(statistics_route,stats_api)
+            visit(page,"/source-catalog/statistics",".source-statistics")
+            page.get_by_placeholder("2026，2025",exact=True).fill("2026")
+            page.get_by_placeholder("郑州大学",exact=True).fill("郑州大学")
+            page.get_by_role("button",name="开始统计",exact=True).click()
+            expect(page.get_by_role("heading",name="统计结果",exact=True)).to_be_visible()
+            page.get_by_role("button",name="重要极限",exact=True).click()
+            expect(page.get_by_role("heading",name="重要极限 · 关联题目")).to_be_visible()
+            expect(page.get_by_text(items[0]["code"],exact=False).last).to_be_visible()
+            page.get_by_role("button",name="关闭",exact=True).click()
+            for dimension,button_name,expected in (("question_type","题型分布","综合题"),("method","解析中的方法名称","泰勒展开"),("cooccurrence","知识点共现","极限运算")):
+                page.get_by_role("button",name=button_name,exact=True).click()
+                if dimension=="cooccurrence":
+                    expect(page.get_by_role("button",name="生成分布",exact=True)).to_be_disabled()
+                    page.get_by_label("选择指定知识点").select_option(label="高等数学 · 重要极限")
+                page.get_by_role("button",name="生成分布",exact=True).click()
+                expect(page.get_by_role("cell",name=expected,exact=True)).to_be_visible()
+            assert [x[0] for x in stats_requests]==["","/questions","/distribution","/distribution","/distribution"]
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+            capture(page,path=str(OUT/("f43-statistics-"+GROUP+".png")),full_page=False)
+            page.unroute(statistics_route,stats_api)
         if GROUP in {'all','desktop','mobile'}:
             print('UI case: persisted agent workflow and confirmed advance',flush=True)
             page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
@@ -1078,7 +1123,7 @@ with sync_playwright() as p:
             page.get_by_label("第 1 小问题目",exact=True).fill("求导数")
             page.get_by_label("第 1 小问答案",exact=True).fill("$2x$")
             page.get_by_label("第 1 小问解析",exact=True).fill("利用导数公式")
-            page.get_by_role("button",name="选择已有知识点",exact=True).click()
+            page.get_by_role("button",name="选择已有知识标签",exact=True).click()
             catalog=page.locator(".manual-tag-catalog")
             catalog.locator(".manual-tag-category").wait_for()
             assert catalog.get_by_role("button",name="导数",exact=True).count()==0
@@ -1087,13 +1132,13 @@ with sync_playwright() as p:
             catalog.get_by_role("button",name="展开 一元函数微分学",exact=True).click()
             catalog.get_by_role("button",name="导数",exact=True).click()
             assert catalog.get_by_role("button",name="定积分",exact=True).count()==0
-            page.get_by_label("搜索已有知识点").fill("定积分")
+            page.get_by_label("搜索已有知识标签").fill("定积分")
             catalog.get_by_role("button",name="定积分",exact=False).first.wait_for()
 
-            page.get_by_label("知识点",exact=True).fill("新知识点")
-            page.get_by_role("button",name="新增知识点",exact=True).click()
-            expect(page.get_by_role("button",name="移除知识点 新知识点",exact=True)).to_be_visible()
-            expect(page.get_by_role("button",name="移除知识点 导数",exact=True)).to_be_visible()
+            page.get_by_label("知识标签",exact=True).fill("新知识点")
+            page.get_by_role("button",name="新增知识标签",exact=True).click()
+            expect(page.get_by_role("button",name="移除知识标签 新知识点",exact=True)).to_be_visible()
+            expect(page.get_by_role("button",name="移除知识标签 导数",exact=True)).to_be_visible()
             page.get_by_role("button",name="下一条 · 新增",exact=True).click()
             page.get_by_role("button",name="＋ 综合题",exact=True).click()
             page.get_by_label("题目",exact=True).fill("测试查重")
