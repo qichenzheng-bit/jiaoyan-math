@@ -666,7 +666,12 @@ with sync_playwright() as p:
                     page.get_by_role("button",name="返回题库",exact=False).click()
                     page.get_by_role("button",name="选题清单",exact=True).click()
                     expect(page.locator(".bank-cart-item")).to_have_count(1)
-                    page.get_by_role("button",name="返回题库",exact=False).click()
+                    page.locator(".bank-tool-actions select").select_option("video")
+                    page.get_by_role("button",name="确认选题",exact=True).click()
+                    with page.expect_request(lambda req:req.url.endswith("/video/projects") and req.method=="POST") as queued_video:
+                        page.get_by_role("button",name="加入视频项目队列（1）",exact=True).click()
+                    assert queued_video.value.post_data_json["resource_id"]==items[0]["id"]
+                    page.locator(".video-work").wait_for()
                 if name=="25-word-ai":
                     page.locator(".manual-word-work").wait_for()
                     expect(page.locator(".manual-word-matches")).to_have_count(0)
@@ -920,6 +925,75 @@ with sync_playwright() as p:
                 page.get_by_role("button",name="按计划开始参考匹配",exact=True).click()
             assert matched.value.post_data_json["source_batch_id"]=="reference-batch"
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+        if GROUP in {'all','desktop','mobile'}:
+            print('UI case: chaptered textbook on desktop and mobile',flush=True)
+            page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
+            book_kind="handout" if GROUP=="mobile" else "textbook"
+            book={**doc,"id":"book-preview","title":"分章教学资料测试","kind":book_kind,"chaptered":True,"source_id":None,"blocks":[],"revision":3}
+            chapter={**doc,"id":"chapter-preview","title":"第一章 极限","kind":book_kind,"chaptered":False,"parent_document_id":book["id"],"source_id":None,"blocks":[{**doc["blocks"][0],"uid":"chapter-question"}],"revision":1}
+            directory=[{"id":chapter["id"],"title":chapter["title"],"revision":1,"chapter_order":1,"archived":False,"updated_at":1,"blocks_count":1}]
+            book_requests=[]
+            def book_api(route):
+                endpoint=route.request.url.split("/api/documents/",1)[1].split("?",1)[0]
+                book_requests.append((route.request.method,endpoint))
+                if endpoint=="book-preview/chapters":
+                    if route.request.method=="POST":
+                        body=route.request.post_data_json
+                        assert body["revision"]==book["revision"]
+                        book["revision"]+=1
+                        directory.append({"id":"second-chapter","title":body["title"],"revision":1,"chapter_order":2,"archived":False,"updated_at":1,"blocks_count":0})
+                    result={"document":{k:v for k,v in book.items() if k!="blocks"},"items":directory}
+                elif endpoint=="book-preview/versions":
+                    result={"items":[{"revision":book["revision"],"title":book["title"],"created_at":1,"blocks_count":1,"chapter_count":len(directory),"current":True}]}
+                elif endpoint=="book-preview":result=book
+                elif endpoint=="chapter-preview":
+                    if route.request.method=="PUT":
+                        body=route.request.post_data_json
+                        assert body["parent_document_id"]==book["id"]
+                        chapter.update(body,revision=chapter["revision"]+1)
+                        directory[0].update(blocks_count=len(chapter["blocks"]),revision=chapter["revision"])
+                        book["revision"]+=1
+                    result=chapter
+                elif endpoint=="chapter-preview/export":result=chapter
+                else:raise AssertionError(endpoint)
+                route.fulfill(json=result)
+            book_route=re.compile(r".*/api/documents/(?:book-preview|chapter-preview)(?:/[^?]*)?(?:[?].*)?$")
+            page.route(book_route,book_api)
+            visit(page,("/handouts" if book_kind=="handout" else "/textbooks")+"?doc=book-preview",".chaptered-book")
+            expect(page.locator(".book-chapter-row")).to_have_count(1)
+            assert ("GET","chapter-preview") not in book_requests
+            page.get_by_label("新章节名称").fill("第二章 导数")
+            page.get_by_role("button",name="＋ 新增章节",exact=True).click()
+            expect(page.locator(".book-chapter-row")).to_have_count(2)
+            if os.environ.get("WG_BOOK_SCREENSHOTS")=="1":
+                page.evaluate("document.fonts.ready")
+                page.screenshot(path=str(OUT/("f44-directory-"+GROUP+".png")),full_page=False)
+                if GROUP=="desktop":
+                    page.set_viewport_size({"width":393,"height":873})
+                    page.screenshot(path=str(OUT/"f44-textbook-directory-phone.png"),full_page=False)
+                    page.set_viewport_size({"width":1600,"height":900})
+            page.get_by_role("button",name="编辑本章",exact=True).first.click()
+            page.locator(".manual-intake-cards").wait_for()
+            assert ("GET","chapter-preview") in book_requests
+            if os.environ.get("WG_BOOK_SCREENSHOTS")=="1":
+                page.evaluate("document.fonts.ready")
+                page.screenshot(path=str(OUT/("f44-chapter-"+GROUP+".png")),full_page=False)
+            expect(page.get_by_role("button",name="＋ 章",exact=True)).to_have_count(0)
+            if GROUP=="mobile":
+                page.get_by_role("button",name="＋ 添加内容",exact=True).click()
+            page.get_by_role("button",name="＋ 正文",exact=True).click()
+            page.get_by_label("正文",exact=True).fill("章节独立保存测试")
+            with page.expect_request(lambda req:req.url.endswith("/api/documents/chapter-preview") and req.method=="PUT") as chapter_save:
+                page.get_by_role("button",name="保存编排",exact=True).click()
+            assert len(chapter_save.value.post_data_json["blocks"])==2
+            expect(page.get_by_text("编排已保存到服务器",exact=True)).to_be_visible()
+            page.get_by_role("link",name="返回全书目录",exact=False).click()
+            expect(page.locator(".book-chapter-row")).to_have_count(2)
+            page.get_by_role("button",name="全书版本历史",exact=True).click()
+            expect(page.locator(".book-version-list")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+2")
+            capture(page,path=str(OUT/("f44-book-"+GROUP+".png")),full_page=False)
+            page.unroute(book_route,book_api)
         if GROUP in {'all','editors'}:
             print('UI case: document assembly',flush=True)
             # Compose from the question bank, preserve original resources, and save layout only.
@@ -960,6 +1034,19 @@ with sync_playwright() as p:
             assert [b["resource_id"] for b in saved.value.post_data_json["blocks"][:2]]==[items[1]["id"],items[0]["id"]]
             page.get_by_text("编排已保存到服务器",exact=True).wait_for()
             capture(page,path=str(OUT/"30-assembly-paper.png"),full_page=False)
+            page.get_by_role("button",name="批量编排",exact=True).click()
+            batch_panel=page.locator(".composition-batch")
+            batch_panel.get_by_role("button",name="选择当前结果",exact=True).click()
+            batch_panel.get_by_label("批量分值").fill("6")
+            batch_panel.get_by_role("button",name="设置分值",exact=True).click()
+            page.get_by_role("button",name="撤销",exact=True).click()
+            page.get_by_role("button",name="重做",exact=True).click()
+            with page.expect_request(lambda req:req.url.endswith("/documents/assembly-demo") and req.method=="PUT",timeout=10000) as auto_saved:
+                batch_panel.get_by_role("button",name="隐藏答案解析",exact=True).click()
+            auto_blocks=auto_saved.value.post_data_json["blocks"]
+            assert [b["score"] for b in auto_blocks if b["kind"]=="reference"]==[6,6]
+            assert all(b["hidden_fields"]==["answer","solution","analysis","proof"] for b in auto_blocks if b["kind"]=="reference")
+            expect(page.get_by_role("button",name="保存编排",exact=True)).to_be_disabled()
             for route in ("handouts","textbooks"):
                 visit(page,"/"+route,".assembly-picker")
                 page.locator(".assembly-picker").wait_for()

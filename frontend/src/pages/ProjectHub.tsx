@@ -3,16 +3,23 @@ import {api} from '../auth'
 import {Link,useParams} from 'react-router-dom'
 import {Icon} from '../components/Icon'
 import {workspaceGroups,modules} from '../navigation'
+type RecentDoc={id:string;kind:string;title:string;updated_at:number;revision:number}
+const recentKinds=['paper','handout','textbook'] as const
+const recentRoutes={paper:'/papers',handout:'/handouts',textbook:'/textbooks'}
+const recentNames={paper:'试卷',handout:'讲义',textbook:'教材'}
 const intro:Record<string,string>={intake:'AI 整理或手动录入来源；在卡片工作台编辑题目与知识点。',teaching:'管理数学教学资源、知识体系及自编资料。',creation:'制作视频、组卷、组讲义和组教材，完成后导出。',publishing:'管理教学作品，设计并导出教学内容封面。',sales:'管理课程与资料商品、订单和交付。'}
 export default function ProjectHub(){
  const {id}=useParams(),group=workspaceGroups.find(g=>g.id===id),[counts,setCounts]=useState<Record<string,string>>({})
  useEffect(()=>{if(id!=='teaching')return;const c=new AbortController();const pairs=[['/resources','/resources?kind=question&limit=1','道题'],['/knowledge-library','/resources?kind=knowledge&limit=1','个知识点'],['/sources','/resources?kind=source&limit=1','份来源'],['/graph','/knowledge/points?limit=1','个知识标签']];void Promise.all(pairs.map(async ([key,url,unit])=>{try{const v=await api<{total:number}>(url,{signal:c.signal});if(!c.signal.aborted&&typeof v.total==='number')setCounts(old=>({...old,[key]:v.total+' '+unit}))}catch{}}));return()=>c.abort()},[id])
+ const [recent,setRecent]=useState<RecentDoc[]>([]),[cartCount,setCartCount]=useState<number>(),[recentState,setRecentState]=useState('正在读取…')
+ useEffect(()=>{if(id!=='creation')return;const c=new AbortController();setRecent([]);setCartCount(undefined);setRecentState('正在读取…');api<{ids:string[]}>('/bank/cart',{signal:c.signal}).then(v=>{if(!c.signal.aborted)setCartCount(v.ids.length)}).catch(()=>{});Promise.all(recentKinds.map(kind=>api<{items:RecentDoc[]}>('/documents?kind='+kind+'&limit=5',{signal:c.signal}))).then(rs=>{if(!c.signal.aborted){const unique=new Map<string,RecentDoc>();for(const item of rs.flatMap(r=>r.items))if(!unique.has(item.id))unique.set(item.id,item);setRecent([...unique.values()].sort((a,b)=>b.updated_at-a.updated_at).slice(0,5));setRecentState('暂无教学资料')}}).catch(()=>{if(!c.signal.aborted)setRecentState('最近编辑读取失败，请打开教学资料库')});return()=>c.abort()},[id])
  if(group?.id==='creation')return <div className="project-hub project-creation production-home">
-  <header className="production-heading"><h1>教学制作</h1><p className="muted">从题库与知识库制作教学内容</p></header>
+  <header className="production-heading"><h1>教学制作</h1><p className="muted">从题库与知识库制作教学内容</p><Link className="button-link" to="/selection">选题清单{cartCount===undefined?'':' · '+cartCount+' 项'}</Link></header>
   <div className="production-grid">
     <Link to="/videos" className="project-link production-video" aria-label="视频制作"><span className="production-symbol"><Icon name="film" size={30}/></span><div className="production-info"><strong>视频制作</strong><small>将题库中的题目制作成教学视频</small><span className="production-flow">选题 · 生成 · 渲染 · 微调</span></div><span className="production-cta">进入视频制作 <Icon name="arrow" size={15}/></span></Link>
     {[{path:'/papers',name:'组卷',icon:'works',desc:'选择题目，设置题型与分值'},{path:'/handouts',name:'组讲义',icon:'files',desc:'编排知识点、例题与练习'},{path:'/textbooks',name:'组教材',icon:'book',desc:'按章节组织知识与题目'}].map(item=><Link key={item.path} to={item.path} className="project-link production-document" aria-label={item.name}><span className="production-symbol"><Icon name={item.icon} size={24}/></span><div className="production-info"><strong>{item.name}</strong><small>{item.desc}</small></div><span className="production-doc-cta">开始编写 <Icon name="chevron" size={15}/></span></Link>)}
   </div>
+  <section className="panel"><div className="button-row"><h2>最近编辑</h2><Link to="/teaching-library">全部教学资料 ›</Link></div>{recent.length?recent.map(d=><Link key={d.id} className="production-recent-item" to={(recentRoutes[d.kind as keyof typeof recentRoutes]??'/teaching-library')+(recentRoutes[d.kind as keyof typeof recentRoutes]?'?doc='+encodeURIComponent(d.id):'')}><Icon name="files" size={20}/><span><strong>{d.title}</strong><small>{(recentNames[d.kind as keyof typeof recentNames]??'教学资料')} · 版本 {d.revision}</small></span><Icon name="chevron" size={16}/></Link>):<p className="muted">{recentState}</p>}</section>
   <Link className="production-library" to="/teaching-library"><Icon name="files" size={20}/><span><strong>我的教学资料</strong><small>查看已保存的试卷、讲义和教材</small></span><Icon name="chevron" size={16}/></Link>
  </div>
  if(!group)return <section className="panel"><h1>项目不存在</h1><Link to="/">返回首页</Link></section>

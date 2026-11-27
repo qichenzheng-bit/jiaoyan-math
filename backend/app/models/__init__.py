@@ -196,6 +196,11 @@ class KnowledgeRelation(Base):
 
 class TeachingDocument(Base):
     __tablename__="teaching_documents"
+    __table_args__=(Index("ix_teaching_documents_parent_order","parent_document_id","chapter_order"),)
+    chaptered: Mapped[bool]=mapped_column(Boolean,default=False,server_default="false")
+    parent_document_id: Mapped[str | None]=mapped_column(ForeignKey("teaching_documents.id",ondelete="RESTRICT"),nullable=True)
+    chapter_order: Mapped[int]=mapped_column(Integer,default=0,server_default="0")
+    chapter_blocks_count: Mapped[int]=mapped_column(Integer,default=0,server_default="0")
     id: Mapped[str]=mapped_column(String(36),primary_key=True)
     title: Mapped[str]=mapped_column(String(200))
     kind: Mapped[str]=mapped_column(String(16))
@@ -206,6 +211,13 @@ class TeachingDocument(Base):
     archived: Mapped[bool]=mapped_column(Boolean)
     created_at: Mapped[int]=mapped_column(BigInteger)
     updated_at: Mapped[int]=mapped_column(BigInteger)
+
+class TeachingDocumentVersion(Base):
+    __tablename__="teaching_document_versions"
+    document_id: Mapped[str]=mapped_column(ForeignKey("teaching_documents.id",ondelete="RESTRICT"),primary_key=True)
+    revision: Mapped[int]=mapped_column(Integer,primary_key=True)
+    snapshot: Mapped[dict]=mapped_column(JSON)
+    created_at: Mapped[int]=mapped_column(BigInteger,index=True)
 
 class DocumentRegistration(Base):
     __tablename__="document_registrations"

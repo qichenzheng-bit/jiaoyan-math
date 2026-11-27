@@ -47,6 +47,7 @@ export const workspaceGroups:WorkspaceGroup[]=[
 
 export function workspaceParent(path:string,search:string):string{
  const params=new URLSearchParams(search)
+ if(path==='/selection')return '/project/creation'
  if(path.startsWith('/project/'))return '/'
  if(path==='/original-library')return '/intake'
  if(path==='/intake')return params.has('doc')||params.has('mode')||params.has('resource')?'/intake':'/'
@@ -63,6 +64,7 @@ export function workspaceParent(path:string,search:string):string{
 
 // Parent matching ignores search params only when identifying the business group.
 export function activeWorkspaceGroup(path:string){
+ if(path==='/selection')return workspaceGroups.find(g=>g.id==='creation')
  if(path.startsWith('/resource-edit/')||path.startsWith('/source-print/')||path.startsWith('/source-catalog/'))return workspaceGroups.find(g=>g.id==='teaching')
  if(path==='/intake-single')return workspaceGroups.find(g=>g.id==='intake')
  if(path.startsWith('/print/'))return workspaceGroups.find(g=>g.id==='creation')

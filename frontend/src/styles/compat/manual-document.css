@@ -31,3 +31,12 @@
 @media(max-width:900px){.manual-word-work:not(.assembly-word) .manual-word-layout.has-matches,.manual-word-work:not(.assembly-word) .manual-word-layout.no-matches{grid-template-columns:minmax(0,1fr)}.manual-word-work:not(.assembly-word) .manual-word-outline,.manual-word-work:not(.assembly-word) .manual-word-matches{min-height:0}.legacy-shell.clean-workspace.doc-route .content-inner:has(.manual-intake-cards){padding:8px}.legacy-shell .manual-word-work:not(.assembly-word) .manual-word-paper{padding:12px}.legacy-shell.clean-workspace .content-inner:has(.manual-flow){padding:10px}.mobile-doc-work .mobile-doc-header{padding:8px}}
 @media print{.legacy-shell.clean-workspace .topbar,.legacy-shell.clean-workspace .nav{display:none!important}.print-document{box-shadow:none!important}}
 
+
+.manual-word-outline nav .manual-outline-entry{display:flex;align-items:stretch;gap:3px;min-width:0}
+.manual-word-outline nav .manual-outline-entry .manual-outline-item{flex:1;min-width:0}
+.manual-word-outline nav .manual-outline-entry .manual-outline-toggle{flex:0 0 22px;display:flex;align-items:center;justify-content:center;padding:3px;background:transparent;color:var(--muted)}
+.manual-word-outline nav .manual-outline-export{align-self:center;flex:0 0 auto;font-size:10px;color:var(--accent);text-decoration:none;padding:3px 4px;border-radius:4px}
+.manual-word-outline nav .manual-outline-export:hover{background:var(--accent-soft)}
+.manual-version-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.manual-version-row span{display:grid;min-width:0;gap:2px}.manual-version-row small{color:var(--muted);font-size:11px}
+@media(max-width:900px){.manual-word-outline nav .manual-outline-entry{flex:0 0 auto;max-width:260px}.manual-word-outline nav .manual-outline-entry .manual-outline-item{max-width:150px}.manual-word-outline nav .manual-outline-export{white-space:nowrap}}

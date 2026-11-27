@@ -44,6 +44,7 @@ EXPORTS = [
     ("production/papers/documents", "teaching_documents", "kind='paper'", "id"),
     ("production/handouts/documents", "teaching_documents", "kind='handout'", "id"),
     ("production/textbooks/documents", "teaching_documents", "kind='textbook'", "id"),
+    ("production/documents/versions", "teaching_document_versions", "true", "document_id,revision"),
     ("teaching/documents/references", "document_resource_refs", "true", "document_id,resource_id"),
     ("teaching/intake/registrations", "document_registrations", "true", "id"),
     ("teaching/intake/imports", "intake_imports", "true", "id"),
@@ -75,7 +76,7 @@ FILE_KEY = re.compile(r"(original|generated)/([0-9a-f-]{36})\Z")
 
 
 def business_settings(cur):
-    cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
+    cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^bank[.]cart[.][0-9]+$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
     return dict(cur.fetchall())
 
 def digest(path):
@@ -169,6 +170,7 @@ def logical_allowed(name):
 
 WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
 CATALOG_EXPORTS={"teaching/sources/catalog_details.csv"}
+DOCUMENT_VERSION_EXPORTS={"production/documents/versions.csv"}
 
 def check_manifest(repo, manifest, allow_legacy=False):
     if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
@@ -181,7 +183,9 @@ def check_manifest(repo, manifest, allow_legacy=False):
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
     missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
-    if missing and not (allow_legacy and missing in (WORK_EXPORTS,CATALOG_EXPORTS,WORK_EXPORTS|CATALOG_EXPORTS)):
+    legacy_groups=(WORK_EXPORTS,CATALOG_EXPORTS,DOCUMENT_VERSION_EXPORTS)
+    allowed_missing={frozenset().union(*(group for i,group in enumerate(legacy_groups) if mask&(1<<i))) for mask in range(1,8)}
+    if missing and not (allow_legacy and frozenset(missing) in allowed_missing):
         raise ValueError("incomplete database backup")
 
 

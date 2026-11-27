@@ -14,7 +14,7 @@ from app.models import User
 
 @pytest.mark.skipif(os.environ.get("RUN_POSTGRES_INTEGRATION") != "1",
                     reason="requires dedicated PostgreSQL test database")
-def test_migration_and_login(tmp_path, monkeypatch):
+def test_migration_and_login(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WG_RECOMMENDATION_SCHEDULER","0")
     from dataclasses import replace
     from app.services import storage
@@ -22,7 +22,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
     assert settings.database_url.startswith("postgresql+psycopg://")
     assert engine().url.database == "jiaoyan_ci", "Use a dedicated CI database"
     command.upgrade(Config("alembic.ini"), "head")
-    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "chat_sessions", "chat_messages", "resource_source_links", "resource_source_versions", "knowledge_point_catalog", "resource_knowledge_links", "alembic_version"} <= set(inspect(engine()).get_table_names())
+    assert {"users", "sessions", "settings", "files", "audit_logs", "file_references", "teaching_resources", "teaching_document_versions", "chat_sessions", "chat_messages", "resource_source_links", "resource_source_versions", "knowledge_point_catalog", "resource_knowledge_links", "alembic_version"} <= set(inspect(engine()).get_table_names())
     with TestClient(create_app(), base_url="https://testserver") as client:
         assert client.get("/api/ready").status_code == 503
         assert client.get("/api/system").status_code == 401
@@ -172,6 +172,131 @@ def test_migration_and_login(tmp_path, monkeypatch):
         updated=client.put("/api/documents/"+d["id"],headers=origin,json={**rd,"title":"修订标题"})
         assert updated.status_code==200,updated.text
         assert updated.json()["blocks"][0]["snapshot"]==rd["blocks"][0]["snapshot"]
+        textbook_payload={"title":"教材章节测试","kind":"textbook","subject":"高等数学","source_id":created_doc["source_id"],"blocks":[
+            {"uid":"early-section","kind":"heading","heading_level":2,"title":"错误顺序的小节"}]}
+        assert client.post("/api/documents",headers=origin,json=textbook_payload).status_code==422
+        textbook_payload["blocks"]=[
+            {"uid":"chapter-1","kind":"heading","heading_level":1,"title":"第一章 函数"},
+            {"uid":"section-1","kind":"heading","heading_level":2,"title":"第一节 极限"},
+            {"uid":"body-1","kind":"text","content":"教材正文"},
+            {"uid":"chapter-2","kind":"heading","heading_level":1,"title":"第二章 导数"}]
+        textbook=client.post("/api/documents",headers=origin,json=textbook_payload)
+        assert textbook.status_code==200,textbook.text
+        textbook=textbook.json()
+        versions=client.get("/api/documents/"+textbook["id"]+"/versions").json()
+        assert versions["current_revision"]==1 and versions["items"][0]["revision"]==1
+        edited=client.put("/api/documents/"+textbook["id"],headers=origin,json={**textbook,"title":"教材章节测试·修订"})
+        assert edited.status_code==200,edited.text
+        edited=edited.json()
+        versions=client.get("/api/documents/"+textbook["id"]+"/versions").json()
+        assert [v["revision"] for v in versions["items"]]==[2,1]
+        restored=client.post("/api/documents/"+textbook["id"]+"/versions/1/restore",headers=origin,json={"revision":edited["revision"]})
+        assert restored.status_code==200,restored.text
+        assert restored.json()["title"]=="教材章节测试" and restored.json()["revision"]==3
+        assert client.post("/api/documents/"+textbook["id"]+"/versions/2/restore",headers=origin,json={"revision":edited["revision"]}).status_code==409
+        # Large textbook: chapter metadata is separate from chapter bodies.
+        book=client.post("/api/documents/books",headers=origin,json={"title":"分章教材","subject":"高数"})
+        assert book.status_code==200,book.text
+        book=book.json();bid=book["id"];bpath="/api/documents/"+bid
+        assert book["chaptered"] and book["blocks"]==[]
+        first=client.post(bpath+"/chapters",headers=origin,json={"revision":book["revision"],"title":"第一章"})
+        assert first.status_code==200,first.text
+        first=first.json();cid=first["chapter"]["id"]
+        second=client.post(bpath+"/chapters",headers=origin,json={"revision":first["document"]["revision"],"title":"第二章"})
+        assert second.status_code==200,second.text
+        second=second.json();cid2=second["chapter"]["id"]
+        child=client.get("/api/documents/"+cid).json()
+        assert child["parent_document_id"]==bid and child["blocks"]==[]
+        edited_chapter=client.put("/api/documents/"+cid,headers=origin,json={**child,"blocks":[{"uid":"sec","kind":"heading","heading_level":2,"title":"小节"},{"uid":"body","kind":"text","content":"独立章节正文"}]})
+        assert edited_chapter.status_code==200,edited_chapter.text
+        edited_chapter=edited_chapter.json()
+        assert client.get("/api/documents/"+cid2).json()["blocks"]==[]
+        index=client.get(bpath+"/chapters").json()
+        assert [v["blocks_count"] for v in index["items"]]==[2,0]
+        assert all("blocks" not in v for v in index["items"])
+        assert client.get(bpath).json()["blocks"]==[]
+        assert cid not in [v["id"] for v in client.get("/api/documents?kind=textbook").json()["items"]]
+        assert client.put("/api/documents/"+cid,headers=origin,json=child).status_code==409
+        assert client.put("/api/documents/"+cid,headers=origin,json={**edited_chapter,"blocks":[{"uid":"bad","kind":"heading","heading_level":1,"title":"不允许嵌套章"}]}).status_code==422
+        ordered=client.put(bpath+"/chapter-order",headers=origin,json={"revision":index["document"]["revision"],"ids":[cid2,cid]})
+        assert ordered.status_code==200,ordered.text
+        ordered=ordered.json()
+        export=client.get(bpath+"/export").json()
+        assert [b["title"] for b in export["blocks"] if b.get("heading_level")==1]==["第二章","第一章"]
+        assert any(b["content"]=="独立章节正文" for b in export["blocks"])
+        restore_book=client.post(bpath+"/versions/"+str(second["document"]["revision"])+"/restore",headers=origin,json={"revision":ordered["document"]["revision"]})
+        assert restore_book.status_code==200,restore_book.text
+        restored_index=client.get(bpath+"/chapters").json()
+        assert [v["id"] for v in restored_index["items"]]==[cid,cid2]
+        assert client.get("/api/documents/"+cid).json()["blocks"]==[]
+        # Shared handout chapter model and two retained historical revisions.
+        handout=client.post("/api/documents/books",headers=origin,json={"kind":"handout","title":"分章讲义"}).json()
+        hpath="/api/documents/"+handout["id"]
+        assert handout["kind"]=="handout" and handout["chaptered"]
+        hchapter=client.post(hpath+"/chapters",headers=origin,json={"revision":handout["revision"],"title":"极限专题"}).json()["chapter"]
+        hcpath="/api/documents/"+hchapter["id"]
+        hd=client.get(hcpath).json()
+        assert hd["kind"]=="handout" and hd["parent_document_id"]==handout["id"]
+        for number in range(4):
+            edit=client.put(hcpath,headers=origin,json={**hd,"blocks":[{"uid":"section","kind":"heading","heading_level":2,"title":"小节"},{"uid":"text","kind":"text","content":str(number)}]})
+            assert edit.status_code==200,edit.text
+            hd=edit.json()
+        hv=client.get(hcpath+"/versions").json()
+        assert hv["history_limit"]==2 and [v["revision"] for v in hv["items"]]==[5,4,3]
+        assert client.post(hcpath+"/versions/2/restore",headers=origin,json={"revision":5}).status_code==404
+        from app.models import TeachingDocumentVersion
+        from sqlalchemy import select
+        with session_factory()() as db:
+            assert set(db.scalars(select(TeachingDocumentVersion.revision).where(TeachingDocumentVersion.document_id==hd["id"])))=={3,4,5}
+        handout_export=client.get(hpath+"/export").json()
+        assert handout_export["kind"]=="handout" and handout_export["blocks"][-1]["content"]=="3"
+        hv=client.get(hpath+"/versions").json()
+        assert len(hv["items"])==3
+        old_book_revision=hv["items"][-1]["revision"]
+        restore_handout=client.post(hpath+"/versions/"+str(old_book_revision)+"/restore",headers=origin,json={"revision":hv["current_revision"]})
+        assert restore_handout.status_code==200,restore_handout.text
+        assert client.get(hcpath).json()["blocks"][-1]["content"]=="1"
+        assert hchapter["id"] not in [x["id"] for x in client.get("/api/documents?kind=handout").json()["items"]]
+        promoted=client.post(hpath+"/promote",headers=origin,json={"revision":restore_handout.json()["revision"]})
+        assert promoted.status_code==200,promoted.text
+        source_export=client.get("/api/documents/source-export/"+promoted.json()["source_id"])
+        assert source_export.status_code==200,source_export.text
+        assert source_export.json()["blocks"][-1]["content"]=="1"
+        # Exercise the 5000-block boundary through the actual API, not a raised JSON limit.
+        import time
+        scale_book=client.post("/api/documents/books",headers=origin,json={"title":"5000项教材容量测试"}).json()
+        scale_path="/api/documents/"+scale_book["id"]
+        started=time.monotonic()
+        for chapter_no in range(25):
+            cresult=client.post(scale_path+"/chapters",headers=origin,json={"revision":scale_book["revision"],"title":f"章节 {chapter_no+1}"})
+            assert cresult.status_code==200,cresult.text
+            cresult=cresult.json();chapter_id=cresult["chapter"]["id"]
+            chapter_doc=client.get("/api/documents/"+chapter_id).json()
+            payload=[{"uid":f"b-{n}","kind":"text","content":f"第 {chapter_no+1} 章第 {n+1} 项 $x^2$"} for n in range(200)]
+            written=client.put("/api/documents/"+chapter_id,headers=origin,json={**chapter_doc,"blocks":payload})
+            assert written.status_code==200,written.text
+            scale_book=client.get(scale_path).json()
+            assert scale_book["blocks"]==[]
+        scale_directory=client.get(scale_path+"/chapters").json()
+        assert len(scale_directory["items"])==25 and sum(x["blocks_count"] for x in scale_directory["items"])==5000
+        assert all("blocks" not in x for x in scale_directory["items"])
+        assert len(json.dumps(scale_directory,ensure_ascii=False).encode())<20000
+        scale_export=client.get(scale_path+"/export")
+        assert scale_export.status_code==200,scale_export.text[:500]
+        assert len(scale_export.json()["blocks"])==5025
+        extra=client.post(scale_path+"/chapters",headers=origin,json={"revision":scale_book["revision"],"title":"容量边界章节"}).json()
+        extra_path="/api/documents/"+extra["chapter"]["id"]
+        extra_doc=client.get(extra_path).json()
+        assert client.put(extra_path,headers=origin,json={**extra_doc,"blocks":[{"uid":"overflow","kind":"text","content":"超容量"}]}).status_code==422
+        assert client.get(extra_path).json()["blocks"]==[]
+        receipt=client.get(scale_path+"/versions").json()
+        assert len(receipt["items"])==3 and receipt["history_limit"]==2 and receipt["items"][0]["blocks_count"]==5000
+        rolled=client.post(scale_path+"/versions/"+str(scale_book["revision"])+"/restore",headers=origin,json={"revision":extra["document"]["revision"]})
+        assert rolled.status_code==200,rolled.text[:500]
+        after=client.get(scale_path+"/chapters").json()
+        assert sum(x["blocks_count"] for x in after["items"] if not x["archived"])==5000
+        assert next(x for x in after["items"] if x["id"]==extra["chapter"]["id"])["archived"]
+        print("TEXTBOOK_5000 seconds=",round(time.monotonic()-started,2),"directory_bytes=",len(json.dumps(scale_directory,ensure_ascii=False).encode()),"export_bytes=",len(scale_export.content))
         # Full-library stem matching and transactional registration.
         batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[
             {"uid":"same","kind":"question","title":"极限","content":"求极限","solution":"另一种解法","question_type":"综合题"},
@@ -500,6 +625,37 @@ def test_migration_and_login(tmp_path, monkeypatch):
         paper=client.get("/api/documents/"+handoff.json()["document_id"]).json()
         assert [b["resource_id"] for b in paper["blocks"]]==c["ids"]
         assert paper["blocks"][0]["snapshot"]["difficulty"]=="困难"
+        scored=client.put("/api/documents/"+paper["id"],headers=origin,json={**paper,"blocks":[{**paper["blocks"][0],"score":7.5},*paper["blocks"][1:]]})
+        assert scored.status_code==200,scored.text
+        assert scored.json()["blocks"][0]["score"]==7.5
+        bad_scores=client.put("/api/documents/"+paper["id"],headers=origin,json={**scored.json(),"blocks":[{**scored.json()["blocks"][0],"subquestion_scores":[1,2]},*scored.json()["blocks"][1:]]})
+        assert bad_scores.status_code==422,bad_scores.text
+        base_paper=scored.json()
+        prior_answer=base_paper["blocks"][0]["snapshot"]["answer"]
+        edited_reference=client.put("/api/documents/"+paper["id"],headers=origin,json={**base_paper,"blocks":[{**base_paper["blocks"][0],"local_fields":["answer"],"answer":"仅本卷答案","hidden_fields":["solution"]},*base_paper["blocks"][1:]]})
+        assert edited_reference.status_code==200,edited_reference.text
+        changed=edited_reference.json()
+        assert changed["blocks"][0]["local_fields"]==["answer"] and changed["blocks"][0]["answer"]=="仅本卷答案"
+        assert changed["blocks"][0]["hidden_fields"]==["solution"]
+        assert changed["blocks"][0]["snapshot"]["answer"]==prior_answer
+        assert client.get("/api/resources/"+seed["id"]).json()["answer"]==prior_answer
+        assert client.put("/api/documents/"+paper["id"],headers=origin,json=base_paper).status_code==409
+        assert client.get("/api/documents/"+paper["id"]+"/export").json()["blocks"][0]["answer"]=="仅本卷答案"
+        merged_doc=client.post("/api/documents/"+paper["id"]+"/merge",headers=origin,json={**base_paper,"title":"另一设备标题"})
+        assert merged_doc.status_code==200,merged_doc.text
+        assert merged_doc.json()["title"]=="另一设备标题"
+        assert merged_doc.json()["blocks"][0]["answer"]=="仅本卷答案"
+        conflict=client.post("/api/documents/"+paper["id"]+"/merge",headers=origin,json={**changed,"title":"冲突标题"})
+        assert conflict.status_code==409,conflict.text
+        assert client.get("/api/documents/"+paper["id"]).json()["title"]=="另一设备标题"
+        partial={**payload,"items":[payload["items"][1]],"request_id":"cart-partial-ci"}
+        partial_result=client.post("/api/bank/cart/confirm",headers=origin,json=partial)
+        assert partial_result.status_code==200,partial_result.text
+        partial_doc=client.get("/api/documents/"+partial_result.json()["document_id"]).json()
+        assert [b["resource_id"] for b in partial_doc["blocks"]]==[merged_id]
+        assert client.get("/api/bank/cart").json()["ids"]==c["ids"]
+        invalid={**partial,"items":[payload["items"][1],payload["items"][0]],"request_id":"cart-reordered-ci"}
+        assert client.post("/api/bank/cart/confirm",headers=origin,json=invalid).status_code==409
         assert client.get("/api/bank/sources/"+source_a["id"]+"/questions").json()["question_count"]==1
         loc=client.get("/api/resources/"+seed["id"]+"/sources").json()
         loc_body={"revision":loc["revision"],"source_id":source_a["id"],"role":"original","action":"add","original_question_number":"11","page_start":3,"page_end":3,"chapter":"例题"}
@@ -1293,6 +1449,56 @@ def test_migration_and_login(tmp_path, monkeypatch):
                 assert json.loads(restored["source.file.versions."+fixture_source["id"]])["items"][0]["active"] is False
             db.rollback()
         assert client.delete(stats_path+"/scopes/"+saved_scope.json()["id"],headers=origin).status_code==200
+
+        # Full-sized HTTP export benchmark using isolated PostgreSQL synthetic rows.
+        # Direct seeding avoids thousands of repeated historical writes; this tests export,
+        # not the write-side capacity or the browser's PDF pagination performance.
+        from app.api.documents import Block, COMPLETE_EXPORT_MAX_BYTES
+        from uuid import uuid4
+        import resource
+        load_book_id=str(uuid4())
+        per_chapter=COMPLETE_EXPORT_MAX_BYTES//100
+        large_blocks=[]
+        for n in range(25):
+            large_blocks.append(Block(uid=f"t{n}",kind="text",content="数学"*9000).model_dump(mode="json"))
+        for n in range(25):
+            q=Block(uid=f"q{n}",kind="reference",resource_id=str(uuid4())).model_dump(mode="json")
+            q["snapshot"]={"kind":"question","content":"函数"*4000,"title":"容量测试","answer":"","solution":"","analysis":"","proof":"","revision":1}
+            large_blocks.append(q)
+        serialized=json.dumps(large_blocks,ensure_ascii=False)
+        remaining=per_chapter-len(serialized.encode("utf-8"))
+        assert 0<=remaining<=50000
+        large_blocks[-1]["snapshot"]["content"]+="x"*remaining
+        serialized=json.dumps(large_blocks,ensure_ascii=False)
+        assert len(serialized.encode("utf-8"))==per_chapter
+        try:
+            with session_factory()() as db:
+                db.execute(text("""
+                    INSERT INTO teaching_documents (id,title,kind,subject,source_id,blocks,revision,archived,created_at,updated_at,chaptered,parent_document_id,chapter_order,chapter_blocks_count)
+                    VALUES (:id,'200 MB容量测试','textbook','',NULL,'[]'::json,1,false,0,0,true,NULL,0,0)
+                """),{"id":load_book_id})
+                # Each chapter shares the same synthetic data; SQL generates independent chapter IDs.
+                db.execute(text("""
+                    INSERT INTO teaching_documents (id,title,kind,subject,source_id,blocks,revision,archived,created_at,updated_at,chaptered,parent_document_id,chapter_order,chapter_blocks_count)
+                    SELECT md5(:id || ':' || n::text),'章节 ' || n::text,'textbook','',NULL,CAST(:blocks AS json),1,false,0,0,false,:id,n,50
+                    FROM generate_series(1,100) AS n
+                """),{"id":load_book_id,"blocks":serialized})
+                db.commit()
+            start=time.monotonic()
+            response=client.get("/api/documents/"+load_book_id+"/export",timeout=180)
+            elapsed=time.monotonic()-start
+            assert response.status_code==200,response.text[:500] if response.status_code!=200 else ""
+            assert 195_000_000<=len(response.content)<=205_000_000
+            assert response.content.count(b'"heading_level":1')==100
+            with capsys.disabled():
+                print("EXPORT_200MB",json.dumps({"source_bytes":COMPLETE_EXPORT_MAX_BYTES,"http_bytes":len(response.content),"seconds":round(elapsed,3),"peak_rss_mib":round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1),"chapters":100,"blocks":5000}),flush=True)
+            assert elapsed<120,"200 MB export exceeds 120-second CI benchmark budget"
+            del response
+        finally:
+            with session_factory()() as db:
+                db.execute(text("DELETE FROM teaching_documents WHERE parent_document_id=:id"),{"id":load_book_id})
+                db.execute(text("DELETE FROM teaching_documents WHERE id=:id"),{"id":load_book_id})
+                db.commit()
 
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
