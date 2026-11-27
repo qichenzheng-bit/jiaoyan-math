@@ -40,7 +40,7 @@ def answer(route):
     result={
       "/auth/me":{"username":"预览管理员"},"/ready":{"status":"ok"},"/settings":{"display_name":"微光数学","theme":"light"},"/resources/subjects":subjects,
       "/knowledge/points":{"items":points,"total":len(points)},"/knowledge/relations":{"items":edges,"truncated":False},
-      "/documents/demo":doc,"/documents/source-export/source-preview":{**doc,"kind":"paper","source_export":True,"has_source_content":True,"batch_count":1},"/documents/demo/origin":{"job_id":"review-demo","input_text":r"原始资料 $x^2$","provenance":{"kind":"manual"},"supplements":[]},"/resources/source-preview":source,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
+      "/documents/demo":doc,"/documents/source-export/source-preview":{**doc,"kind":"paper","source_export":True,"has_source_content":True,"batch_count":1,"export_token":"a"*64},"/documents/demo/origin":{"job_id":"review-demo","input_text":r"原始资料 $x^2$","provenance":{"kind":"manual"},"supplements":[]},"/resources/source-preview":source,"/documents":{"items":[{k:v for k,v in doc.items() if k!="blocks"}],"total":1},
       "/intelligence/jobs":[],"/intelligence/import/capabilities":{"text":True,"docx":True,"pdf_text":True,"image_ocr":False,"pdf_ocr":False},"/chat/sessions/chat-demo":demo_chat,"/intelligence/chat-source/msg-user":{"message_id":"msg-user","session_id":"chat-demo","role":"user","text":demo_chat["messages"][0]["content"],"title":demo_chat["title"],"has_attachments":False},"/chat/sessions":[{k:v for k,v in demo_chat.items() if k!="messages"}],"/qoder/status":{"available":True,"chat_available":True,"worker_version":4},"/qoder/models":{"source":"cli","models":[{"id":"Auto","label":"Auto","efforts":["medium","high"]}]},"/qoder/preferences":{"model":"Auto","effort":"medium","video_model":"Auto","video_effort":"medium"},
       "/settings/status":{"version":"preview","release":"synthetic-preview","disk":None},"/settings/audit":[],
       "/studio/presets":{"bilibili":[1200,900,7,7,7,7],"bilibili_wide":[1920,1080,8,8,8,8],"douyin":[1080,1440,9,12,8,8],"douyin_wide":[1440,1080,8,8,8,8],"douyin_full":[1080,1920,13,21,8,12],"xiaohongshu":[1080,1440,8,10,8,8],"wechat_channels":[1080,1260,8,10,8,8],"wechat_channels_wide":[1920,1080,8,8,8,8],"wechat_top":[900,383,6,8,28.72,28.72],"wechat_sub":[500,500,8,8,8,8]},
@@ -213,7 +213,7 @@ def answer(route):
             result={"mode":"chapters","items":[{"chapter":c,"count":sum(p["chapter"]==c for p in roots)} for c in chapters],"total":len(chapters)}
         else:
             result={"mode":"points","items":[{**p,"child_count":sum(e["source_id"]==p["id"] for e in relations)} for p in rows],"total":len(rows)}
-    if p.startswith("/settings/document-layout/") or p=="/settings/document-templates":
+    if p.startswith(("/settings/document-layout/","/settings/source-layout-draft/")) or p=="/settings/document-templates":
         record=layout_profiles.get(p,{"revision":0,"value":[] if p.endswith("document-templates") else None,"history":[]})
         if route.request.method=="PUT":
             body=route.request.post_data_json
@@ -222,6 +222,7 @@ def answer(route):
             record={"revision":record["revision"]+1,"value":body["value"],"history":([{"revision":record["revision"],"value":record["value"]}]+record["history"])[:2] if record["revision"] else []}
             layout_profiles[p]=record
         result=record
+    if p.startswith("/document-pdf/") and p.endswith("/jobs"):result=[]
     if p.startswith("/knowledge/points/") and p.endswith("/resources"):result=[]
     if result is None:result={}
     route.fulfill(status=200,content_type="application/json",body=json.dumps(result,ensure_ascii=False))
@@ -1410,8 +1411,8 @@ with sync_playwright() as p:
             expect(page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)).to_have_count(0)
             page.get_by_label("选择排版模板").select_option("paper")
             page.get_by_role("button",name="进入排版工作台",exact=True).click()
-            page.locator(".print-document .katex").first.wait_for()
-            expect(page.locator(".print-question-number")).to_have_count(4)
+            page.locator(".layout-pages .katex").first.wait_for()
+            expect(page.locator(".layout-pages .print-question-number")).to_have_count(4)
             export=page.get_by_role("button",name="打印 / 保存为 PDF",exact=True)
             expect(export).to_be_disabled()
             page.get_by_label("已检查预览，确认无问题").check()
@@ -1420,8 +1421,8 @@ with sync_playwright() as p:
             expect(export).to_be_disabled()
             expect(page.locator(".print-document").get_by_text("答案：",exact=False)).to_have_count(0)
             page.get_by_role("button",name="预览",exact=True).click()
-            expect(page.locator(".print-document")).to_be_visible()
-            expect(page.locator(".layout-settings")).to_have_count(0)
+            expect(page.locator(".layout-pages .print-document").first).to_be_visible()
+            expect(page.locator(".layout-settings:not(.layout-pdf-jobs)")).to_have_count(0)
             page.get_by_role("button",name="排版设置",exact=True).click()
             page.get_by_label("纸张",exact=True).select_option("A5")
             page.get_by_role("button",name="保存排版到服务器",exact=True).click()
