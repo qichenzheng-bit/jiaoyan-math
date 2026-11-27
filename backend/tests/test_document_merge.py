@@ -22,3 +22,18 @@ def test_independent_fields_same_block():
     r["blocks"][0]["answer"]="答案"
     out=merge_document(b,l,r)["blocks"][0]
     assert out["score"]==6 and out["answer"]=="答案"
+
+def test_independent_reference_overrides():
+    b=doc();l=doc();r=doc()
+    l["blocks"][0].update(answer="甲答案",local_fields=["answer"],hidden_fields=["proof"])
+    r["blocks"][0].update(solution="乙解析",local_fields=["solution"],hidden_fields=["analysis"])
+    out=merge_document(b,l,r)["blocks"][0]
+    assert out["answer"]=="甲答案" and out["solution"]=="乙解析"
+    assert out["local_fields"]==["answer","solution"]
+    assert out["hidden_fields"]==["analysis","proof"]
+
+def test_same_reference_field_conflicts():
+    b=doc();l=doc();r=doc()
+    l["blocks"][0].update(answer="甲",local_fields=["answer"])
+    r["blocks"][0].update(answer="乙",local_fields=["answer"])
+    with pytest.raises(MergeConflict):merge_document(b,l,r)

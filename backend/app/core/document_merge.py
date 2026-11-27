@@ -28,6 +28,18 @@ def merge_document(base,local,remote):
         for group in groups:
             values=[{k:v.get(k) for k in group} for v in (b,l,r)]
             out.update(choose(*values,"条目 "+uid+" / "+"/".join(group)))
+        if b.get("kind")=="reference":
+            # Treat a field override's value and activation as one edit, not the entire list.
+            overrides=[]
+            for field in ("title","content","answer","solution","analysis","proof"):
+                values=[(field in (v.get("local_fields") or []),v.get(field)) for v in (b,l,r)]
+                enabled,value=choose(*values,"条目 "+uid+" / "+field)
+                if enabled:overrides.append(field)
+                out[field]=value
+                grouped.add(field)
+            out["local_fields"]=overrides
+            out["hidden_fields"]=[field for field in ("answer","solution","analysis","proof") if choose(*(field in (v.get("hidden_fields") or []) for v in (b,l,r)),"条目 "+uid+" / 显示 "+field)]
+            grouped.update(("local_fields","hidden_fields"))
         for key in (set(b)|set(l)|set(r))-grouped-{"uid"}:
             out[key]=choose(b.get(key),l.get(key),r.get(key),"条目 "+uid+" / "+key)
         merged.append(out)
