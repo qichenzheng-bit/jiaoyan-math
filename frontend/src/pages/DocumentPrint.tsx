@@ -11,7 +11,7 @@ import './document-layout.css'
 import {useParams,useSearchParams,Link,useNavigate} from 'react-router-dom'
 import {api} from '../auth'
 import ChatText from './ChatText'
-type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:{stem:string;options?:{label:string;content:string}[];blanks?:unknown[]}}
+type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:{stem:string;options?:{label:string;content:string}[];blanks?:unknown[]}|null}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
 type SourceDraft={export_token:string;selected_uids?:string[]|null;overrides:Record<string,Partial<Content>>;stem:boolean;answerOnly:boolean;filename:string}
 type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
@@ -68,7 +68,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
    if(remoteDraft&&Number.isInteger(remoteDraft.revision))setDraftRevision(remoteDraft.revision)
    const localDraft=readLocal<{baseRevision:number|null;value:SourceDraft} | null>(storageKey+':source-draft',null)
    const draftValue=localDraft&&localDraft.baseRevision===(remoteDraft?.revision??null)?localDraft.value:remoteDraft?.value??localDraft?.value
-   if(source&&draftValue?.export_token===data.export_token){setScopeMode(draftValue.selected_uids==null?'all':'selected');setScope(draftValue.selected_uids??[]);setOverrides(draftValue.overrides??{});setStem(draftValue.stem);setAnswerOnly(draftValue.answerOnly);setFilename(draftValue.filename||data.title)}
+   if(source&&draftValue&&draftValue.export_token===data.export_token){setScopeMode(draftValue.selected_uids==null?'all':'selected');setScope(draftValue.selected_uids??[]);setOverrides(draftValue.overrides??{});setStem(draftValue.stem);setAnswerOnly(draftValue.answerOnly);setFilename(draftValue.filename||data.title)}
    else if(draftValue)setMessage('来源内容已更新，旧内容草稿不会自动应用。')
    setHasDraft(Boolean(current));setTemplateId(defaultTemplate.id);setLayout(current?sanitizeLayout(current):{...sanitizeLayout(defaultTemplate.layout),originalNumbers:source});setDoc(data);if(!source||!draftValue||draftValue.export_token!==data.export_token)setFilename(data.title);setLoadedKey(storageKey)
   }).catch(e=>{if(!c.signal.aborted)setError(e.message)})
@@ -80,10 +80,11 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  },[doc,layout,loadedKey,storageKey,cloudRevision])
  const draftValue:SourceDraft|undefined=source&&doc?.export_token?{export_token:doc.export_token,selected_uids:scopeMode==='all'?null:scope,overrides,stem,answerOnly,filename}:undefined
  useEffect(()=>{if(draftValue&&loadedKey===storageKey&&editing&&!writeLocal(storageKey+':source-draft',{baseRevision:draftRevision,value:draftValue}))setMessage('浏览器无法保存内容草稿，请保存到服务器。')},[doc,scope,scopeMode,overrides,stem,answerOnly,filename,loadedKey,storageKey,draftRevision,editing])
- const viewDoc=useMemo(()=>doc?{...doc,blocks:doc.blocks.filter(b=>scopeMode==='all'||scope.includes(b.uid)).map(b=>{
+ const scopeSet=useMemo(()=>new Set(scope),[scope])
+ const viewDoc=useMemo(()=>doc?{...doc,blocks:doc.blocks.filter(b=>scopeMode==='all'||scopeSet.has(b.uid)).map(b=>{
   const edit=overrides[b.uid];if(!edit)return b
   return {...b,...edit,local_fields:Array.from(new Set([...(b.local_fields??[]),...Object.keys(edit)])) as Block['local_fields']}
- })}:undefined,[doc,scopeMode,scope,overrides])
+ })}:undefined,[doc,scopeMode,scopeSet,overrides])
  const renderVersion=useMemo(()=>({viewDoc,stem,answerOnly}),[viewDoc,stem,answerOnly])
  const activeEdit=doc?.blocks.find(b=>b.uid===editUid)
  function invalidate(){setConfirmed(false);setReady(false)}
@@ -214,7 +215,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   {doc&&editing&&<>
    {controls&&source&&<section className="print-controls layout-settings"><details><summary>来源导出范围与局部内容</summary>
     <label>导出范围<select value={scopeMode} onChange={e=>{invalidate();setScopeMode(e.target.value as 'all'|'selected');if(e.target.value==='selected'&&!scope.length)setScope(doc.blocks.map(b=>b.uid))}}><option value="all">全部已入库内容</option><option value="selected">自由选择内容</option></select></label>
-    {scopeMode==='selected'&&<div className="layout-selection"><button onClick={()=>{invalidate();setScope(doc.blocks.map(b=>b.uid))}}>全选</button><button onClick={()=>{invalidate();setScope([])}}>清空</button>{doc.blocks.map((b,i)=><label key={b.uid}><input type="checkbox" checked={scope.includes(b.uid)} onChange={e=>{invalidate();setScope(old=>e.target.checked?[...old,b.uid]:old.filter(x=>x!==b.uid))}}/>{i+1}. <MathText compact content={(b.snapshot??b).title||(b.snapshot??b).content.slice(0,100)}/></label>)}</div>}
+    {scopeMode==='selected'&&<div className="layout-selection"><button onClick={()=>{invalidate();setScope(doc.blocks.map(b=>b.uid))}}>全选</button><button onClick={()=>{invalidate();setScope([])}}>清空</button>{doc.blocks.map((b,i)=><label key={b.uid}><input type="checkbox" checked={scopeSet.has(b.uid)} onChange={e=>{invalidate();setScope(old=>e.target.checked?[...old,b.uid]:old.filter(x=>x!==b.uid))}}/>{i+1}. <MathText compact content={(b.snapshot??b).title||(b.snapshot??b).content.slice(0,100)}/></label>)}</div>}
     <label>仅修改当前导出副本<select value={editUid} onChange={e=>setEditUid(e.target.value)}><option value="">选择内容</option>{doc.blocks.map((b,i)=><option key={b.uid} value={b.uid}>{i+1}. {(b.snapshot??b).title||b.kind}</option>)}</select></label>
     {activeEdit&&(['title','content','answer','solution','analysis','proof'] as const).map(field=><label key={field}>{({title:'标题',content:'正文',answer:'答案',solution:'解析',analysis:'思路',proof:'证明'})[field]}<textarea rows={3} value={overrides[editUid]?.[field]??(activeEdit.local_fields?.includes(field)?activeEdit[field]:(activeEdit.snapshot??activeEdit)[field])??''} onChange={e=>{invalidate();setOverrides(old=>({...old,[editUid]:{...old[editUid],[field]:e.target.value}}))}}/></label>)}
     {activeEdit&&<button onClick={()=>{invalidate();setOverrides(old=>Object.fromEntries(Object.entries(old).filter(([k])=>k!==editUid)))}}>恢复该条原内容</button>}
