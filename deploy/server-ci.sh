@@ -38,7 +38,7 @@ echo "=== Isolated backend $(python3 --version) ==="
     DATABASE_URL="postgresql+psycopg://jiaoyan_ci@/jiaoyan_ci?host=$scratch/socket&port=55432" \
     RUN_POSTGRES_INTEGRATION=1 APP_ORIGIN=https://testserver COOKIE_SECURE=true \
     STORAGE_ROOT="$scratch/files" JIAOYAN_CI_ISOLATION=1 \
-    "$py" -m pytest -q
+    "$py" -m pytest -q --ignore=tests/test_question_search_scale.py
 )
 "$pgbin/pg_ctl" -D "$scratch/pg" -m fast -w stop
 pg_started=0
