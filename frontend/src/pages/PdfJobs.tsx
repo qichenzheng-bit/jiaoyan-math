@@ -1,5 +1,8 @@
 import {useEffect,useRef,useState} from 'react'
 import {api} from '../auth'
+import {WrapArt,wrapDefaults,wrapDimensions,wrapError} from './PrintWrap'
+import type {WrapSettings} from './PrintWrap'
+import type {Layout} from './documentLayout'
 
 function validateRanges(raw:string,total:number){
  if(!raw.trim())return ''
@@ -13,9 +16,14 @@ function validateRanges(raw:string,total:number){
  return ''
 }
 type Job={id:string;state:'queued'|'running'|'ready'|'failed'|'cancelled';stage:string;detail:string;filename:string;pages:number;bytes:number;total_pages?:number;page_ranges?:string}
-export default function PdfJobs({path,request,canExport,pageCount}:{path:string;request:Record<string,unknown>;canExport:boolean;pageCount:number}){
+export default function PdfJobs({path,request,canExport,pageCount,layout,title}:{path:string;request:Record<string,unknown>;canExport:boolean;pageCount:number;layout:Layout;title:string}){
  const [jobs,setJobs]=useState<Job[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false)
  const [ranges,setRanges]=useState('')
+ const [wrap,setWrap]=useState<WrapSettings>({...wrapDefaults})
+ const [wrapOpen,setWrapOpen]=useState(false),[wrapConfirmed,setWrapConfirmed]=useState(false)
+ const [caliper,setCaliper]=useState(.1)
+ const wrapInvalid=wrapError(layout,wrap),geometry=wrapDimensions(layout,wrap)
+ const patchWrap=(v:Partial<WrapSettings>)=>{setWrap(old=>({...old,...v}));setWrapConfirmed(false)}
  const rangeError=validateRanges(ranges,pageCount)
  const [reviewed,setReviewed]=useState<Record<string,boolean>>({})
  const active=useRef(path);active.current=path
@@ -25,14 +33,15 @@ export default function PdfJobs({path,request,canExport,pageCount}:{path:string;
    try{const list=await api<Job[]>(path+'/jobs');if(live&&Array.isArray(list))setJobs(list)}
    catch(e){if(live)setError(e instanceof Error?e.message:'无法读取 PDF 任务')}
   }
-  setJobs([]);setReviewed({});setRanges('');setError('');setBusy(false);void refresh()
+  setJobs([]);setReviewed({});setRanges('');setWrap({...wrapDefaults});setWrapOpen(false);setWrapConfirmed(false);setError('');setBusy(false);void refresh()
   const timer=window.setInterval(()=>void refresh(),2500)
   return()=>{live=false;window.clearInterval(timer)}
  },[path])
- async function generate(){
-  if(!canExport||busy||rangeError)return
+ useEffect(()=>{setWrapConfirmed(false)},[layout,pageCount])
+ async function generate(cover=false){
+  if(!canExport||busy||(cover?!!wrapInvalid||!wrapConfirmed:!!rangeError))return
   setBusy(true);setError('')
-  try{const job=await api<Job>(path,{method:'POST',body:JSON.stringify({...request,page_ranges:ranges,preview_pages:pageCount})});if(active.current!==path)return;setJobs(old=>[job,...old.filter(j=>j.id!==job.id)])}
+  try{const job=await api<Job>(path,{method:'POST',body:JSON.stringify({...request,page_ranges:cover?'':ranges,preview_pages:pageCount,...(cover?{wrap,filename:title+'-印刷书衣'}:{})})});if(active.current!==path)return;setJobs(old=>[job,...old.filter(j=>j.id!==job.id)])}
   catch(e){if(active.current===path)setError(e instanceof Error?e.message:'PDF 提交失败')}
   finally{if(active.current===path)setBusy(false)}
  }
@@ -47,7 +56,21 @@ export default function PdfJobs({path,request,canExport,pageCount}:{path:string;
   <label>指定 PDF 页码（留空导出全部）<input aria-label="指定 PDF 页码" value={ranges} maxLength={2000} placeholder="例如 1-3,5" onChange={e=>setRanges(e.target.value)}/></label>
   {rangeError&&<small role="alert">{rangeError}</small>}
   <small className="muted">指定页码以完整预览为准，保留原来的页眉、页脚和页号。</small>
-  <small className="muted">后台生成任务可离开本页。成品需打开最终 PDF 检查后再下载；临时文件保留 6 小时，服务器重启后任务可能失效。</small>
+  <small className="muted">后台生成任务可离开本页。成品需打开最终 PDF 检查后再下载；临时文件保留 6 小时，服务重启后未完成任务会重新生成。</small>
+  {!!layout.coverFileId&&!!layout.backCoverFileId&&<details open={wrapOpen} onToggle={e=>setWrapOpen(e.currentTarget.open)}><summary>独立印刷书衣 PDF（封底＋书脊＋封面）</summary>
+   {wrapOpen&&<><div className="layout-fields">
+    <label>书脊宽度 (mm)<input type="number" min={0} max={150} step={.1} value={wrap.spine} onChange={e=>patchWrap({spine:e.currentTarget.valueAsNumber})}/></label>
+    <label>出血 (mm)<input type="number" min={0} max={20} step={.1} value={wrap.bleed} onChange={e=>patchWrap({bleed:e.currentTarget.valueAsNumber})}/></label>
+    <label>单张纸厚度 (mm)<input type="number" min={.01} max={1} step={.01} value={caliper} onChange={e=>setCaliper(e.currentTarget.valueAsNumber)}/></label>
+    <button type="button" disabled={!pageCount||!Number.isFinite(caliper)||caliper<.01||caliper>1} onClick={()=>patchWrap({spine:Math.min(150,Math.round(Math.ceil(Math.max(0,pageCount-2)/2)*caliper*10)/10)})}>按正文纸张厚度估算书脊</button>
+    <label>书脊文字<input maxLength={200} value={wrap.spineText} onChange={e=>patchWrap({spineText:e.target.value})}/></label>
+    <button type="button" onClick={()=>patchWrap({spineText:title})}>使用文档名称</button>
+    <label>书衣底色<input type="color" value={wrap.background} onChange={e=>patchWrap({background:e.target.value})}/></label>
+    <label>书脊文字颜色<input type="color" value={wrap.foreground} onChange={e=>patchWrap({foreground:e.target.value})}/></label>
+   </div><small>成品尺寸 {geometry.totalWidth.toFixed(1)} × {geometry.totalHeight.toFixed(1)} mm。书脊估算不含胶层或装订附加厚度，请以印厂确认值为准。图片完整显示，出血由底色填充，不自动延展原图。</small>
+   {wrapInvalid?<p role="alert">{wrapInvalid}</p>:<><div className="layout-wrap-preview"><WrapArt layout={layout} wrap={wrap}/></div><label><input type="checkbox" checked={wrapConfirmed} onChange={e=>setWrapConfirmed(e.target.checked)}/>已核对书衣尺寸与预览</label><button disabled={!canExport||busy||!wrapConfirmed} onClick={()=>void generate(true)}>生成印刷书衣 PDF</button></>}
+   </>}
+  </details>}
   {error&&<p role="alert">{error}</p>}
   {jobs.map(job=><article className="layout-pdf-job" key={job.id}>
    <strong>{job.filename}</strong><small>{job.stage}{job.pages?' · '+job.pages+' 页':''}{job.bytes?' · '+(job.bytes/1_000_000).toFixed(2)+' MB':''}</small>
