@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react'
 import {api} from '../auth'
+import {WorkspaceLink as Link} from '../components/WorkspaceNavigation'
 import {WrapArt,wrapDefaults,wrapDimensions,wrapError} from './PrintWrap'
 import type {WrapSettings} from './PrintWrap'
 import type {Layout} from './documentLayout'
@@ -76,7 +77,7 @@ export default function PdfJobs({path,request,canExport,pageCount,layout,title}:
    <strong>{job.filename}</strong><small>{job.stage}{job.pages?' · '+job.pages+' 页':''}{job.bytes?' · '+(job.bytes/1_000_000).toFixed(2)+' MB':''}</small>
    {job.detail&&<p role="alert">{job.detail}</p>}
    {job.state==='queued'||job.state==='running'?<button onClick={()=>void action(job,'cancel')}>取消任务</button>:<button onClick={()=>void action(job,'delete')}>清理记录</button>}
-   {job.state==='ready'&&<>{job.work_error?<p role="alert">{job.work_error}</p>:job.work_id?<small>{job.work_version===0?'书衣已保存，等待匹配正文':'已自动保存教学作品 · V'+job.work_version}</small>:null}<a className="button-link" target="_blank" rel="noopener" href={'/api/document-pdf/jobs/'+job.id+'/file'}>打开最终 PDF 预览</a>
+   {job.state==='ready'&&<>{job.work_error?<p role="alert">{job.work_error}</p>:job.work_id?<small>{job.work_version===0?'书衣已保存，等待匹配正文':'已自动保存教学作品 · V'+job.work_version}　<Link to={'/works?work='+encodeURIComponent(job.work_id)}>查看作品</Link></small>:null}<a className="button-link" target="_blank" rel="noopener" href={'/api/document-pdf/jobs/'+job.id+'/file'}>打开最终 PDF 预览</a>
     {job.page_ranges&&<small>原文页码：{job.page_ranges}（完整文档 {job.total_pages} 页）</small>}
     {pageCount>0&&(job.total_pages??job.pages)!==pageCount&&<small className="muted">与当前工作台页数不同，请以本任务生成的 PDF 为准重新核对。</small>}
     <label><input type="checkbox" checked={!!reviewed[job.id]} onChange={e=>setReviewed(old=>({...old,[job.id]:e.target.checked}))}/>已检查该 PDF，确认无误</label>
