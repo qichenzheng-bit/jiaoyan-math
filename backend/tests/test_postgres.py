@@ -1186,6 +1186,15 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert f["recognized_ranges"]==[[1,1]] and f["registered_ranges"]==[]
         assert client.get(catalog_url+"/file-progress").json()["items"]==[]
 
+        # Knowledge directory parent selection includes children but not similar prefixes.
+        for ix,path in enumerate(("目录专项/极限","目录专项/极限/方法","目录专项/极限外")):
+            r=client.post("/api/resources",headers=origin,json={"kind":"knowledge","title":"多级目录测试"+str(ix),"subject":"高等数学","chapter":path,"content":"独立目录内容"+str(ix)})
+            assert r.status_code==200,r.text
+        direct=client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限"}).json()
+        nested=client.get("/api/resources",params={"kind":"knowledge","subject":"高等数学","chapter":"目录专项/极限","chapter_tree":True}).json()
+        assert direct["total"]==1 and nested["total"]==2
+        assert {r["chapter"] for r in nested["items"]}=={"目录专项/极限","目录专项/极限/方法"}
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
