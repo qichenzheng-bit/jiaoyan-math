@@ -140,7 +140,7 @@ def progress(db,f,batches,total,states=None):
     return {"total_units":total,"recognized_units":len(recognized),"verified_units":len(done),"registered_units":len(saved),"next_unit":next_unit,"complete":total is not None and total>0 and sum(1 for n in saved if 1<=n<=total)==total}
 def batch_view(db,b,full=False,states=None):
     j=latest_job(db,b) if states is None else states[0].get(b.id)
-    result={"id":b.id,"material_id":b.material_id,"start":b.start,"end":b.end,"units":[{k:v for k,v in u.items() if full or k!="text"} for u in b.units],"verified":b.verified_text is not None,"job_id":j.id if j else None,"job_state":j.state if j else None,"document_id":j.document_id if j else None,"created_at":b.created_at}
+    result={"id":b.id,"material_id":b.material_id,"start":b.start,"end":b.end,"units":[{k:v for k,v in u.items() if k!="image_results" and (full or k!="text")} for u in b.units],"verified":b.verified_text is not None,"job_id":j.id if j else None,"job_state":j.state if j else None,"document_id":j.document_id if j else None,"created_at":b.created_at}
     if full:result["verified_text"]=b.verified_text
     return result
 def material_view(db,m):
@@ -330,13 +330,20 @@ def create_batch(ident:str,mid:str,body:Range,db:Session=Depends(get_db),user:Us
 def read_batch(ident:str,bid:str,db:Session=Depends(get_db)):
     return batch_view(db,batch(db,workspace(db,ident),bid),True)
 @router.post("/{ident}/batches/{bid}/step",dependencies=[Depends(require_origin)])
-def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_user),model:str|None=None,effort:str|None=None):
+def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_user),model:str|None=None,effort:str|None=None,manual_review:bool=False):
     s=workspace(db,ident,True);b=batch(db,s,bid,True);m=db.get(WorkMaterial,b.material_id);f=file_for(db,m,True)
     if b.verified_text is not None:return batch_view(db,b,True)
     existing={u["unit"]:u for u in b.units}
     n=next((n for n in range(b.start,b.end+1) if existing.get(n,{}).get("state")!="done"),None)
     if n is None:return batch_view(db,b,True)
+    previous=existing.get(n,{})
+    if manual_review and (f.media_type!=imp.DOCX or previous.get("state")!="failed" or not previous.get("image_current")):
+        raise HTTPException(409,"当前没有可标记为人工核对的失败图片")
     try:
+        if f.media_type==imp.DOCX:
+            u=vision.word_step(f,n,previous,model,effort,manual_review)
+            existing[n]=u;b.units=sorted(existing.values(),key=lambda x:x["unit"]);b.updated_at=now();s.updated_at=now();db.commit()
+            return batch_view(db,b,True)
         if f.media_type in storage.IMAGE_TYPES:
             result=vision.recognize(f,n,model,effort) if model else imp.extract(f,"ocr",n,n)
         elif f.media_type=="application/pdf":
@@ -346,11 +353,10 @@ def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_
                 except HTTPException as exc:
                     if exc.status_code!=422 or not imp.capabilities()["pdf_ocr"]:raise
                     result=imp.extract(f,"ocr",n,n)
-        elif f.media_type==imp.DOCX and model:result=vision.recognize_word(f,n,model,effort)
         else:result=imp.extract(f,"text",n,n)
         u={"unit":n,"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
     except HTTPException as exc:
-        u={"unit":n,"state":"failed","error":str(exc.detail)[:400]}
+        u={**previous,"unit":n,"state":"failed","error":str(exc.detail)[:400]}
     existing[n]=u;b.units=sorted(existing.values(),key=lambda x:x["unit"]);b.updated_at=now();s.updated_at=now();db.commit()
     return batch_view(db,b,True)
 @router.post("/{ident}/batches/{bid}/verify",dependencies=[Depends(require_origin)])
@@ -391,22 +397,22 @@ def word_block(ident:str,mid:str,unit:int=Query(ge=1,le=10000),db:Session=Depend
     m=material(db,workspace(db,ident),mid);f=file_for(db,m)
     if f.media_type!=imp.DOCX:raise HTTPException(415,"仅Word支持段落原文预览")
     images=[]
-    def marker(index,media,raw):
-        images.append({"index":index,"media_type":media})
-        return f"[Word原图{index}]"
-    result=word_images.block(storage.file_path(f),unit,marker)
+    def marker(index,media,loader):
+        if media:images.append({"index":index,"media_type":media})
+        return f"[Word原图{index}]" if media else f"[Word图片{index}待核对]"
+    result=word_images.scan(storage.file_path(f),unit,marker)
     return {**result,"images":images}
 
 @router.get("/{ident}/materials/{mid}/word-image")
-def word_image(ident:str,mid:str,unit:int=Query(ge=1,le=10000),index:int=Query(ge=1,le=word_images.MAX_IMAGES_PER_BLOCK),db:Session=Depends(get_db)):
+def word_image(ident:str,mid:str,unit:int=Query(ge=1,le=10000),index:int=Query(ge=1),db:Session=Depends(get_db)):
     m=material(db,workspace(db,ident),mid);f=file_for(db,m)
     if f.media_type!=imp.DOCX:raise HTTPException(415,"仅Word支持内嵌图片预览")
     selected=None
-    def marker(i,media,raw):
+    def marker(i,media,loader):
         nonlocal selected
-        if i==index:selected=(media,raw)
+        if i==index:selected=loader()
         return f"[Word原图{i}]"
-    word_images.block(storage.file_path(f),unit,marker)
+    word_images.scan(storage.file_path(f),unit,marker)
     if selected is None:raise HTTPException(404,"原图不可用，请下载原文件核对")
     return Response(selected[1],media_type=selected[0],headers={"Content-Security-Policy":"sandbox; default-src 'none'","Cache-Control":"private, no-store"})
 
