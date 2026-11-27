@@ -184,7 +184,7 @@ def answer(route):
         result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}
     if p=="/source-catalog/statistics/scopes":result={"items":[]}
     if p=="/files/agent-pdf/document-preview":result={"total_units":100}
-    if p=="/files/agent-pdf/document-preview/page":
+    if p in ("/files/agent-pdf/document-preview/page","/workspaces/agent-work-demo/materials/agent-material/page"):
         import base64
         route.fulfill(status=200,content_type="image/png",body=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII="))
         return
@@ -1283,6 +1283,8 @@ with sync_playwright() as p:
                 page.set_viewport_size({"width":393,"height":873})
                 visit(page,"/work?job=compact-single&review=1",".compact-review-v2")
                 expect(page.get_by_text("函数极限",exact=True)).to_be_visible()
+                expect(page.locator(".answer-solution-view")).to_be_visible()
+                expect(page.locator(".answer-solution-field[open]").first).to_be_visible()
                 expect(page.get_by_role("button",name="设为主标签 函数极限")).to_have_attribute("aria-pressed","true")
                 expect(page.get_by_text("补充资料与 AI 建议",exact=True)).to_have_count(0)
                 page.get_by_role("button",name="原文对照",exact=True).click()

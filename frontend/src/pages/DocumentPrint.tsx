@@ -1,4 +1,6 @@
 import {useWorkspaceBack} from '../components/WorkspaceNavigation'
+import {AnswerSolutionView} from '../components/AnswerSolutionView'
+import type {QuestionData} from '../components/questionData'
 import {MathText} from '../components/MathText'
 import {useEffect,useState,useRef,useMemo,Fragment} from 'react'
 import PagedPreview from './PagedPreview'
@@ -13,7 +15,7 @@ import './document-layout.css'
 import {useParams,useSearchParams,Link,useNavigate} from 'react-router-dom'
 import {api} from '../auth'
 import ChatText from './ChatText'
-type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:{stem:string;options?:{label:string;content:string}[];blanks?:unknown[]}|null}
+type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:QuestionData|null}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
 type WorkContext={origin_scope:string;origin_id:string;version:number;layout:Layout;edition:{selection?:string[]|null;stem?:boolean;answerOnly?:boolean;page_ranges?:string};export_token?:string;overrides?:Record<string,Partial<Content>>;wrap?:unknown}
 type SourceDraft={export_token:string;selected_uids?:string[]|null;overrides:Record<string,Partial<Content>>;stem:boolean;answerOnly:boolean;filename:string}
@@ -356,7 +358,7 @@ export function PrintableDocument({doc,stem=false,answerOnly=false,source=false,
      {!answerOnly&&(canUseOptions?<><RichPrint content={structured?.stem??''} labels={labels}/><div className="layout-options" data-option-layout={String(rule.optionColumns??layout?.optionColumns??'auto')}>{options.map(o=><div className="layout-option" key={o.label}><span>{o.label}. </span><MathText compact content={o.content}/></div>)}</div></>:<RichPrint content={v.content} labels={labels} blankWidth={layout?.blankWidth}/>)}
      {!answerOnly&&question&&!!b.subquestion_scores?.length&&layout?.showScore!==false&&<p className="print-question-number">{b.subquestion_scores.map((value,i)=>'（'+(i+1)+'）'+value+'分').join('　')}</p>}
      {stem&&question&&space>0&&<div className="layout-answer-space" style={{height:space+'mm'}}/>}
-     {!stem&&<>{v.answer&&<div>答案：<RichPrint content={v.answer} labels={labels}/></div>}{!answerOnly&&v.analysis&&<div>思路：<RichPrint content={v.analysis} labels={labels}/></div>}{!answerOnly&&v.solution&&<div>解析：<RichPrint content={v.solution} labels={labels}/></div>}{!answerOnly&&v.proof&&<div>证明：<RichPrint content={v.proof} labels={labels}/></div>}</>}
+     {!stem&&<>{question?<AnswerSolutionView value={v} answerOnly={answerOnly} render={content=><RichPrint content={content} labels={labels}/>}/>:<>{v.answer&&<div>答案：<RichPrint content={v.answer} labels={labels}/></div>}{!answerOnly&&v.analysis&&<div>说明：<RichPrint content={v.analysis} labels={labels}/></div>}{!answerOnly&&v.solution&&<div>解析：<RichPrint content={v.solution} labels={labels}/></div>}</>}{!answerOnly&&v.proof&&<div>证明：<RichPrint content={v.proof} labels={labels}/></div>}</>}
     </section>
    </Fragment>
   })}</div>

@@ -4,6 +4,7 @@ import {Link,useNavigate} from 'react-router-dom'
 import {useWorkspaceBack} from './WorkspaceNavigation'
 import {confirmAction} from './WorkspaceConfirm'
 import type {Block,Doc,Kind,CardPanel,LocalField,HiddenField} from '../pages/DocWork'
+import {AnswerSolutionView} from './AnswerSolutionView'
 import {MathText} from './MathText'
 import ChatText from '../pages/ChatText'
 import {Icon} from './Icon'
@@ -172,7 +173,7 @@ const WordBlockPreview=memo(function WordBlockPreview({block:b,number}:{block:Bl
  if(b.kind==='heading'){const Heading=b.heading_level===2?'h3':'h2';return <div className={'manual-word-heading level-'+(b.heading_level??1)}><Heading><MathText compact content={b.title||b.content||'未填写标题'}/></Heading>{b.title&&b.content&&<ChatText content={b.content}/>}</div>}
  return <div className="manual-word-typeset">
  {question?<div className="manual-word-stem"><strong className="manual-word-number">{number}.</strong><div><ChatText content={v.content||'（点击录入题目）'}/></div>{!!b.score&&<small>（{b.score} 分）</small>}</div>:<>{v.title&&<h3><MathText compact content={v.title}/></h3>}<ChatText content={v.content||'（点击录入内容）'}/></>}
- {v.answer&&<div className="manual-word-answer"><strong>答案：</strong><ChatText content={v.answer}/></div>}{v.analysis&&<div className="manual-word-answer"><strong>思路：</strong><ChatText content={v.analysis}/></div>}{v.solution&&<div className="manual-word-answer"><strong>解析：</strong><ChatText content={v.solution}/></div>}{v.proof&&<div className="manual-word-answer"><strong>证明：</strong><ChatText content={v.proof}/></div>}
+ {question?<AnswerSolutionView value={v}/>:<>{v.answer&&<div className="manual-word-answer"><strong>答案：</strong><ChatText content={v.answer}/></div>}{v.analysis&&<div className="manual-word-answer"><strong>说明：</strong><ChatText content={v.analysis}/></div>}{v.solution&&<div className="manual-word-answer"><strong>解析：</strong><ChatText content={v.solution}/></div>}</>}{v.proof&&<div className="manual-word-answer"><strong>证明：</strong><ChatText content={v.proof}/></div>}
  </div>
 })
 type CardProps={doc:Doc;selected:string;panel:CardPanel;subjects:string[];dirty:boolean;busy:boolean;saving?:boolean;saveError?:string;onPanel:(p:CardPanel)=>void;onSelect:(uid:string)=>void;onEdit:(p:Partial<Block>)=>void;onAdd:(kind:Kind,type?:string,level?:1|2)=>void;onRemove:()=>void;onMove:(n:number)=>void;onSave:()=>void;onReview?:()=>void;desktop?:boolean;onTitle?:(title:string)=>void;onImage?:(file:File)=>void;onReorder?:(uid:string,target:string)=>void;onPick?:()=>void;onReplace?:()=>void;onRestoreVersion?:(doc:Doc)=>void;}
@@ -231,7 +232,7 @@ export default function ManualIntakeCards({doc,selected,panel,subjects,dirty,bus
  function cancelReferenceEdit(){onEdit({edit_reference_revision:null,title:"",content:"",answer:"",solution:"",analysis:"",proof:"",subject:null,chapter:"",question_type:"",difficulty:"",knowledge_tags:[]});setEditorVersion(n=>n+1)}
  function renderBlock(b:Block){
   const v=effectiveBlock(b),isQuestion=v.kind==='question'
-  return <div className="manual-render">{isQuestion?<strong>第 {questionNumber(b)} 题</strong>:b.kind==='heading'&&<strong>{b.heading_level===2?'节标题':'章标题'}</strong>}{b.kind==='image'?<img src={'/api/files/'+encodeURIComponent(b.file_id??'')+'/preview'} alt={b.title} style={{width:b.width+'%'}}/>:b.kind==='pagebreak'?<p>—— 分页 ——</p>:<><ChatText content={b.kind==='heading'?b.title||b.content:v.content||'（尚未填写）'}/>{(v.answer||v.solution)&&<><div><strong>答案</strong><ChatText content={v.answer}/></div><div><strong>解析</strong><ChatText content={v.solution}/></div></>}{v.proof&&<ChatText content={v.proof}/>}</>}</div>
+  return <div className="manual-render">{isQuestion?<strong>第 {questionNumber(b)} 题</strong>:b.kind==='heading'&&<strong>{b.heading_level===2?'节标题':'章标题'}</strong>}{b.kind==='image'?<img src={'/api/files/'+encodeURIComponent(b.file_id??'')+'/preview'} alt={b.title} style={{width:b.width+'%'}}/>:b.kind==='pagebreak'?<p>—— 分页 ——</p>:<><ChatText content={b.kind==='heading'?b.title||b.content:v.content||'（尚未填写）'}/>{isQuestion?<AnswerSolutionView value={v}/>:((v.answer||v.solution)&&<><div><strong>答案</strong><ChatText content={v.answer}/></div><div><strong>解析</strong><ChatText content={v.solution}/></div></>)}{v.proof&&<ChatText content={v.proof}/>}</>}</div>
  }
 
  const editor=block?(<section className={desktop?'manual-word-editor':'panel mobile-doc-card'}><div className="mobile-doc-title"><h2>{block.kind==='question'||block.snapshot?.kind==='question'?'第 '+questionNumber(block)+' 题':block.kind==='knowledge'||block.snapshot?.kind==='knowledge'?'知识点':block.kind==='heading'?(block.heading_level===2?'节标题':'章标题'):'正文'}</h2><small>{i+1}/{doc.blocks.length}</small></div>

@@ -223,3 +223,16 @@
 }
 
 @media(max-width:760px){.shell.legacy-shell.clean-workspace:has(.compact-review-v2)>.workspace>.main-content{overflow:hidden;min-height:0}.shell.legacy-shell.clean-workspace:has(.compact-review-v2)>.workspace>.main-content>.content-inner{height:100%;max-height:100%;overflow:hidden;padding:6px 9px;min-height:0}.compact-review-card>label{display:grid;gap:4px}.compact-review-card>label input,.compact-review-card>label select{width:100%;min-width:0;font-size:16px}}
+
+.answer-solution-view,.answer-solution-group{display:grid;gap:10px;min-width:0}
+.answer-solution-group>h4{font-size:inherit;margin:4px 0 0}
+.answer-solution-field{min-width:0;padding:8px 0;border-top:1px solid var(--line,#ddd)}
+.answer-solution-field>summary,.answer-solution-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.answer-solution-field>summary{cursor:pointer}
+.answer-solution-field>summary::after{content:'⌄';margin-left:auto}
+.answer-solution-field[open]>summary::after{content:'⌃'}
+.answer-solution-field .katex-display{overflow-x:auto}
+.print-block .answer-solution-view,.print-block .answer-solution-group{display:block}
+.print-block .answer-solution-field{border:0;padding:0;margin:0 0 3mm}
+.print-block .answer-solution-heading{display:block;margin-bottom:1mm}
+.print-block .answer-solution-field .katex-display{overflow:visible}
