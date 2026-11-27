@@ -37,6 +37,30 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
         setup=client.post("/api/documents/setup",headers=origin,json={"title":"UI录入测试","source_type":"exam","subject":"高等数学","exam_type":"数学一","year":"2026","intro":"卷头说明"})
         assert setup.status_code==200,setup.text
         created_doc=setup.json()
+        # Layout saves are separate from the original source and bounded to two histories.
+        layout_path="/api/settings/document-layout/source/"+created_doc["source_id"]
+        assert client.get(layout_path).json()=={"revision":0,"value":None,"history":[]}
+        first=client.put(layout_path,headers=origin,json={"revision":0,"value":{"paper":"A4","size":12}})
+        assert first.status_code==200,first.text
+        assert first.json()["revision"]==1
+        assert client.put(layout_path,headers=origin,json={"revision":0,"value":{"size":14}}).status_code==409
+        for revision in (1,2,3):
+            changed=client.put(layout_path,headers=origin,json={"revision":revision,"value":{"size":12+revision}})
+            assert changed.status_code==200,changed.text
+        assert [v["revision"] for v in changed.json()["history"]]==[3,2]
+        assert client.put(layout_path,headers=origin,json={"revision":4,"value":{"paper":"A6","left":100}}).status_code==422
+        assert client.get(layout_path).json()["revision"]==4
+        template_path="/api/settings/document-templates"
+        original=client.get(template_path).json()
+        assert original=={"revision":0,"value":[],"history":[]}
+        template={"id":"layout-test","name":"测试模板","kind":"paper","layout":{"paper":"A3"}}
+        saved_template=client.put(template_path,headers=origin,json={"revision":0,"value":[template]})
+        assert saved_template.status_code==200,saved_template.text
+        assert client.get(template_path).json()["value"][0]["layout"]["paper"]=="A3"
+        assert client.put(template_path,headers=origin,json={"revision":0,"value":[]}).status_code==409
+        assert client.put(template_path,headers=origin,json={"revision":1,"value":[template,template]}).status_code==422
+        assert client.put(template_path,headers=origin,json={"revision":1,"value":[{**template,"layout":{"script":"bad"}}]}).status_code==422
+        assert client.put(template_path,headers=origin,json={"revision":1,"value":[]}).status_code==200
         catalog_url="/api/source-catalog/sources/"+created_doc["source_id"]
         old_catalog=client.get(catalog_url).json()
         assert old_catalog["revision"]==0 and old_catalog["intake_status"]=="unknown"

@@ -329,6 +329,13 @@ def assemble_source_export(source, documents, resources, *, latest=False):
             "blocks":blocks,"source_export":True,"batch_count":len(batches),
             "has_source_content":has_content}
 
+def export_token(data):
+    # Canonical server snapshot identity; never hash a browser-supplied document.
+    value={k:v for k,v in data.items() if k!="export_token"}
+    raw=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":"),default=str).encode("utf-8")
+    check_complete_export_size(len(raw))
+    return {**value,"export_token":hashlib.sha256(raw).hexdigest()}
+
 @router.get("/source-export/{source_id}")
 def source_export(source_id:str,db:Session=Depends(get_db)):
     source=bank.existing(db,source_id)
@@ -341,10 +348,10 @@ def source_export(source_id:str,db:Session=Depends(get_db)):
     promoted=next((d for d in documents if d.chaptered and source.content.endswith("对应文档编号 "+d.id)),None)
     if promoted:
         result=export_document(promoted.id,db)
-        return {**result,"source_export":True,"batch_count":len(chapter_index(db,promoted)),"has_source_content":bool(result["blocks"])}
+        return export_token({**result,"source_export":True,"batch_count":len(chapter_index(db,promoted)),"has_source_content":bool(result["blocks"])})
     result=assemble_source_export(source,documents,resources,latest=True)
     if not result["has_source_content"]:raise HTTPException(409,"该来源尚无已入库资料，不能导出")
-    return result
+    return export_token(result)
 
 @router.get("/{id}/reference-updates")
 def reference_updates(id:str,db:Session=Depends(get_db)):
@@ -394,14 +401,20 @@ def check_complete_export_size(size:int):
     if size>COMPLETE_EXPORT_MAX_BYTES:raise HTTPException(422,"完整资料预览超过 200 MB，请按章导出")
 
 @router.get("/{id}/export")
-def export_document(id:str,db:Session=Depends(get_db)):
+def export_document(id:str,db:Session=Depends(get_db),chapter:str|None=None):
     d=row(db,id)
     if d.kind=="intake":raise HTTPException(409,"录入文档不支持直接导出，请入库后从来源库导出")
     if d.parent_document_id:book_parent(db,d,False)
+    if chapter and d.kind not in ("textbook","handout"):
+        raise HTTPException(422,"仅讲义和教材支持按章导出")
     if d.chaptered:
         if d.archived:raise HTTPException(409,"资料已归档")
         result=public(d);blocks=[];size=0
-        for meta in chapter_index(db,d):
+        metadata=chapter_index(db,d)
+        if chapter:
+            metadata=[meta for meta in metadata if meta["id"]==chapter]
+            if not metadata:raise HTTPException(404,"未找到指定章节")
+        for meta in metadata:
             c=db.get(Doc,meta["id"])
             blocks.append(Block(uid=c.id,kind="heading",title=c.title,heading_level=1).model_dump())
             for b in public(c)["blocks"]:
@@ -409,8 +422,17 @@ def export_document(id:str,db:Session=Depends(get_db)):
             size+=len(json.dumps(c.blocks,ensure_ascii=False).encode("utf-8"))
             check_complete_export_size(size)
         result["blocks"]=blocks
-        return result
-    return public(d)
+        if chapter:result["export_chapter_uid"]=chapter
+        return export_token(result)
+    result=public(d)
+    if chapter:
+        blocks=result["blocks"]
+        start=next((i for i,b in enumerate(blocks) if b["uid"]==chapter and b["kind"]=="heading" and b.get("heading_level")==1),None)
+        if start is None:raise HTTPException(404,"未找到指定章节")
+        end=next((i for i in range(start+1,len(blocks)) if blocks[i]["kind"]=="heading" and blocks[i].get("heading_level")==1),len(blocks))
+        result["blocks"]=blocks[start:end]
+        result["export_chapter_uid"]=chapter
+    return export_token(result)
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):

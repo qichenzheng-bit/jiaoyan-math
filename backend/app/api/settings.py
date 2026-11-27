@@ -116,3 +116,229 @@ def backup_run(db: Session = Depends(get_db), user: User = Depends(current_user)
     audit(db, "backup.request", user.id)
     db.commit()
     return {"accepted": True}
+
+
+# F4.6: versioned, declarative, user-scoped layout profiles. No document contents,
+# HTML, CSS or scripts may be supplied by the browser.
+from typing import Literal
+import hashlib
+import json
+from pydantic import ConfigDict, model_validator
+from app.models import TeachingDocument, TeachingResource
+
+class DocumentBlockStyle(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    size: float|None=Field(default=None,ge=6,le=36)
+    lineHeight: float|None=Field(default=None,ge=1,le=3)
+    paragraphGap: float|None=Field(default=None,ge=0,le=50)
+    align: Literal["left","center","right","justify"]|None=None
+    bold: bool|None=None
+    frame: Literal["none","border","accent","fill"]|None=None
+    role: Literal["normal","knowledge","definition","theorem","lemma","corollary","proof","example","exercise","method","warning","summary"]|None=None
+    pageBreak: Literal["auto","before","after","alone"]|None=None
+    answerSpace: float|None=Field(default=None,ge=0,le=180)
+    headingLevel: Literal[1,2,3,4,5,6]|None=None
+    optionColumns: Literal["auto",1,2,4]|None=None
+
+class DocumentSectionPage(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    paper: Literal["A4","A3","A5","B5","A6","custom"]|None=None
+    width: float|None=Field(default=None,ge=50,le=1000)
+    height: float|None=Field(default=None,ge=50,le=1000)
+    landscape: bool|None=None
+    top: float|None=Field(default=None,ge=0,le=100)
+    bottom: float|None=Field(default=None,ge=0,le=100)
+    left: float|None=Field(default=None,ge=0,le=100)
+    right: float|None=Field(default=None,ge=0,le=100)
+    columns: Literal[1,2,3]|None=None
+    gap: float|None=Field(default=None,ge=3,le=30)
+
+class DocumentLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper: Literal["A4","A3","A5","B5","A6","custom"]="A4"
+    width: float=Field(default=210,ge=50,le=1000)
+    height: float=Field(default=297,ge=50,le=1000)
+    landscape: bool=False
+    top: float=Field(default=20,ge=0,le=100)
+    bottom: float=Field(default=20,ge=0,le=100)
+    left: float=Field(default=20,ge=0,le=100)
+    right: float=Field(default=20,ge=0,le=100)
+    columns: Literal[1,2,3]=1
+    gap: float=Field(default=8,ge=3,le=30)
+    font: Literal["serif","sans"]="serif"
+    size: float=Field(default=10.5,ge=6,le=36)
+    lineHeight: float=Field(default=1.5,ge=1,le=3)
+    paragraphGap: float=Field(default=6,ge=0,le=50)
+    keepQuestions: bool=True
+    originalNumbers: bool=False
+    answerSpace: float=Field(default=0,ge=0,le=180)
+    header: str=Field(default="",max_length=200)
+    footer: str=Field(default="第 {{当前页码}} 页，共 {{总页数}} 页",max_length=200)
+    coverFileId: str=Field(default="",pattern=r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$")
+    backCoverFileId: str=Field(default="",pattern=r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$")
+    knowledgeIndex: bool=False
+    toc: bool=False
+    tocDepth: Literal[1,2,3,4,5,6]=2
+    chapterNewPage: bool=False
+    mirrorMargins: bool=False
+    titleSize: float=Field(default=18,ge=8,le=36)
+    headingSize: float=Field(default=14,ge=8,le=36)
+    equationNumbering: Literal["off","continuous","chapter"]="off"
+    subtitle: str=Field(default="",max_length=200)
+    examTime: str=Field(default="",max_length=200)
+    showScore: bool=True
+    typeHeadings: bool=False
+    numbering: Literal["continuous","section"]="continuous"
+    optionColumns: Literal["auto",1,2,4]="auto"
+    blankWidth: float=Field(default=0,ge=0,le=100)
+    sectionPages: dict[str,DocumentSectionPage]=Field(default_factory=dict,max_length=100)
+    typeStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=100)
+    chapterStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=5100)
+    blockStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=5100)
+
+    @model_validator(mode="after")
+    def printable_area(self):
+        if any(not key or len(key)>100 or key in {"__proto__","constructor","prototype"} for rules in (self.typeStyles,self.chapterStyles,self.blockStyles,self.sectionPages) for key in rules):
+            raise ValueError("样式编号无效")
+        dims={"A4":(210,297),"A3":(297,420),"A5":(148,210),"B5":(176,250),"A6":(105,148)}
+        base={k:getattr(self,k) for k in ("paper","width","height","landscape","top","bottom","left","right","columns","gap")}
+        for page in [base,*[{**base,**section.model_dump(exclude_none=True)} for section in self.sectionPages.values()]]:
+            w,h=sorted(dims.get(page["paper"],(page["width"],page["height"])))
+            if page["landscape"]:w,h=h,w
+            if w-page["left"]-page["right"]-(page["columns"]-1)*page["gap"]<page["columns"]*20 or h-page["top"]-page["bottom"]<25:
+                raise ValueError("页面或分节有效排版空间不足")
+        return self
+
+class DocumentLayoutTemplate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    id: str=Field(min_length=1,max_length=80,pattern=r"^[A-Za-z0-9_-]+$")
+    name: str=Field(min_length=1,max_length=80)
+    kind: Literal["paper","handout","textbook","all"]
+    layout: DocumentLayout
+    isDefault: bool=False
+
+class LayoutUpdate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revision: int=Field(ge=0)
+    value: DocumentLayout
+
+class TemplateUpdate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revision: int=Field(ge=0)
+    value: list[DocumentLayoutTemplate]=Field(max_length=100)
+
+    @model_validator(mode="after")
+    def unique_ids(self):
+        ids=[t.id for t in self.value]
+        if len(set(ids))!=len(ids) or set(ids)&{"paper","paper-double","handout","textbook","general"}:
+            raise ValueError("模板编号重复或与系统模板冲突")
+        default_kinds=[t.kind for t in self.value if t.isDefault]
+        if len(set(default_kinds))!=len(default_kinds):
+            raise ValueError("同类模板只能设置一个默认项")
+        if any(t.layout.blockStyles or t.layout.chapterStyles or t.layout.sectionPages or t.layout.coverFileId or t.layout.backCoverFileId for t in self.value):
+            raise ValueError("模板不能携带特定文档的局部样式")
+        if any(not t.name.strip() for t in self.value):
+            raise ValueError("模板名称不能为空")
+        return self
+
+def _layout_key(user,scope,identity):
+    return "layout:"+str(user.id)+":"+hashlib.sha256((scope+":"+identity).encode()).hexdigest()
+
+def _layout_record(db,key,fallback=None):
+    setting=db.get(Setting,key)
+    return json.loads(setting.value) if setting else {"revision":0,"value":fallback,"history":[]}
+
+def _layout_save(db,user,key,revision,value,fallback=None):
+    # Serialize writes even for a profile not yet present in the settings table.
+    db.scalar(select(User).where(User.id==user.id).with_for_update())
+    old=_layout_record(db,key,fallback)
+    if old["revision"]!=revision:
+        raise HTTPException(409,"排版配置已被其他设备更新，请重新读取后保存")
+    if old["value"]==value:return old
+    history=([{"revision":old["revision"],"value":old["value"]}]+old["history"])[:2] if old["revision"] else []
+    record={"revision":revision+1,"value":value,"history":history}
+    db.merge(Setting(key=key,value=json.dumps(record,ensure_ascii=False)))
+    audit(db,"document.layout.update",user.id)
+    db.commit()
+    return record
+
+def _check_layout_target(db,scope,identity):
+    model=TeachingDocument if scope=="doc" else TeachingResource
+    target=db.get(model,identity)
+    if not target or (scope=="source" and target.kind!="source"):
+        raise HTTPException(404,"排版资料不存在")
+
+@router.get("/document-layout/{scope}/{identity}")
+def read_document_layout(scope:Literal["doc","source"],identity:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,scope,identity)
+    return _layout_record(db,_layout_key(user,scope,identity))
+
+@router.put("/document-layout/{scope}/{identity}",dependencies=[Depends(require_origin)])
+def update_document_layout(scope:Literal["doc","source"],identity:str,body:LayoutUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,scope,identity)
+    return _layout_save(db,user,_layout_key(user,scope,identity),body.revision,body.value.model_dump(exclude_none=True))
+
+@router.get("/document-templates")
+def read_document_templates(db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return _layout_record(db,_layout_key(user,"templates","all"),[])
+
+@router.put("/document-templates",dependencies=[Depends(require_origin)])
+def update_document_templates(body:TemplateUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return _layout_save(db,user,_layout_key(user,"templates","all"),body.revision,[t.model_dump(exclude_none=True) for t in body.value],[])
+
+class DocumentLocalEdit(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    title: str|None=Field(default=None,max_length=200)
+    content: str|None=Field(default=None,max_length=50000)
+    answer: str|None=Field(default=None,max_length=20000)
+    solution: str|None=Field(default=None,max_length=50000)
+    analysis: str|None=Field(default=None,max_length=50000)
+    proof: str|None=Field(default=None,max_length=50000)
+
+class SourceDraftValue(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    export_token: str=Field(pattern=r"^[a-f0-9]{64}$")
+    selected_uids: list[str]|None=Field(default=None,max_length=5100)
+    overrides: dict[str,DocumentLocalEdit]=Field(default_factory=dict,max_length=5100)
+    stem: bool=False
+    answerOnly: bool=False
+    filename: str=Field(default="",max_length=200)
+
+class SourceDraftUpdate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revision: int=Field(ge=0)
+    value: SourceDraftValue
+
+@router.get("/source-layout-draft/{identity}")
+def read_source_layout_draft(identity:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,"source",identity)
+    return _layout_record(db,_layout_key(user,"source-draft",identity))
+
+@router.put("/source-layout-draft/{identity}",dependencies=[Depends(require_origin)])
+def update_source_layout_draft(identity:str,body:SourceDraftUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.api.documents import source_export,check_complete_export_size
+    snapshot=source_export(identity,db)
+    if snapshot["export_token"]!=body.value.export_token:
+        raise HTTPException(409,"来源内容已更新，请重新检查排版")
+    valid={b["uid"] for b in snapshot["blocks"]}
+    selected=body.value.selected_uids
+    if (selected is not None and (len(selected)!=len(set(selected)) or not set(selected)<=valid)) or not set(body.value.overrides)<=valid:
+        raise HTTPException(422,"草稿含有失效内容")
+    value=body.value.model_dump(exclude_none=True)
+    check_complete_export_size(len(json.dumps(value,ensure_ascii=False).encode("utf-8")))
+    return _layout_save(db,user,_layout_key(user,"source-draft",identity),body.revision,value)
+
+@router.delete("/source-layout-draft/{identity}",dependencies=[Depends(require_origin)])
+def delete_source_layout_draft(identity:str,revision:int,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    _check_layout_target(db,"source",identity)
+    db.scalar(select(User).where(User.id==user.id).with_for_update())
+    key=_layout_key(user,"source-draft",identity)
+    old=_layout_record(db,key)
+    if old["revision"]!=revision:
+        raise HTTPException(409,"草稿已被其他设备更新")
+    item=db.get(Setting,key)
+    if item:
+        db.delete(item)
+        audit(db,"document.layout.draft.delete",user.id)
+        db.commit()
+    return {"revision":0,"value":None,"history":[]}
