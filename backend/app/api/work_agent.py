@@ -18,6 +18,7 @@ class Start(BaseModel):
     model:str=Field(default="Auto",max_length=80,pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
     effort:str|None=Field(default=None,max_length=16)
     selected_id:str|None=Field(default=None,max_length=36)
+    auto:bool=True
 class Confirm(BaseModel):
     plan_id:str=Field(min_length=1,max_length=36)
 class Intent(BaseModel):
@@ -202,6 +203,10 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
     r={"id":ident_job,"instruction":body.instruction.strip(),"model":body.model,"effort":effort.get("effort","default"),
        "state":"running","detail":"正在排队并理解工作要求","created_at":now(),"allowed_files":[x["id"] for x in rows],
        "auto":True,"actor_id":user.id,"phase":"pending","phase_at":now(),"model_job":ident_job,"prompt":prompt,"preference_snapshot":preference_snapshot,"steps":[]}
+    if not body.auto:
+        # Compatibility for explicit manual intake planning; work UI defaults to autonomous.
+        qoder.request("POST","/chat/start",{"id":ident_job,"model":body.model,"prompt":prompt,**effort})
+        r["auto"]=False
     save(db,s,r);audit(db,"work.agent.start",user.id);db.commit()
     return public(r)
 @router.post("/{ident}/agent/cancel",dependencies=[Depends(require_origin)])

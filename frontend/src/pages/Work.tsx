@@ -37,7 +37,7 @@ function WorkComposer(){
  const pdf=Boolean(file?.name.toLowerCase().endsWith('.pdf')),word=Boolean(file?.name.toLowerCase().endsWith('.docx')),image=Boolean(file&&/\.(png|jpe?g|webp|gif)$/i.test(file.name))
  const supported=Boolean(caps&&(image?caps.image_ocr:pdf?(ocr?caps.pdf_ocr:caps.pdf_text):word?caps.docx:caps.text))
  const end=ocr||image?first:pdf||word?last:1
- const autonomous=!source&&!transferred&&!params.has('from')&&intent==='mixed'&&!imported
+ const autonomous=!source&&!transferred&&!params.has('from')&&intent==='mixed'&&!imported&&(!file||Boolean(draft.trim())||additional.length>0)
  const validRange=Number.isInteger(first)&&Number.isInteger(end)&&first>=1&&end>=first&&end<=10000&&end-first<(word?100:10)
  useEffect(()=>{const c=new AbortController();api<Cap>('/intelligence/import/capabilities',{signal:c.signal}).then(setCaps).catch(e=>setError(e.message));Promise.all([api<ModelPreferences>('/qoder/preferences',{signal:c.signal}),getModelCatalog()]).then(([p,m])=>{if(c.signal.aborted)return;const saved=modelChoice('work',p.model,p.effort??'default');setModel(saved.model);setModels(m.models);setCatalog(m);setEffort(saved.effort);setReady(true)}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>c.abort()},[])
  useEffect(()=>{const el=area.current;if(el){el.style.height='0px';el.style.height=Math.min(Math.max(el.scrollHeight,30),144)+'px'}},[draft])

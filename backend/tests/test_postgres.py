@@ -16,6 +16,7 @@ from app.models import User
                     reason="requires dedicated PostgreSQL test database")
 def test_migration_and_login(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WG_RECOMMENDATION_SCHEDULER","0")
+    monkeypatch.setenv("WG_AI_WORK_SCHEDULER","0")
     from dataclasses import replace
     from app.services import storage
     monkeypatch.setattr(storage, 'settings', replace(storage.settings, storage_root=str(tmp_path)))
@@ -855,7 +856,7 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
                     return {"state":"done","answer":json.dumps(reply,ensure_ascii=False)}
                 with monkeypatch.context() as ap:
                     ap.setattr(qoder,"request",contract_worker)
-                    asked=client.post(agent_url,headers=origin,json={"instruction":instruction,"model":"Auto","effort":"default","selected_id":mat["id"]})
+                    asked=client.post(agent_url,headers=origin,json={"instruction":instruction,"model":"Auto","effort":"default","selected_id":mat["id"],"auto":False})
                     assert asked.status_code==200,(instruction,asked.text)
                     ident=asked.json()["id"]
                     assert asked.json()["state"]=="running" and len(calls)==1
@@ -890,7 +891,7 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
             with monkeypatch.context() as ap:
                 ap.setattr(qoder,"request",agent_worker)
                 agent_url=wb+"/agent"
-                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页，核对后整理审核并匹配参考答案","model":"Auto","effort":"default","selected_id":mat["id"]})
+                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页，核对后整理审核并匹配参考答案","model":"Auto","effort":"default","selected_id":mat["id"],"auto":False})
                 assert asked.status_code==200,asked.text
                 assert asked.json()["state"]=="running" and len(agent_calls)==1 and fid in agent_calls[0]["prompt"]
                 ready=client.get(agent_url).json()
