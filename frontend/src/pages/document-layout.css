@@ -87,3 +87,12 @@
 .layout-sheet .layout-numbered-equation{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5pt;max-width:100%}
 .layout-sheet .layout-numbered-equation>.katex-display{min-width:0;margin:0}
 .layout-sheet .layout-equation-number{font-family:var(--layout-font);font-size:.9em;white-space:nowrap;text-align:right}
+
+.layout-cover-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
+.layout-cover-list button{display:grid;gap:5px;justify-items:center;min-width:0}
+.layout-cover-thumbnail{display:block;width:100%;max-width:120px;height:100px;object-fit:contain;background:#fff}
+.layout-work .layout-sheet.layout-cover-sheet{padding:0!important}
+.layout-cover-sheet .layout-sheet-column{display:flex;align-items:center;justify-content:center}
+.layout-cover-sheet .layout-cover-picture{width:100%;height:100%;object-fit:contain;display:block}
+.layout-index-pages{flex:0 1 45%;min-width:0;text-align:right;overflow-wrap:anywhere}
+.layout-index-page{color:inherit;text-decoration:underline}
