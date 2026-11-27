@@ -182,6 +182,11 @@ def answer(route):
     if p=="/files" and route.request.method=="POST":
         name=q.get("name",["demo.tex"])[0]
         result={"id":"12345678-1234-4321-8765-123456789abc","name":name,"media_type":"image/png","previewable":True} if name.endswith(".png") else {"id":"file-demo","name":name,"media_type":"text/plain","previewable":False}
+    if p=="/files/agent-pdf/document-preview":result={"total_units":100}
+    if p=="/files/agent-pdf/document-preview/page":
+        import base64
+        route.fulfill(status=200,content_type="image/png",body=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII="))
+        return
     if p=="/files/12345678-1234-4321-8765-123456789abc/preview":
         import base64
         route.fulfill(status=200,content_type="image/png",body=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII="))
@@ -955,6 +960,20 @@ with sync_playwright() as p:
             expect(page.get_by_text("先识别旧教材",exact=True)).to_be_visible()
             expect(page.get_by_label("继续识别指令")).to_be_visible()
             expect(page.locator(".agent-manual")).to_have_count(0)
+            if GROUP=="mobile":
+                summary=page.locator(".phone-material-summary")
+                expect(summary).to_contain_text("已关联 1 份资料")
+                expect(summary.locator(".wg-attachment-strip")).not_to_be_visible()
+                summary.locator("summary").click()
+                summary.get_by_role("button",name="查看 高等数学.pdf").click()
+                preview=page.get_by_role("dialog",name="原始资料预览")
+                expect(preview.get_by_alt_text("PDF 第 1 页")).to_be_visible()
+                preview.get_by_role("button",name="下一页",exact=True).click()
+                expect(preview.get_by_alt_text("PDF 第 2 页")).to_be_visible()
+                preview.get_by_role("button",name="放大 PDF").click()
+                expect(preview.get_by_role("button",name="150%")).to_be_visible()
+                preview.get_by_role("button",name="关闭预览").click()
+                summary.locator("summary").click()
             page.get_by_role("button",name="资料与识别").first.click()
             expect(page.locator(".agent-manual")).to_be_visible()
             expect(page.locator(".agent-workspace-body")).to_have_attribute("data-panel-open","true")
@@ -1370,6 +1389,13 @@ with sync_playwright() as p:
             expect(page.locator(".mode-switch")).to_be_visible()
             for path in ("/chat","/work"):
                 visit(page,path,"[data-chat-layout=v3] .compact-composer")
+                page.locator(".compact-tools .composer-plus").click()
+                sheet=page.get_by_role("dialog",name="添加资料")
+                expect(sheet).to_be_visible()
+                expect(sheet.get_by_role("button",name="拍照",exact=True)).to_be_visible()
+                expect(sheet.get_by_role("button",name="相册",exact=True)).to_be_visible()
+                page.keyboard.press("Escape")
+                expect(sheet).to_have_count(0)
                 model_button=page.get_by_role("button",name="打开模型选择",exact=True)
                 send_button=page.locator(".compact-tools .composer-send")
                 expect(model_button).to_be_visible()
