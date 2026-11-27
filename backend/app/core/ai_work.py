@@ -393,7 +393,7 @@ def intake_tick(db,s,r,user):
     stage=wa.workflow(db,s,r)
     if not stage:return
     if stage["stage"]=="recognizing":
-        w.step(s.id,stage["batch_id"],db,user);return
+        w.step(s.id,stage["batch_id"],db,user,model=r["model"],effort=r.get("effort"));return
     if stage["stage"]=="organize":
         status=qoder.request("GET","/status")
         if status.get("busy") or not status.get("chat_available"):return

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
 from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument, DocumentRegistration, IntakeSupplement
-from app.services import storage, material_import as imp
+from app.services import storage, material_import as imp, material_vision as vision
 from app.services.recognition_plan import parse_instruction, matching_names, propose_range
 from app.api import intelligence as ai
 from app.api import work_agent as agent
@@ -330,19 +330,22 @@ def create_batch(ident:str,mid:str,body:Range,db:Session=Depends(get_db),user:Us
 def read_batch(ident:str,bid:str,db:Session=Depends(get_db)):
     return batch_view(db,batch(db,workspace(db,ident),bid),True)
 @router.post("/{ident}/batches/{bid}/step",dependencies=[Depends(require_origin)])
-def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_user),model:str|None=None,effort:str|None=None):
     s=workspace(db,ident,True);b=batch(db,s,bid,True);m=db.get(WorkMaterial,b.material_id);f=file_for(db,m,True)
     if b.verified_text is not None:return batch_view(db,b,True)
     existing={u["unit"]:u for u in b.units}
     n=next((n for n in range(b.start,b.end+1) if existing.get(n,{}).get("state")!="done"),None)
     if n is None:return batch_view(db,b,True)
     try:
-        if f.media_type in storage.IMAGE_TYPES:result=imp.extract(f,"ocr",n,n)
+        if f.media_type in storage.IMAGE_TYPES:
+            result=vision.recognize(f,n,model,effort) if model else imp.extract(f,"ocr",n,n)
         elif f.media_type=="application/pdf":
             try:result=imp.extract(f,"text",n,n)
             except HTTPException as exc:
-                if exc.status_code!=422 or not imp.capabilities()["pdf_ocr"]:raise
-                result=imp.extract(f,"ocr",n,n)
+                if exc.status_code!=422:raise
+                if model:result=vision.recognize(f,n,model,effort)
+                elif imp.capabilities()["pdf_ocr"]:result=imp.extract(f,"ocr",n,n)
+                else:raise
         else:result=imp.extract(f,"text",n,n)
         u={"unit":n,"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
     except HTTPException as exc:
