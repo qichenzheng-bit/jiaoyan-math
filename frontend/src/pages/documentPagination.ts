@@ -148,9 +148,24 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
    }
   }
  }
+ function cover(which:'front'|'back'){
+  const img=article?.querySelector<HTMLImageElement>('[data-layout-cover="'+which+'"]')
+  if(!img)return
+  const idx=addPage(false,true),entry=sheets[idx]
+  entry.sheet.classList.add('layout-cover-sheet')
+  entry.header.hidden=true;entry.footer.hidden=true
+  const picture=copy(img);picture.hidden=false;picture.className='layout-cover-picture'
+  entry.columns[0].append(picture)
+  if(which==='front'){
+   sheets.pop();target.prepend(entry.sheet);sheets.unshift(entry)
+   target.querySelectorAll<HTMLElement>('.layout-toc-number,.layout-index-page').forEach(n=>{n.textContent=String(Number(n.textContent)+1)})
+  }
+ }
+ if(!error){cover('front');cover('back')}
  const total=sheets.length
  sheets.forEach((p,i)=>{
   p.sheet.dataset.page=String(i+1)
+  if(p.sheet.classList.contains('layout-cover-sheet'))return
   if(layout.mirrorMargins&&i%2===1)p.sheet.classList.add('layout-mirror')
   p.header.textContent=field(layout.header,title,subject,i+1,total,p.chapter)
   p.footer.textContent=field(layout.footer,title,subject,i+1,total,p.chapter)
