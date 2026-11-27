@@ -67,6 +67,7 @@ class TeachingResource(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     stem_key: Mapped[str] = mapped_column(String(64), index=True, default="", server_default="")
     search_features: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(),"postgresql"),default=dict,server_default="{}")
+    bank_facts: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(),"postgresql"),default=dict,server_default="{}")
     code: Mapped[str] = mapped_column(String(16), unique=True)
     exam_type: Mapped[str] = mapped_column(String(80), default="", server_default="")
     chapter: Mapped[str] = mapped_column(String(120), default="", server_default="")
@@ -88,7 +89,7 @@ class TeachingResource(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),)
+    __table_args__ = (Index("ix_resource_search_features","search_features",postgresql_using="gin"),Index("ix_resource_bank_facts","bank_facts",postgresql_using="gin"),Index("ix_resource_bank_order","kind","archived","updated_at","id"))
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
@@ -331,3 +332,6 @@ def update_resource_search_features(session,flush_context,instances):
     for row in session.new.union(session.dirty):
         if isinstance(row,TeachingResource) and (row in session.new or inspect(row).attrs.content.history.has_changes()):
             row.search_features=search_features(row.content) if row.kind=="question" else {}
+        if isinstance(row,TeachingResource) and (row in session.new or any(inspect(row).attrs[k].history.has_changes() for k in ("content","answer","solution","question_type","question_data"))):
+            from app.core.bank_filter_facts import filter_facts
+            row.bank_facts=filter_facts(row.content,row.answer or "",row.solution or "",row.question_type or "",row.question_data) if row.kind=="question" else {}

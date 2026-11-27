@@ -5,7 +5,9 @@ from difflib import SequenceMatcher
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from app.core.question_structure import QuestionData, normalize_payload, resolve
-from sqlalchemy import select, func, or_, delete
+from sqlalchemy import select, func, or_, and_, delete, cast, case, literal, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session, object_session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, audit, now
@@ -81,12 +83,12 @@ def clean(body,db):
     return d
 
 FIELDS=("id","code","kind","title","subject","content","answer","solution","tags","source_id","archived","created_at","updated_at","revision","sources_revision","exam_type","chapter","question_type","difficulty","unit_type","analysis","proof","exams","source_type","authority_tier","cohort_year","series_key","edition","dedup_override","dedup_reason")
-def view(row):
+def view(row,*,knowledge_lookup=None):
     data={k:getattr(row,k) for k in FIELDS}
     if row.kind=="question":data["question_data"]=resolve(row.content,row.answer,row.solution,row.question_type,getattr(row,"question_data",None)).model_dump()
     db=object_session(row) if hasattr(row,"_sa_instance_state") else None
     if db is not None and row.kind in ("question","knowledge"):
-        pts=list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(ResourceKnowledgeLink.resource_id==row.id).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)))
+        pts=knowledge_lookup.get(row.id,[]) if knowledge_lookup is not None else list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(ResourceKnowledgeLink.resource_id==row.id).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)))
         data["knowledge_points"]=[{"id":p.id,"name":p.name} for p in pts]
         if pts:data["tags"]=[p.name for p in pts][:20]
     return data
@@ -181,7 +183,7 @@ def question_list_summaries(db,rows,data):
         item["bank_summary"]={"source_count":len(sources[r.id]),"source_title":titles.get(r.source_id) or next((titles[s] for s in sorted(sources[r.id]) if s in titles),""),"method_count":count,"has_answer":bool(r.answer.strip()),"has_solution":bool(r.solution.strip())}
 
 @router.get("")
-def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),bank_summary:bool=False,db:Session=Depends(get_db)):
+def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),chapter:str=Query("",max_length=120),question_type:str=Query("",max_length=20),unit_type:str=Query("",max_length=24),exam_type:str=Query("",max_length=80),source_type:str=Query("",max_length=16),authority_tier:str=Query("",max_length=24),difficulty:str=Query("",max_length=16),source_id:str=Query("",max_length=36),knowledge_id:str=Query("",max_length=36),source_ids:list[str]|None=Query(None),knowledge_ids:list[str]|None=Query(None),origin_type:str=Query("",max_length=16),origin_chapter:str=Query("",max_length=120),include_related:bool=False,video_state:Literal['made','unmade']|None=None,usage_state:Literal['used','unused']|None=None,archived:bool=False,limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0),bank_summary:bool=False,origin_exam:str=Query("",max_length=80),origin_authority:str=Query("",max_length=24),origin_edition:str=Query("",max_length=60),year_from:int|None=Query(None,ge=1900,le=2200),year_to:int|None=Query(None,ge=1900,le=2200),original_number:str=Query("",max_length=40),original_page:int|None=Query(None,ge=1),knowledge_mode:Literal["any","all"]="any",method_name:str=Query("",max_length=60),integrity:Literal["complete","missing_answer","missing_solution","ambiguous"]|None=None,method_state:Literal["single","multi","pending","review","failed","confirmed"]|None=None,source_count:Literal["none","single","multiple"]|None=None,sort:Literal["updated","created","year","number","difficulty","sources"]="updated",db:Session=Depends(get_db)):
     filters=[TeachingResource.archived==archived]
     if kind: filters.append(TeachingResource.kind==kind)
     if subject: filters.append(TeachingResource.subject==normalize_subject(subject))
@@ -190,27 +192,96 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
             filters.append(TeachingResource.question_type.in_(("综合题","解答题","计算题","证明题")))
         elif value: filters.append(getattr(TeachingResource,key)==value)
     if difficulty: filters.append(TeachingResource.difficulty==difficulty)
-    if source_id: filters.append(or_(TeachingResource.source_id==source_id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source_id))))
+    if year_from and year_to and year_from>year_to:raise HTTPException(422,"起始年份不能大于结束年份")
+    bank_query=kind=="question" and bank_summary
+    if source_id and not bank_query: filters.append(or_(TeachingResource.source_id==source_id,TeachingResource.id.in_(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==source_id))))
     if knowledge_id: filters.append(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).where(ResourceKnowledgeLink.knowledge_id==knowledge_id)))
-    if source_ids or origin_type or origin_chapter:
+    if not bank_query and (source_ids or origin_type or origin_chapter):
         sources=select(TeachingResource.id).where(TeachingResource.kind=="source",TeachingResource.archived==False)
         if source_ids:sources=sources.where(TeachingResource.id.in_(source_ids[:100]))
         if origin_type:sources=sources.where(TeachingResource.source_type==origin_type)
         links=select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id.in_(sources))
         if origin_chapter:links=links.where(ResourceSourceLink.chapter==origin_chapter)
         filters.append(TeachingResource.id.in_(links) if origin_chapter else or_(TeachingResource.source_id.in_(sources),TeachingResource.id.in_(links)))
+    order=[TeachingResource.updated_at.desc(),TeachingResource.id]
+    if bank_query:
+        R=TeachingResource;S=aliased(R);L=ResourceSourceLink
+        # Same source identity for all origin attributes; no cross-source mixing.
+        source_filters=[S.kind=="source",S.archived==False]
+        if source_id:source_filters.append(S.id==source_id)
+        if source_ids:source_filters.append(S.id.in_(source_ids[:100]))
+        for attr,val in (("source_type",origin_type),("exam_type",origin_exam),("authority_tier",origin_authority),("edition",origin_edition)):
+            if val:source_filters.append(getattr(S,attr)==val)
+        if year_from or year_to:source_filters.append(S.cohort_year.op("~")(r"^[0-9]{4}$"))
+        if year_from:source_filters.append(S.cohort_year>=str(year_from))
+        if year_to:source_filters.append(S.cohort_year<=str(year_to))
+        origin_requested=bool(source_id or source_ids or origin_type or origin_exam or origin_authority or origin_edition or year_from or year_to or origin_chapter or original_number or original_page)
+        position_requested=bool(origin_chapter or original_number or original_page)
+        # Preserve individual occurrence identity. A page and number must belong to the same occurrence.
+        occ=func.jsonb_array_elements(cast(L.occurrences,JSONB)).table_valued("value").alias("occ")
+        oj=cast(occ.c.value,JSONB)
+        page_start=case((oj["page_start"].astext.op("~")(r"^[0-9]{1,9}$"),cast(oj["page_start"].astext,Integer)),else_=None)
+        page_end=case((oj["page_end"].astext.op("~")(r"^[0-9]{1,9}$"),cast(oj["page_end"].astext,Integer)),else_=page_start)
+        old_pos=[];new_pos=[]
+        if origin_chapter:old_pos.append(L.chapter==origin_chapter);new_pos.append(oj["chapter"].astext==origin_chapter)
+        if original_number:old_pos.append(L.original_question_number==original_number);new_pos.append(oj["original_question_number"].astext==original_number)
+        if original_page:
+            old_pos.extend([L.page_start<=original_page,func.coalesce(L.page_end,L.page_start)>=original_page])
+            new_pos.extend([page_start<=original_page,func.coalesce(page_end,page_start)>=original_page])
+        link_match=select(L.resource_id).join(S,S.id==L.source_id).where(*source_filters)
+        if position_requested:link_match=link_match.where(or_(and_(*old_pos),select(literal(1)).select_from(occ).where(*new_pos).correlate(L).exists()))
+        primary_match=select(S.id).where(*source_filters)
+        if origin_requested:filters.append(R.id.in_(link_match) if position_requested else or_(R.id.in_(link_match),R.source_id.in_(primary_match)))
+        all_source_links=select(L.source_id.label("sid")).where(L.resource_id==R.id).correlate(R).union(select(R.source_id.label("sid")).where(R.source_id.is_not(None)).correlate(R)).subquery()
+        source_total=select(func.count()).select_from(all_source_links).correlate(R).scalar_subquery()
+        if source_count:filters.append(source_total==0 if source_count=="none" else source_total==1 if source_count=="single" else source_total>1)
+        # JSONB facts are derived on every ORM write and backfilled on migration.
+        f=R.bank_facts
+        def fact(key,val=True):return f.op("@>")(cast({key:val},JSONB))
+        if integrity=="complete":filters.extend([fact("answer_complete"),fact("solution_complete"),fact("ambiguous",False)])
+        elif integrity=="missing_answer":filters.append(fact("answer_complete",False))
+        elif integrity=="missing_solution":filters.append(fact("solution_complete",False))
+        elif integrity=="ambiguous":filters.append(fact("ambiguous"))
+        if method_name:
+            name=matching.METHOD_ALIASES.get(method_name,method_name)
+            if name in matching.METHOD_NAMES:filters.append(fact("method:"+name))
+            else:filters.append(R.solution.contains(method_name,autoescape=True))
+        if method_state in ("single","multi"):filters.append(fact(method_state))
+        elif method_state:
+            raw=select(Setting.value).where(Setting.key==literal("question.recommendation.")+R.id).correlate(R).scalar_subquery()
+            rec=cast(raw,JSONB)
+            valid=rec["revision"].astext==cast(R.revision,String)
+            state=rec["state"].astext
+            if method_state=="pending":filters.extend([fact("multi"),or_(raw.is_(None),~valid,state.in_(("queued","running")),state.is_(None))])
+            else:filters.extend([valid,state==method_state])
+        if sort=="created":order=[R.created_at.desc(),R.id]
+        elif sort=="difficulty":order=[case((R.difficulty=="简单",1),(R.difficulty=="中等",2),(R.difficulty=="困难",3),else_=4),R.id]
+        elif sort=="sources":order=[source_total.desc(),R.id]
+        elif sort=="year":
+            year=select(func.max(S.cohort_year)).where(*source_filters,S.cohort_year.op("~")(r"^[0-9]{4}$"),or_(S.id==R.source_id,S.id.in_(select(L.source_id).where(L.resource_id==R.id).correlate(R)))).correlate(R).scalar_subquery()
+            order=[year.desc().nulls_last(),R.id]
+        elif sort=="number":
+            def numeric(expr):return case((expr.op("~")(r"^[0-9]{1,9}$"),cast(expr,Integer)),else_=None)
+            old=select(func.min(numeric(L.original_question_number))).join(S,S.id==L.source_id).where(L.resource_id==R.id,*source_filters,*old_pos).correlate(R).scalar_subquery()
+            new=select(func.min(numeric(oj["original_question_number"].astext))).select_from(L).join(S,S.id==L.source_id).join(occ,literal(True)).where(L.resource_id==R.id,*source_filters,*new_pos).correlate(R).scalar_subquery()
+            order=[func.least(old,new).asc().nulls_last(),R.id]
     if knowledge_ids:
-        ids=set(knowledge_ids[:100])
-        if include_related:
-            edges=list(db.execute(select(KnowledgeRelation.source_id,KnowledgeRelation.target_id,KnowledgeRelation.relation_type)))
-            roots=set(ids)
-            while True:
-                children={t for s,t,k in edges if k=="contains" and s in ids}
-                if children<=ids:break
-                ids.update(children)
-            ids.update(t for s,t,k in edges if s in roots and k in ("related","prerequisite"))
-            ids.update(s for s,t,k in edges if t in roots and k in ("related","prerequisite"))
-        filters.append(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).where(ResourceKnowledgeLink.knowledge_id.in_(ids))))
+        roots=set(knowledge_ids[:100])
+        edges=list(db.execute(select(KnowledgeRelation.source_id,KnowledgeRelation.target_id,KnowledgeRelation.relation_type))) if include_related else []
+        def expanded(root):
+            ids={root}
+            if include_related:
+                while True:
+                    children={t for s,t,k in edges if k=="contains" and s in ids}
+                    if children<=ids:break
+                    ids.update(children)
+                ids.update(t for s,t,k in edges if s==root and k in ("related","prerequisite"))
+                ids.update(s for s,t,k in edges if t==root and k in ("related","prerequisite"))
+            return ids
+        groups=[expanded(root) for root in roots]
+        if knowledge_mode=="any":groups=[set().union(*groups)]
+        for ids in groups:
+            filters.append(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).where(ResourceKnowledgeLink.knowledge_id.in_(ids))))
     if video_state:
         made=TeachingResource.id.in_(select(VideoProject.resource_id).where(VideoProject.work_id.is_not(None)))
         filters.append(made if video_state=="made" else ~made)
@@ -221,8 +292,12 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
         term=q.strip()
         filters.append(or_(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
     total=db.scalar(select(func.count()).select_from(TeachingResource).where(*filters))
-    rows=list(db.scalars(select(TeachingResource).where(*filters).order_by(TeachingResource.updated_at.desc(),TeachingResource.id).offset(offset).limit(limit)))
-    data=[view(r) for r in rows]
+    rows=list(db.scalars(select(TeachingResource).where(*filters).order_by(*order).offset(offset).limit(limit)))
+    knowledge_lookup={}
+    if bank_query and rows:
+        for point in db.execute(select(ResourceKnowledgeLink.resource_id,KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(ResourceKnowledgeLink.resource_id.in_([r.id for r in rows])).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)):
+            knowledge_lookup.setdefault(point.resource_id,[]).append(point)
+    data=[view(r,knowledge_lookup=knowledge_lookup if bank_query else None) for r in rows]
     if bank_summary:question_list_summaries(db,rows,data)
     return {"items":data,"total":total}
 

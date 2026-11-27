@@ -319,6 +319,19 @@ def test_migration_and_login(tmp_path, monkeypatch):
         summary=next(r["bank_summary"] for r in bank_page["items"] if r["id"]==merged_id)
         assert summary["source_count"]==1 and summary["method_count"]==2 and summary["has_answer"] and summary["has_solution"]
         assert summary["source_title"]
+        def bank_search(**kw):
+            response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":merged_resource["code"],**kw})
+            assert response.status_code==200,response.text
+            return response.json()["total"]
+        assert bank_search(method_state="multi",integrity="complete")==1
+        assert bank_search(method_state="single")==0
+        assert bank_search(original_number="7",original_page=5)==1
+        assert bank_search(original_number="7",original_page=2)==0
+        assert bank_search(source_count="single",sort="sources")==1
+        assert bank_search(source_count="multiple")==0
+        assert bank_search(sort="number")==1
+        assert bank_search(sort="year")==1
+        assert bank_search(method_state="pending")==1
         assert "直接代入法" in merged_resource["solution"] and "连续性法" in merged_resource["solution"]
         occurrences=client.get("/api/resources/"+merged_id+"/sources").json()["items"][0]["occurrences"]
         assert {(o["original_question_number"],o["page_start"]) for o in occurrences}=={("1",2),("7",5)}
@@ -351,6 +364,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         confirmed=client.post(rec_path+"/confirm",headers=origin,json={"revision":rec_revision,"choices":suggested["choices"]})
         assert confirmed.status_code==200,confirmed.text
         assert confirmed.json()["evaluation"]["reason"]=="连续性法更便于课堂讲解"
+        assert bank_search(method_state="confirmed")==1
+        assert bank_search(method_state="pending")==0
         assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
         related_seed=client.post("/api/resources",headers=origin,json={"kind":"question","title":"关联方法专项","subject":"高等数学","content":"计算某项幂函数的定积分","answer":"1","solution":"分部积分法","tags":["相关专题"]}).json()
         related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})

@@ -613,6 +613,12 @@ with sync_playwright() as p:
                     with page.expect_request(lambda req:"/api/resources?" in req.url and "source_ids=" in req.url):
                         checkbox.check()
                     expect(picker).to_contain_text("已选 1 项")
+                    page.get_by_label("起始年份",exact=True).fill("2010")
+                    page.get_by_label("结束年份",exact=True).fill("2025")
+                    page.get_by_label("内容完整性",exact=True).select_option("missing_answer")
+                    with page.expect_request(lambda req:"/api/resources?" in req.url and "year_from=2010" in req.url and "integrity=missing_answer" in req.url):
+                        page.get_by_role("button",name="应用筛选",exact=True).click()
+                    expect(page.locator(".question-bank-active-filters")).to_contain_text("2010")
                     page.get_by_role("button",name="重置",exact=True).click()
                     page.get_by_role("button",name="收起筛选").click()
                     page.locator(".bank-detail .katex").first.wait_for()
