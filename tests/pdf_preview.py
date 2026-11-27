@@ -1,5 +1,7 @@
 """Exercise the production PDF renderer against the exact compiled frontend."""
+import base64
 import json
+import time
 import os
 import sys
 import tempfile
@@ -49,6 +51,7 @@ def run():
         for marker in ("MarkerAlpha", "MarkerBeta", "ScaleMarker79"):
             assert marker in text, marker
         assert "HiddenAnswerAlpha" not in text
+        assert "(2.1)" in "".join(text.split()), text
         for page in reader.pages:
             assert abs(float(page.mediabox.width) - 595.28) < 1.5
             assert abs(float(page.mediabox.height) - 841.89) < 1.5
@@ -60,6 +63,29 @@ def run():
         assert subset["pages"]==1 and subset["total_pages"]==result["pages"]
         assert PdfReader(path/"subset.pdf").pages[0].extract_text()==reader.pages[1].extract_text()
         payload.pop("page_ranges");payload.pop("preview_pages")
+        # Mixed paper sizes, linked knowledge index, and saved cover assets.
+        cover_id="e59eb181-5574-4dbc-a272-7246d2d0d069"
+        image=path/"cover.png"
+        image.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3J0AAAAASUVORK5CYII="))
+        images={"/api/files/"+cover_id+"/preview":(str(image),"image/png")}
+        payload["doc"]["blocks"]=[
+            *blocks[:5],
+            {**block("index-entry","knowledge","Knowledge content"),"title":"IndexMarker","knowledge_tags":["GraphTagNotForIndex"]},
+        ]
+        payload["layout"].update(sectionPages={"chapter-two":{"paper":"A5","landscape":True}},knowledgeIndex=True,coverFileId=cover_id,backCoverFileId=cover_id)
+        (path/"payload.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
+        combined=render_pdf(path/"payload.json",images,path/"combined.pdf",print,lambda:False,ROOT/"frontend"/"dist")
+        reader2=PdfReader(path/"combined.pdf")
+        assert combined["pages"]==len(reader2.pages)
+        sizes=[(float(p.mediabox.width),float(p.mediabox.height)) for p in reader2.pages]
+        assert any(abs(w-595.28)<1.5 and abs(h-419.53)<1.5 for w,h in sizes),sizes
+        assert all(abs(sizes[i][0]-595.28)<1.5 and abs(sizes[i][1]-841.89)<1.5 for i in (0,-1)),sizes
+        combined_text="\n".join(p.extract_text() for p in reader2.pages)
+        assert combined_text.count("IndexMarker")>=2
+        assert "GraphTagNotForIndex" not in combined_text
+        assert not reader2.pages[0].extract_text().strip() and not reader2.pages[-1].extract_text().strip()
+        print("Mixed page geometry, knowledge index and cover verification:",sizes)
+        payload["layout"]={"paper":"A4","columns":1}
         payload["doc"]["blocks"] = [block("bad", "question", r"$\unknowncommand$")]
         (path/"payload.json").write_text(json.dumps(payload), encoding="utf-8")
         try:
@@ -69,5 +95,27 @@ def run():
         else:
             raise AssertionError("Invalid math must block PDF output")
 
+def scale():
+    count=int(os.environ.get("WG_PDF_SCALE","0"))
+    if not count:return
+    rows=[]
+    for i in range(count):
+        if i%200==0:
+            rows.append({**block("chapter-"+str(i),"heading",heading_level=1),"title":"Chapter "+str(i//200+1)})
+        rows.append(block("item-"+str(i),"question","ScaleRow%05d"%i+(r" $x^2+1$" if i%25==0 else " 练习")))
+    payload={"doc":{"title":"Large Layout","subject":"高等数学","kind":"textbook","blocks":rows},
+             "layout":{"paper":"A4","toc":True,"chapterNewPage":True},"stem":True,"answerOnly":False,"source":False}
+    with tempfile.TemporaryDirectory() as folder:
+        path=Path(folder)
+        (path/"payload.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
+        started=time.monotonic()
+        result=render_pdf(path/"payload.json",{},path/"scale.pdf",print,lambda:False,ROOT/"frontend"/"dist")
+        text="\n".join(p.extract_text() for p in PdfReader(path/"scale.pdf").pages)
+        import re
+        found=set(re.findall(r"ScaleRow\d{5}",text))
+        assert len(found)==count,(len(found),count)
+        print("Scale:",count,"items",result,"seconds",round(time.monotonic()-started,2))
+
 if __name__ == "__main__":
     run()
+    scale()
