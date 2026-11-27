@@ -83,7 +83,7 @@ def latex(node,depth=0):
         return r"\left("+"".join(latex(c,depth+1) for c in node.findall(M+"e"))+r"\right)"
     raise ValueError("unsupported formula")
 
-def docx_blocks(path):
+def docx_blocks(path, target_unit=None, image_handler=None):
     warnings=set()
     try:
         with zipfile.ZipFile(path) as z:
@@ -97,6 +97,7 @@ def docx_blocks(path):
         raise HTTPException(422,"Word文档损坏或包含不支持的XML")
     body=root.find(W+"body")
     if body is None:raise HTTPException(422,"Word正文不存在")
+    active_handler=None
     def walk(node,depth=0):
         if depth>64:raise HTTPException(422,"Word结构嵌套过深")
         tag=node.tag
@@ -109,6 +110,8 @@ def docx_blocks(path):
                 warnings.add("包含无法无损转换的Word公式，已标记待核对")
                 return "[Word公式待核对]"
         if tag in (W+"drawing",W+"pict",W+"object"):
+            if active_handler is not None:
+                return active_handler(node)
             warnings.add("图片或嵌入对象需查看原文件")
             return "[图形或嵌入对象待核对]"
         if tag==W+"t":return node.text or ""
@@ -126,8 +129,13 @@ def docx_blocks(path):
     for node in body:
         if node.tag in (W+"p",W+"tbl",W+"sdt"):
             value=walk(node).strip()
-            if value:blocks.append(value)
-    warnings.add("Word仅提取正文、表格及部分原生公式；页眉页脚、版式、复杂公式请对照原件")
+            if value:
+                if image_handler is not None and len(blocks)+1==target_unit:
+                    active_handler=image_handler
+                    try: value=walk(node).strip()
+                    finally: active_handler=None
+                blocks.append(value)
+    warnings.add("Word提取正文、表格及部分原生公式；页眉页脚、版式、复杂公式请对照原件")
     return blocks,sorted(warnings)
 
 def bounded_command(args,timeout,output=None):

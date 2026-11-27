@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
 from app.models import WorkSession, WorkMaterial, WorkBatch, StoredFile, IntakeImport, IntakeJob, User, FileReference, TeachingDocument, DocumentRegistration, IntakeSupplement
-from app.services import storage, material_import as imp, material_vision as vision
+from app.services import storage, material_import as imp, material_vision as vision, word_images
 from app.services.recognition_plan import parse_instruction, matching_names, propose_range
 from app.api import intelligence as ai
 from app.api import work_agent as agent
@@ -340,12 +340,13 @@ def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_
         if f.media_type in storage.IMAGE_TYPES:
             result=vision.recognize(f,n,model,effort) if model else imp.extract(f,"ocr",n,n)
         elif f.media_type=="application/pdf":
-            try:result=imp.extract(f,"text",n,n)
-            except HTTPException as exc:
-                if exc.status_code!=422:raise
-                if model:result=vision.recognize(f,n,model,effort)
-                elif imp.capabilities()["pdf_ocr"]:result=imp.extract(f,"ocr",n,n)
-                else:raise
+            if model:result=vision.recognize(f,n,model,effort)
+            else:
+                try:result=imp.extract(f,"text",n,n)
+                except HTTPException as exc:
+                    if exc.status_code!=422 or not imp.capabilities()["pdf_ocr"]:raise
+                    result=imp.extract(f,"ocr",n,n)
+        elif f.media_type==imp.DOCX and model:result=vision.recognize_word(f,n,model,effort)
         else:result=imp.extract(f,"text",n,n)
         u={"unit":n,"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
     except HTTPException as exc:
@@ -384,5 +385,29 @@ def page(ident:str,mid:str,unit:int=Query(ge=1,le=10000),db:Session=Depends(get_
         path=Path(prefix+".png")
         if not path.is_file() or path.stat().st_size>10_000_000:raise HTTPException(422,"原页预览不可用")
         return Response(path.read_bytes(),media_type="image/png",headers={"Content-Security-Policy":"sandbox; default-src 'none'"})
+
+@router.get("/{ident}/materials/{mid}/word-block")
+def word_block(ident:str,mid:str,unit:int=Query(ge=1,le=10000),db:Session=Depends(get_db)):
+    m=material(db,workspace(db,ident),mid);f=file_for(db,m)
+    if f.media_type!=imp.DOCX:raise HTTPException(415,"仅Word支持段落原文预览")
+    images=[]
+    def marker(index,media,raw):
+        images.append({"index":index,"media_type":media})
+        return f"[Word原图{index}]"
+    result=word_images.block(storage.file_path(f),unit,marker)
+    return {**result,"images":images}
+
+@router.get("/{ident}/materials/{mid}/word-image")
+def word_image(ident:str,mid:str,unit:int=Query(ge=1,le=10000),index:int=Query(ge=1,le=word_images.MAX_IMAGES_PER_BLOCK),db:Session=Depends(get_db)):
+    m=material(db,workspace(db,ident),mid);f=file_for(db,m)
+    if f.media_type!=imp.DOCX:raise HTTPException(415,"仅Word支持内嵌图片预览")
+    selected=None
+    def marker(i,media,raw):
+        nonlocal selected
+        if i==index:selected=(media,raw)
+        return f"[Word原图{i}]"
+    word_images.block(storage.file_path(f),unit,marker)
+    if selected is None:raise HTTPException(404,"原图不可用，请下载原文件核对")
+    return Response(selected[1],media_type=selected[0],headers={"Content-Security-Policy":"sandbox; default-src 'none'","Cache-Control":"private, no-store"})
 
 router.include_router(agent.router)
