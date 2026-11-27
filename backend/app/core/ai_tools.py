@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic.fields import FieldInfo
 
 from app.api import resources, knowledge, source_catalog, documents, settings, video, workspaces, bank_work, studio, qiandao, qoder, teaching_works
-from app.models import TeachingResource
+from app.models import TeachingResource, StoredFile, ChatSession, ChatMessage, WorkSession
+from app.services import material_import
+from sqlalchemy import select
 
 
 class StrictBody(BaseModel):
@@ -59,6 +61,7 @@ class DocumentPatch(StrictBody):
 
 
 def patch_document(id: str, body: DocumentPatch, db, user):
+    resources.admin_lock(db,user)
     d = documents.row(db,id)
     if d.kind == "intake" or d.chaptered or d.archived or d.revision != body.revision:
         raise HTTPException(409,"仅支持当前版本的创作文档局部编辑")
@@ -88,6 +91,56 @@ def patch_document(id: str, body: DocumentPatch, db, user):
                                                 blocks=blocks,revision=body.revision),db,user)
 
 
+class ReadOriginal(StrictBody):
+    file_id: str=Field(min_length=1,max_length=36)
+    start: int=Field(default=1,ge=1,le=10000)
+    end: int=Field(default=1,ge=1,le=10000)
+    mode: Literal["text","ocr"]="text"
+
+
+def read_original(body: ReadOriginal, db):
+    if body.end<body.start or body.end-body.start>=10:
+        raise HTTPException(422,"单批最多读取10页或段")
+    f=db.scalar(workspaces.original_query().where(StoredFile.id==body.file_id,StoredFile.archived==False))
+    if not f:raise HTTPException(404,"原始资料不存在")
+    result=material_import.extract(f,body.mode,body.start,body.end)
+    return {**result,"file_id":f.id,"name":f.name,"verified":False}
+
+
+class HistoryQuery(StrictBody):
+    q: str=Field(min_length=1,max_length=200)
+
+
+def history_search(body: HistoryQuery,db):
+    q=body.q.strip()
+    if not q:raise HTTPException(422,"请输入历史检索词")
+    sessions=list(db.scalars(select(ChatSession).where(ChatSession.title.contains(q,autoescape=True)|ChatSession.project.contains(q,autoescape=True)).order_by(ChatSession.updated_at.desc()).limit(10)))
+    messages=list(db.scalars(select(ChatMessage).where(ChatMessage.state=="done",ChatMessage.content.contains(q,autoescape=True)).order_by(ChatMessage.created_at.desc()).limit(15)))
+    work=list(db.scalars(select(WorkSession).where(WorkSession.title.contains(q,autoescape=True)).order_by(WorkSession.updated_at.desc()).limit(10)))
+    return {"sessions":[{"id":s.id,"title":s.title,"project":s.project} for s in sessions],
+            "messages":[{"id":m.id,"session_id":m.session_id,"role":m.role,"content":m.content[:1200]} for m in messages],
+            "work":[{"id":s.id,"title":s.title,"recent":[{"instruction":r.get("instruction"),"state":r.get("state"),"detail":r.get("detail")} for r in (s.agent_history or [])[-3:]]} for s in work]}
+
+
+class TextIntake(StrictBody):
+    title: str=Field(min_length=1,max_length=200)
+    subject: str=Field(default="",max_length=40)
+    text: str=Field(min_length=1,max_length=24000)
+    intent: Literal["mixed","question","knowledge","document"]="mixed"
+
+
+def intake_text(body: TextIntake,db,user,model="Auto",effort="default"):
+    from app.api import intelligence
+    # Explicitly distinguish an AI-provided draft from original textbook material.
+    request=intelligence.Start(**body.model_dump(),model=model,effort=effort,input_origin="chat_draft")
+    return intelligence.start(request,db,user)
+
+
+def intake_status(id: str,db):
+    from app.api import intelligence
+    return intelligence.detail(id,db)
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -113,6 +166,7 @@ class Tool:
                 params[name] = value.default.default
             elif value.default is not inspect.Parameter.empty:
                 params[name] = value.default
+        if self.name=="intake_text":params.update(model=model or "Auto",effort=effort or "default")
         # Model selection is controlled by the task, not by generated arguments.
         if self.name in ("video_generate", "video_edit"):
             if self.name == "video_generate":
@@ -152,6 +206,10 @@ register("source_read", "读取来源信息", source_catalog.read, ("id",))
 register("source_questions", "读取指定来源的题目", bank_work.source_questions, ("id","offset","limit"))
 register("source_statistics", "按来源、年份、院校等统计实际已录入知识点", source_catalog.statistics, ("body",))
 register("original_search", "查询原始资料库与识别进度", workspaces.library, ("q","limit","offset"), fixed={"archived":False})
+register("original_read", "读取原始文件指定页或段，返回未核对原文与警告", read_original, ("body",))
+register("history_search", "按关键词查询历史聊天及工作记录", history_search, ("body",))
+register("intake_text", "从用户提供的文字创建待人工审核的录入任务，不正式入库", intake_text, ("body",), write=True)
+register("intake_status", "查看录入任务实际状态", intake_status, ("id",))
 register("document_search", "查询教学资料", documents.listing, ("q","kind","limit","offset"), fixed={"archived":False})
 register("document_read", "读取文档及真实版本", documents.read, ("id",))
 register("book_chapters", "读取教材章节", documents.book_chapters, ("id",))
@@ -197,7 +255,9 @@ def bounded_result(value, limit=12000):
         return value
     # Preserve IDs and pagination metadata instead of chopping JSON arbitrarily.
     if isinstance(value,dict):
-        result={k:v for k,v in value.items() if not isinstance(v,(dict,list)) and len(str(v))<500}
+        result={k:(v[:2400] if isinstance(v,str) else v) for k,v in value.items() if not isinstance(v,(dict,list)) and k not in ("password","token","pat")}
+        if len(json.dumps(result,ensure_ascii=False,default=str))>limit//2:
+            result={k:(v[:600] if isinstance(v,str) else v) for k,v in result.items()}
         rows=next((v for k,v in value.items() if k in ("items","rows","results","blocks","jobs") and isinstance(v,list)),[])
     elif isinstance(value,list):
         result={};rows=value
@@ -207,7 +267,7 @@ def bounded_result(value, limit=12000):
     for row in rows:
         if isinstance(row,dict):
             item={k:v[:600] if isinstance(v,str) else v for k,v in row.items()
-                  if k in ("id","code","title","kind","subject","revision","name","state","status","resource_id","question_type","difficulty","question_count","source_question_count","content","start","end")}
+                  if k in ("id","uid","code","title","kind","subject","revision","name","state","status","resource_id","question_type","difficulty","question_count","source_question_count","content","answer","solution","score","start","end")}
         else:
             item=str(row)[:300]
         if len(json.dumps(result,ensure_ascii=False,default=str))+len(json.dumps(item,ensure_ascii=False,default=str))>limit-500:
