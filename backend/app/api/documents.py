@@ -73,7 +73,7 @@ def row(db,id):
     return d
 def summary(d):return {k:getattr(d,k) for k in ("id","title","kind","subject","source_id","revision","archived","created_at","updated_at","chaptered","parent_document_id","chapter_order")}
 def chapter_index(db,d,include_archived=False):
-    stmt=select(Doc.id,Doc.title,Doc.revision,Doc.archived,Doc.chapter_order,Doc.updated_at,func.json_array_length(Doc.blocks).label("blocks_count")).where(Doc.parent_document_id==d.id)
+    stmt=select(Doc.id,Doc.title,Doc.revision,Doc.archived,Doc.chapter_order,Doc.updated_at,Doc.chapter_blocks_count.label("blocks_count")).where(Doc.parent_document_id==d.id)
     if not include_archived:stmt=stmt.where(Doc.archived==False)
     return [dict(r._mapping) for r in db.execute(stmt.order_by(Doc.chapter_order,Doc.id))]
 def book_parent(db,d,lock=True):
@@ -99,6 +99,7 @@ def public(d):
     return {**summary(d),"blocks":blocks}
 def record_version(db,d):
     if d.kind not in ("paper","handout","textbook"):return
+    if d.parent_document_id:d.chapter_blocks_count=len(d.blocks)
     if db.get(TeachingDocumentVersion,(d.id,d.revision)):return
     snapshot={"title":d.title,"kind":d.kind,"subject":d.subject,"source_id":d.source_id,"blocks":d.blocks}
     if d.chaptered:snapshot["chapters"]=chapter_index(db,d)

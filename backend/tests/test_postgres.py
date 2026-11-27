@@ -256,6 +256,13 @@ def test_migration_and_login(tmp_path, monkeypatch):
         extra_doc=client.get(extra_path).json()
         assert client.put(extra_path,headers=origin,json={**extra_doc,"blocks":[{"uid":"overflow","kind":"text","content":"超容量"}]}).status_code==422
         assert client.get(extra_path).json()["blocks"]==[]
+        receipt=client.get(scale_path+"/versions").json()
+        assert len(receipt["items"])==30 and receipt["items"][0]["blocks_count"]==5000
+        rolled=client.post(scale_path+"/versions/"+str(scale_book["revision"])+"/restore",headers=origin,json={"revision":extra["document"]["revision"]})
+        assert rolled.status_code==200,rolled.text[:500]
+        after=client.get(scale_path+"/chapters").json()
+        assert sum(x["blocks_count"] for x in after["items"] if not x["archived"])==5000
+        assert next(x for x in after["items"] if x["id"]==extra["chapter"]["id"])["archived"]
         print("TEXTBOOK_5000 seconds=",round(time.monotonic()-started,2),"directory_bytes=",len(json.dumps(scale_directory,ensure_ascii=False).encode()),"export_bytes=",len(scale_export.content))
         # Full-library stem matching and transactional registration.
         batch=client.post("/api/documents",headers=origin,json={"title":"批量审核","subject":"高数","source_id":created_doc["source_id"],"blocks":[

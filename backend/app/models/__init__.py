@@ -200,6 +200,7 @@ class TeachingDocument(Base):
     chaptered: Mapped[bool]=mapped_column(Boolean,default=False,server_default="false")
     parent_document_id: Mapped[str | None]=mapped_column(ForeignKey("teaching_documents.id",ondelete="RESTRICT"),nullable=True)
     chapter_order: Mapped[int]=mapped_column(Integer,default=0,server_default="0")
+    chapter_blocks_count: Mapped[int]=mapped_column(Integer,default=0,server_default="0")
     id: Mapped[str]=mapped_column(String(36),primary_key=True)
     title: Mapped[str]=mapped_column(String(200))
     kind: Mapped[str]=mapped_column(String(16))

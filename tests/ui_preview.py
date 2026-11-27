@@ -968,6 +968,14 @@ with sync_playwright() as p:
             page.locator(".manual-intake-cards").wait_for()
             assert ("GET","chapter-preview") in book_requests
             expect(page.get_by_role("button",name="＋ 章",exact=True)).to_have_count(0)
+            if GROUP=="mobile":
+                page.get_by_role("button",name="＋ 添加内容",exact=True).click()
+            page.get_by_role("button",name="＋ 正文",exact=True).click()
+            page.get_by_label("正文",exact=True).fill("章节独立保存测试")
+            with page.expect_request(lambda req:req.url.endswith("/api/documents/chapter-preview") and req.method=="PUT") as chapter_save:
+                page.get_by_role("button",name="保存编排",exact=True).click()
+            assert len(chapter_save.value.post_data_json["blocks"])==2
+            expect(page.get_by_text("编排已保存到服务器",exact=True)).to_be_visible()
             page.get_by_role("link",name="返回全书目录",exact=False).click()
             expect(page.locator(".book-chapter-row")).to_have_count(2)
             page.get_by_role("button",name="全书版本历史",exact=True).click()
