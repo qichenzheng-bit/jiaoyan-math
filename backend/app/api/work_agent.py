@@ -20,6 +20,7 @@ class Start(BaseModel):
     selected_id:str|None=Field(default=None,max_length=36)
     auto:bool=True
     priority:Literal["normal","high"]="normal"
+    chat_session_id:str|None=Field(default=None,max_length=36)
 class Confirm(BaseModel):
     plan_id:str=Field(min_length=1,max_length=36)
 class Intent(BaseModel):
@@ -60,7 +61,7 @@ def current(s):return (s.agent_history or [])[-1] if s.agent_history else None
 def save(db,s,r):
     s.agent_history=[*[x for x in (s.agent_history or []) if x["id"]!=r["id"]],r][-12:]
     s.updated_at=now()
-def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context"}} if r else None
+def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context","linked_chat"}} if r else None
 
 def workflow(db,s,r):
     """Derive progress from real extraction, review and registration records.
@@ -189,6 +190,8 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
     rows,truncated=catalog(db,s,body)
     from app.core.ai_work import history_context
     recent=history_context(s)
+    from app.core.ai_work import chat_context
+    linked_chat=chat_context(db,body.chat_session_id) if body.chat_session_id else ""
     prompt=("你是数学教研工作意图助手。理解用户的自然语言和上下文，自主规划下一项操作。只输出JSON对象，不执行代码。"
     "资料录入动作可选recognize(识别原文),open_batch(打开批次),organize(整理已核对原文),review(审核已有整理),attach(关联资料),clarify(澄清)。"
     "字段action,file_id,batch_id,start,count,reference_ids,match_fields,focus,goal,explanation。只能使用真实目录ID；歧义或缺少页数时clarify并提问。"
@@ -200,14 +203,14 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
     from app.core.ai_work import rules
     from app.core.ai_preferences import context
     preference_snapshot=context(db,user,'work')
-    prompt+=preference_snapshot+rules()
+    prompt+=linked_chat+preference_snapshot+rules()
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"资料上下文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"Qoder执行服务未就绪")
     effort=qoder.assistant_effort(db,body.model,body.effort)
     ident_job=str(uuid4())
     r={"id":ident_job,"instruction":body.instruction.strip(),"model":body.model,"effort":effort.get("effort","default"),
        "priority":body.priority,"state":"running","detail":"正在排队并理解工作要求","created_at":now(),"allowed_files":[x["id"] for x in rows],
-       "auto":True,"initial_context":json.dumps(rows,ensure_ascii=False)[:12000],"actor_id":user.id,"phase":"pending","phase_at":now(),"model_job":ident_job,"prompt":prompt,"preference_snapshot":preference_snapshot,"steps":[]}
+       "auto":True,"chat_session_id":body.chat_session_id,"linked_chat":linked_chat,"initial_context":json.dumps(rows,ensure_ascii=False)[:12000],"actor_id":user.id,"phase":"pending","phase_at":now(),"model_job":ident_job,"prompt":prompt,"preference_snapshot":preference_snapshot,"steps":[]}
     if not body.auto:
         # Compatibility for explicit manual intake planning; work UI defaults to autonomous.
         qoder.request("POST","/chat/start",{"id":ident_job,"model":body.model,"prompt":prompt,**effort})
