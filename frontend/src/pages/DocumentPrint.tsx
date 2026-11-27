@@ -2,6 +2,7 @@ import {useWorkspaceBack} from '../components/WorkspaceNavigation'
 import {MathText} from '../components/MathText'
 import {useEffect,useState,useRef,useMemo,Fragment} from 'react'
 import PagedPreview from './PagedPreview'
+import BlockStyleEditor from './BlockStyleEditor'
 import PdfJobs from './PdfJobs'
 import type {CSSProperties} from 'react'
 import {defaults,builtins,dimensions,layoutError,sanitizeLayout,readLocal,writeLocal,readTemplates,templateLayout,sanitizeRule} from './documentLayout'
@@ -25,7 +26,9 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const [pageCount,setPageCount]=useState(0)
  const [scope,setScope]=useState<string[]>([]),[scopeMode,setScopeMode]=useState<'all'|'selected'>('all')
  const [editUid,setEditUid]=useState(''),[overrides,setOverrides]=useState<Record<string,Partial<Content>>>({})
- const [filename,setFilename]=useState('')
+ const [filename,setFilename]=useState(''),[picked,setPicked]=useState('')
+ const [applyMode,setApplyMode]=useState<'keep'|'replace'|'partial'>('keep'),[applyParts,setApplyParts]=useState(['page','body','special','header','types'])
+ const [layoutHistory,setLayoutHistory]=useState<Saved<Layout|null>['history']>([]),[templateHistory,setTemplateHistory]=useState<Saved<LayoutTemplate[]>['history']>([])
  const [cloudRevision,setCloudRevision]=useState<number|null>(null),[templateRevision,setTemplateRevision]=useState<number|null>(null),[cloudBusy,setCloudBusy]=useState(false),[cloudLayout,setCloudLayout]=useState<Layout|null>(null)
  const [hasDraft,setHasDraft]=useState(false)
  const routeRef=useRef('')
@@ -35,7 +38,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const back=source?'/sources':(doc?.kind==='paper'?'/papers':doc?.kind==='handout'?'/handouts':doc?.kind==='textbook'?'/textbooks':'/intake')+'?doc='+id
  useWorkspaceBack(()=>{if(!doc&&!source)return false;navigate(back);return true})
  useEffect(()=>{
-  const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('');setScope([]);setScopeMode('all');setOverrides({});setEditUid('');setFilename('');setPageCount(0)
+  const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('');setScope([]);setScopeMode('all');setOverrides({});setEditUid('');setFilename('');setPageCount(0);setPicked('');setLayoutHistory([]);setTemplateHistory([])
   api<PrintDoc>((source?'/documents/source-export/':'/documents/')+encodeURIComponent(id??'')+(source?'':'/export'),{signal:c.signal}).then(async data=>{
    if(c.signal.aborted)return
    if(chapterUid){
@@ -51,10 +54,11 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
    if(c.signal.aborted)return
    const saved=remote.status==='fulfilled'?remote.value:null
    const lib=library.status==='fulfilled'?library.value:null
-   if(saved&&Number.isInteger(saved.revision)){setCloudRevision(saved.revision);setCloudLayout(saved.value?sanitizeLayout(saved.value):null)}
-   if(lib&&Number.isInteger(lib.revision)&&Array.isArray(lib.value)){setTemplateRevision(lib.revision);if(lib.revision>0){setTemplates(lib.value);writeLocal('wg-layout-templates-v1',lib.value)}}
+   if(saved&&Number.isInteger(saved.revision)){setCloudRevision(saved.revision);setCloudLayout(saved.value?sanitizeLayout(saved.value):null);setLayoutHistory(saved.history??[])}
+   if(lib&&Number.isInteger(lib.revision)&&Array.isArray(lib.value)){setTemplateRevision(lib.revision);setTemplateHistory(lib.history??[]);if(lib.revision>0){const list=lib.value.map(t=>({...t,layout:templateLayout(sanitizeLayout(t.layout))}));setTemplates(list);writeLocal('wg-layout-templates-v1',list)}}
+   const defaultTemplate=lib?.value?.find(t=>t.isDefault&&t.kind===data.kind)??lib?.value?.find(t=>t.isDefault&&t.kind==='all')??base
    const current=saved?.value??stored
-   setHasDraft(Boolean(current));setTemplateId(base.id);setLayout(current?sanitizeLayout(current):{...base.layout,originalNumbers:source});setDoc(data);setFilename(data.title);setLoadedKey(storageKey)
+   setHasDraft(Boolean(current));setTemplateId(defaultTemplate.id);setLayout(current?sanitizeLayout(current):{...sanitizeLayout(defaultTemplate.layout),originalNumbers:source});setDoc(data);setFilename(data.title);setLoadedKey(storageKey)
   }).catch(e=>{if(!c.signal.aborted)setError(e.message)})
   return()=>c.abort()
  },[id,source,chapterUid,storageKey,layoutPath])
@@ -74,43 +78,85 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const selected=compatible.find(t=>t.id===templateId)
  function apply(){
   if(!selected)return
-  const next={...selected.layout}
-  if(source)next.originalNumbers=true
+  const next=templateLayout(sanitizeLayout(selected.layout))
+  if(source)next.originalNumbers=layout.originalNumbers
+  if(applyMode==='partial'){
+   const groups:Record<string,(keyof Layout)[]>={page:['paper','width','height','landscape','top','bottom','left','right','columns','gap','mirrorMargins','chapterNewPage'],body:['font','size','lineHeight','paragraphGap','titleSize','headingSize','keepQuestions'],special:['subtitle','examTime','showScore','typeHeadings','numbering','optionColumns','blankWidth','answerSpace','originalNumbers'],header:['header','footer','toc','tocDepth'],types:['typeStyles']}
+   const chosen=new Set(applyParts.flatMap(part=>groups[part]??[]))
+   for(const key of Object.keys(next) as (keyof Layout)[])if(!chosen.has(key))Object.assign(next,{[key]:layout[key]})
+  }
+  if(applyMode!=='replace'){next.blockStyles=layout.blockStyles;next.chapterStyles=layout.chapterStyles}
   setLayout(next);setConfirmed(false);setReady(false);setEditing(true);setMessage('已应用模板，原始教学内容保持不变。')
  }
  async function saveCloud(){
   if(cloudRevision===null||cloudBusy||layoutError(layout))return
   const key=storageKey;setCloudBusy(true)
-  try{const saved=await api<Saved<Layout>>(layoutPath,{method:'PUT',body:JSON.stringify({revision:cloudRevision,value:layout})});if(routeRef.current!==key)return;setCloudRevision(saved.revision);setCloudLayout(saved.value);setMessage('排版配置已保存到服务器，可跨设备读取。')}
+  try{const saved=await api<Saved<Layout>>(layoutPath,{method:'PUT',body:JSON.stringify({revision:cloudRevision,value:layout})});if(routeRef.current!==key)return;setCloudRevision(saved.revision);setCloudLayout(sanitizeLayout(saved.value));setLayoutHistory(saved.history??[]);setMessage('排版配置已保存到服务器，可跨设备读取。')}
   catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'服务器保存失败，当前浏览器草稿仍保留。')}
+  finally{if(routeRef.current===key)setCloudBusy(false)}
+ }
+ async function persistTemplates(list:LayoutTemplate[],messageText:string,choose?:string){
+  if(cloudBusy||list.length>100)return
+  const key=storageKey;setCloudBusy(true)
+  try{
+   if(templateRevision!==null){
+    const result=await api<Saved<LayoutTemplate[]>>('/settings/document-templates',{method:'PUT',body:JSON.stringify({revision:templateRevision,value:list})})
+    if(routeRef.current!==key)return
+    setTemplateRevision(result.revision);setTemplateHistory(result.history??[])
+   }
+   setTemplates(list)
+   const cached=writeLocal('wg-layout-templates-v1',list)
+   if(choose)setTemplateId(choose)
+   setTemplateName('');setMessage(messageText+(templateRevision===null?(cached?'（保存在本浏览器）':'（本地保存失败）'):'到服务器。'))
+  }catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'模板保存失败')}
   finally{if(routeRef.current===key)setCloudBusy(false)}
  }
  async function saveTemplate(){
   if(!templateName.trim()||layoutError(layout))return
   const kind:LayoutTemplate['kind']=doc?.kind==='paper'||doc?.kind==='handout'||doc?.kind==='textbook'?doc.kind:'all'
   if(templates.length>=100){setMessage('个人模板已达到 100 个，请先删除不用的模板。');return}
-  const item:LayoutTemplate={id:crypto.randomUUID(),name:templateName.trim().slice(0,80),kind,layout:{...layout}}
-  const list=[...templates,item]
-  const key=storageKey;setCloudBusy(true)
-  try{if(templateRevision!==null){const result=await api<Saved<LayoutTemplate[]>>('/settings/document-templates',{method:'PUT',body:JSON.stringify({revision:templateRevision,value:list})});if(routeRef.current!==key)return;setTemplateRevision(result.revision)}
-   else if(!writeLocal('wg-layout-templates-v1',list))throw Error('模板保存失败。')
-   setTemplates(list);writeLocal('wg-layout-templates-v1',list);setTemplateId(item.id);setTemplateName('');setMessage(templateRevision!==null?'模板已保存到服务器。':'服务器不可用，模板仅保存在当前浏览器。')
-  }catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'模板保存失败')}
-  finally{if(routeRef.current===key)setCloudBusy(false)}
+  const item:LayoutTemplate={id:crypto.randomUUID(),name:templateName.trim().slice(0,80),kind,layout:templateLayout(layout)}
+  await persistTemplates([...templates,item],'模板已保存',item.id)
  }
  async function removeTemplate(){
   if(!templates.some(t=>t.id===templateId))return
-  const list=templates.filter(t=>t.id!==templateId)
-  const key=storageKey;setCloudBusy(true)
-  try{if(templateRevision!==null){const result=await api<Saved<LayoutTemplate[]>>('/settings/document-templates',{method:'PUT',body:JSON.stringify({revision:templateRevision,value:list})});if(routeRef.current!==key)return;setTemplateRevision(result.revision)}
-   else if(!writeLocal('wg-layout-templates-v1',list))throw Error('删除失败。')
-   setTemplates(list);writeLocal('wg-layout-templates-v1',list);setTemplateId(compatible.find(t=>t.kind===doc?.kind&&builtins.includes(t))?.id??'general')
-  }catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'删除失败')}
-  finally{if(routeRef.current===key)setCloudBusy(false)}
+  await persistTemplates(templates.filter(t=>t.id!==templateId),'模板已删除',builtins.find(t=>t.kind===doc?.kind)?.id??'general')
+ }
+ async function updateTemplate(mode:'rename'|'replace'|'default'|'copy'){
+  const item=selected
+  if(!item)return
+  const own=templates.some(t=>t.id===item.id)
+  if(mode==='copy'){
+   if(templates.length>=100){setMessage('个人模板最多100个。');return}
+   const copied={...item,id:crypto.randomUUID(),name:(templateName.trim()||item.name+' 副本').slice(0,80),isDefault:false,layout:templateLayout(item.layout)}
+   await persistTemplates([...templates,copied],'模板已复制',copied.id);return
+  }
+  if(!own)return
+  if(mode==='rename'&&!templateName.trim())return
+  if(mode==='replace'&&layoutError(layout))return
+  const list=templates.map(t=>mode==='default'&&t.kind===item.kind?{...t,isDefault:t.id===item.id}:t.id!==item.id?t:mode==='rename'?{...t,name:templateName.trim().slice(0,80)}:mode==='replace'?{...t,layout:templateLayout(layout)}:t)
+  await persistTemplates(list,mode==='default'?'默认模板已保存':'模板已更新',item.id)
+ }
+ function exportTemplate(){
+  if(!selected)return
+  const data={version:1,template:{...selected,layout:templateLayout(selected.layout),isDefault:false}}
+  const href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}))
+  const a=document.createElement('a');a.href=href;a.download=selected.name+'.json';a.click();window.setTimeout(()=>URL.revokeObjectURL(href),1000)
+ }
+ async function importTemplate(file:File|undefined){
+  if(!file||cloudBusy)return
+  try{
+   if(file.size>1_000_000||templates.length>=100)throw Error('模板文件过大或个人模板已满。')
+   const parsed=JSON.parse(await file.text()),item=parsed.template
+   if(parsed.version!==1||!item||typeof item.name!=='string'||!item.name.trim()||!['paper','handout','textbook','all'].includes(item.kind)||!item.layout||typeof item.layout!=='object')throw Error('不支持的模板格式')
+   const imported:LayoutTemplate={id:crypto.randomUUID(),name:item.name.trim().slice(0,80),kind:item.kind,layout:templateLayout(sanitizeLayout(item.layout)),isDefault:false}
+   if(layoutError(imported.layout))throw Error(layoutError(imported.layout))
+   await persistTemplates([...templates,imported],'模板已导入',imported.id)
+  }catch(e){setMessage(e instanceof Error?e.message:'模板导入失败')}
  }
  const [w,h]=dimensions(layout),invalid=layoutError(layout)
  const style={'--layout-width':w+'mm','--layout-height':h+'mm','--layout-top':layout.top+'mm','--layout-bottom':layout.bottom+'mm','--layout-left':layout.left+'mm','--layout-right':layout.right+'mm','--layout-columns':layout.columns,'--layout-gap':layout.gap+'mm','--layout-size':layout.size+'pt','--layout-line':layout.lineHeight,'--layout-paragraph':layout.paragraphGap+'pt','--layout-font':layout.font==='sans'?'"Noto Sans CJK SC","Microsoft YaHei",sans-serif':'"Noto Serif CJK SC",SimSun,serif'} as CSSProperties
- const num=(label:string,key:'width'|'height'|'top'|'bottom'|'left'|'right'|'gap'|'size'|'lineHeight'|'paragraphGap'|'answerSpace'|'titleSize'|'headingSize',min:number,max:number,step=1)=><label>{label}<input type="number" min={min} max={max} step={step} value={layout[key]} onChange={e=>{const value=e.currentTarget.valueAsNumber;if(Number.isFinite(value))patch({[key]:Math.max(min,Math.min(max,value))})}}/></label>
+ const num=(label:string,key:'width'|'height'|'top'|'bottom'|'left'|'right'|'gap'|'size'|'lineHeight'|'paragraphGap'|'answerSpace'|'titleSize'|'headingSize'|'blankWidth',min:number,max:number,step=1)=><label>{label}<input type="number" min={min} max={max} step={step} value={layout[key]} onChange={e=>{const value=e.currentTarget.valueAsNumber;if(Number.isFinite(value))patch({[key]:Math.max(min,Math.min(max,value))})}}/></label>
  return <div className="print-work layout-work" style={style}>
   <style>{'@page{size:'+w+'mm '+h+'mm;margin:0}'}</style>
   <header className="print-controls layout-toolbar">
@@ -120,9 +166,21 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
   </header>
   {error&&<p role="alert">{error}</p>}
   {doc&&<div className="print-controls layout-template-panel">
-   <label>选择排版模板<select value={templateId} onChange={e=>setTemplateId(e.target.value)}>{compatible.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+   <label>选择排版模板<select aria-label="选择排版模板" value={templateId} onChange={e=>setTemplateId(e.target.value)}>{compatible.map(t=><option key={t.id} value={t.id}>{t.name}{t.isDefault?'（默认）':''}</option>)}</select></label>
    <button className={editing?'':'primary'} type="button" disabled={!selected} onClick={apply}>{editing?'应用模板':'进入排版工作台'}</button>
    {!editing&&hasDraft&&<button type="button" onClick={()=>setEditing(true)}>继续上次排版</button>}{editing&&<><button type="button" disabled={cloudBusy||cloudRevision===null||!!invalid} onClick={()=>void saveCloud()}>保存排版到服务器</button><label>新模板名称<input value={templateName} maxLength={80} onChange={e=>setTemplateName(e.target.value)} placeholder="保存当前排版"/></label><button type="button" disabled={cloudBusy||!templateName.trim()||!!invalid} onClick={()=>void saveTemplate()}>保存为模板</button><button type="button" disabled={cloudBusy||!templates.some(t=>t.id===templateId)} onClick={()=>void removeTemplate()}>删除个人模板</button></>}
+   {editing&&controls&&<details><summary>模板管理与应用方式</summary><div className="layout-fields">
+    <label>应用方式<select value={applyMode} onChange={e=>setApplyMode(e.target.value as typeof applyMode)}><option value="keep">保留局部修改</option><option value="replace">完全替换排版</option><option value="partial">仅应用指定设置</option></select></label>
+    {applyMode==='partial'&&[['page','页面与分栏'],['body','字体与段落'],['special','文档专项规则'],['header','目录及页眉页脚'],['types','同类内容样式']].map(([v,t])=><label key={v} className="layout-check"><input type="checkbox" checked={applyParts.includes(v)} onChange={e=>setApplyParts(old=>e.target.checked?[...old,v]:old.filter(x=>x!==v))}/>{t}</label>)}
+    <button type="button" disabled={!selected||cloudBusy} onClick={()=>void updateTemplate('copy')}>复制模板</button>
+    <button type="button" disabled={!templates.some(t=>t.id===templateId)||cloudBusy||!templateName.trim()} onClick={()=>void updateTemplate('rename')}>重命名</button>
+    <button type="button" disabled={!templates.some(t=>t.id===templateId)||cloudBusy||!!invalid} onClick={()=>void updateTemplate('replace')}>更新所选模板</button>
+    <button type="button" disabled={!templates.some(t=>t.id===templateId)||cloudBusy} onClick={()=>void updateTemplate('default')}>设为同类默认模板</button>
+    <button type="button" disabled={!selected} onClick={exportTemplate}>导出模板 JSON</button>
+    <label>导入模板 JSON<input type="file" accept=".json,application/json" disabled={cloudBusy} onChange={e=>{const file=e.currentTarget.files?.[0];e.currentTarget.value='';void importTemplate(file)}}/></label>
+    {templateHistory.map(v=><button key={v.revision} disabled={cloudBusy} onClick={()=>{if(window.confirm('恢复模板历史版本 '+v.revision+'？'))void persistTemplates(v.value.map(t=>({...t,layout:templateLayout(sanitizeLayout(t.layout))})),'模板历史已恢复','general')}}>恢复模板版本 {v.revision}</button>)}
+    {layoutHistory.filter(v=>v.value).map(v=><button key={v.revision} onClick={()=>{if(window.confirm('恢复排版版本 '+v.revision+'？')){invalidate();setLayout(sanitizeLayout(v.value));setMessage('已载入历史排版，请保存确认。')}}}>载入排版版本 {v.revision}</button>)}
+   </div></details>}
    {message&&<p role="status">{message}</p>}
    <small className="muted">{cloudRevision===null?'排版草稿自动保存在当前浏览器。':cloudLayout&&JSON.stringify(cloudLayout)===JSON.stringify(layout)?'排版已同步至服务器。':'本地草稿自动保存，点击保存排版到服务器后可跨设备使用。'} 不修改题库或来源。</small>
   </div>}
@@ -139,7 +197,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
    </details></section>}
    {controls&&<section className="print-controls layout-settings">
     <details open><summary>页面与分栏</summary><div className="layout-fields">
-     <label>纸张<select value={layout.paper} onChange={e=>patch({paper:e.target.value as Layout['paper']})}>{['A4','A3','A5','B5','A6','custom'].map(p=><option key={p} value={p}>{p==='custom'?'自定义':p}</option>)}</select></label>
+     <label>纸张<select aria-label="纸张" value={layout.paper} onChange={e=>patch({paper:e.target.value as Layout['paper']})}>{['A4','A3','A5','B5','A6','custom'].map(p=><option key={p} value={p}>{p==='custom'?'自定义':p}</option>)}</select></label>
      <label>方向<select value={layout.landscape?'landscape':'portrait'} onChange={e=>patch({landscape:e.target.value==='landscape'})}><option value="portrait">纵向</option><option value="landscape">横向</option></select></label>
      {layout.paper==='custom'&&<>{num('宽度 (mm)','width',50,1000)}{num('高度 (mm)','height',50,1000)}</>}
      {num('上边距 (mm)','top',0,100)}{num('下边距 (mm)','bottom',0,100)}{num('左边距 (mm)','left',0,100)}{num('右边距 (mm)','right',0,100)}
@@ -153,6 +211,16 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
      <label className="layout-check"><input type="checkbox" checked={layout.originalNumbers} onChange={e=>patch({originalNumbers:e.target.checked})}/>保留已有原题号</label>
      {doc.kind==='paper'&&num('每题答题留白 (mm)','answerSpace',0,180,5)}
     </div></details>
+    <details><summary>文档专项排版</summary><div className="layout-fields">
+     <label>副标题<input value={layout.subtitle} maxLength={200} onChange={e=>patch({subtitle:e.target.value})}/></label>
+     {doc.kind==='paper'&&<><label>考试时间<input value={layout.examTime} maxLength={200} placeholder="例如 180 分钟" onChange={e=>patch({examTime:e.target.value})}/></label>
+     <label className="layout-check"><input type="checkbox" checked={layout.showScore} onChange={e=>patch({showScore:e.target.checked})}/>显示分值与总分</label>
+     <label className="layout-check"><input type="checkbox" checked={layout.typeHeadings} onChange={e=>patch({typeHeadings:e.target.checked})}/>按已有题型自动生成分组标题</label>
+     <label>选择题选项排列<select value={layout.optionColumns} onChange={e=>patch({optionColumns:e.target.value==='auto'?'auto':Number(e.target.value) as 1|2|4})}><option value="auto">自动</option><option value="1">竖排</option><option value="2">双列</option><option value="4">四列</option></select></label>
+     {num('填空横线长度 (mm，0 保留原样)','blankWidth',0,100)}</>}
+     <label>题号规则<select value={layout.numbering} onChange={e=>patch({numbering:e.target.value as Layout['numbering']})}><option value="continuous">连续编号</option><option value="section">按章或题型重新编号</option></select></label>
+    </div></details>
+    <BlockStyleEditor doc={doc} layout={layout} onChange={patch} picked={picked}/>
     <details><summary>分页、目录与页眉页脚</summary><div className="layout-fields">
      <label>页眉<input maxLength={200} value={layout.header} onChange={e=>patch({header:e.target.value})}/></label>
      <label>页脚<input maxLength={200} value={layout.footer} onChange={e=>patch({footer:e.target.value})}/></label>
@@ -164,15 +232,15 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
     </div></details>
    </section>}
    <div className="print-controls layout-output">
-    <label><input type="checkbox" checked={stem} onChange={e=>{setStem(e.target.checked);setConfirmed(false);setReady(false)}}/> {doc.kind==='paper'?'仅题目':'学生版（隐藏答案与解析）'}</label>
-    {doc.kind==='paper'&&!stem&&<label><input type="checkbox" checked={answerOnly} onChange={e=>{setAnswerOnly(e.target.checked);setConfirmed(false);setReady(false)}}/> 仅答案（不含解析）</label>}
+    <label><input type="checkbox" checked={stem} onChange={e=>{setStem(e.target.checked);if(e.target.checked)setAnswerOnly(false);setConfirmed(false);setReady(false)}}/> {doc.kind==='paper'?'仅题目':'学生版（隐藏答案与解析）'}</label>
+    {!stem&&<label><input type="checkbox" checked={answerOnly} onChange={e=>{setAnswerOnly(e.target.checked);setConfirmed(false);setReady(false)}}/> 仅答案（不含解析）</label>}
     <label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} disabled={!ready||!!invalid}/> 已检查预览，确认无问题</label>
     <button className="primary" disabled={!ready||!confirmed||!!invalid} onClick={async()=>{await document.fonts.ready;window.print()}}>打印 / 保存为 PDF</button>
     <label>文件名<input value={filename} onChange={e=>setFilename(e.target.value)} maxLength={200}/></label><small className="muted">{pageCount?`共 ${pageCount} 页`:"正在计算页数"} · 当前分页预览使用实际纸张尺寸。</small>
    </div>
    {doc.export_token&&<PdfJobs path={'/document-pdf/'+(source?'source':'doc')+'/'+encodeURIComponent(id??'')} canExport={ready&&confirmed&&!invalid&&!!filename.trim()} pageCount={pageCount} request={{export_token:doc.export_token,layout,stem,answerOnly,selected_uids:scopeMode==='all'?null:scope,overrides,chapter_uid:chapterUid,filename,confirmed:true}}/>}
    {invalid&&<p role="alert">{invalid}</p>}{previewError&&<p role="alert" className="print-controls">{previewError}</p>}
-   {!invalid&&viewDoc&&viewDoc.blocks.length>0&&<div className="print-preview-content layout-preview"><PagedPreview layout={layout} title={viewDoc.title} subject={viewDoc.subject??''} version={renderVersion} onResult={result=>{setPageCount(result.pages);setPreviewError(result.error);setReady(Boolean(result.pages)&&!result.error);setConfirmed(false)}}><PrintableDocument doc={viewDoc} stem={stem} answerOnly={answerOnly} source={source} layout={layout}/></PagedPreview></div>}
+   {!invalid&&viewDoc&&viewDoc.blocks.length>0&&<div className="print-preview-content layout-preview" onClick={e=>{const target=e.target as HTMLElement;if(target.closest("a"))return;const uid=target.closest<HTMLElement>(".layout-pages [data-layout-uid]")?.dataset.layoutUid;if(uid&&doc.blocks.some(b=>b.uid===uid)){setPicked(uid);setControls(true)}}}><PagedPreview layout={layout} title={viewDoc.title} subject={viewDoc.subject??''} version={renderVersion} onResult={result=>{setPageCount(result.pages);setPreviewError(result.error);setReady(Boolean(result.pages)&&!result.error);setConfirmed(false)}}><PrintableDocument doc={viewDoc} stem={stem} answerOnly={answerOnly} source={source} layout={layout}/></PagedPreview></div>}
    {viewDoc&&!viewDoc.blocks.length&&<p role="alert">请选择至少一个内容条目。</p>}
   </>}
  </div>
