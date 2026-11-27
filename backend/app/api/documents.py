@@ -61,6 +61,7 @@ class Draft(BaseModel):
     source_id:str|None=Field(default=None,max_length=36)
     blocks:list[Block]=Field(default_factory=list,max_length=200)
     revision:int|None=Field(default=None,ge=1)
+    merge_same_batch:bool=False
 class Register(BaseModel):
     revision:int=Field(ge=1)
     duplicate_reason:str=Field(default="",max_length=200)
@@ -726,10 +727,11 @@ class ManualSearch(BaseModel):
     content:str=Field(min_length=1,max_length=50000)
     answer:str=Field(default="",max_length=20000)
     solution:str=Field(default="",max_length=50000)
+    deep:bool=False
 
 @router.post("/manual-matches",dependencies=[Depends(require_origin)])
 def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
-    matches,scanned=matching.search(db,body.kind,body.content,body.answer,body.solution,body.title)
+    matches,scanned=matching.search(db,body.kind,body.content,body.answer,body.solution,body.title,deep=body.deep)
     items=[]
     for m in matches:
         r=m["resource"];resource=bank.view(r)
@@ -801,6 +803,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
     original_revisions={}
     count=0
     edited_refs=set()
+    batch_resources=[]
     for i,b in enumerate(blocks):
         if b.get("edit_reference_revision") is not None:
             if b["resource_id"] in edited_refs:
@@ -835,7 +838,17 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
         primary=data.pop("source_id")
         tags,knowledge_ids=manual_knowledge(db,data["subject"],data["chapter"],b.get("knowledge_tags",[]))
         before=None
-        if b.get("reuse_resource_id"):
+        peer=next((r for content,r in batch_resources if b["kind"]=="question" and matching.same_question(content,b["content"])),None) if body.merge_same_batch and not b.get("reuse_resource_id") else None
+        if peer is not None:
+            r=peer;before=bank.view(r)
+            if r.subject!=item_subject or matching.answer_conflict(r.answer,b["answer"]):raise HTTPException(422,"本批次同题的答案或科目冲突，请核对")
+            changed=False
+            if matching.method_keys(b["solution"])-matching.method_keys(r.solution) or not r.answer.strip() and b["answer"].strip():changed=merge_question_methods(r,b,item_subject)
+            changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
+            changed=attach_review_knowledge(db,r,knowledge_ids) or changed
+            if changed:r.revision+=1;r.updated_at=now()
+            action="reuse"
+        elif b.get("reuse_resource_id"):
             r=bank.existing(db,b["reuse_resource_id"],True)
             if r.archived or r.kind!=b["kind"] or original_revisions.setdefault(r.id,r.revision)!=b.get("reuse_revision"):
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
@@ -868,11 +881,17 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             audit(db,"resource.create",user.id)
             action="create"
         db.flush();protect_resource_images(db,r)
+        if b["kind"]=="question":batch_resources.append((b["content"],r))
         replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
         replacement["snapshot"]=bank.view(r)
         blocks[i]=replacement
         history.append({"uid":b["uid"],"action":action,"reason":"手动录入复用原题" if action=="reuse" else "手动直接入库","input":b,"before":before,
                         "after":bank.view(r),"knowledge_ids":knowledge_ids,"source_id":primary})
+    # Refresh references created in this transaction after later same-batch methods were added.
+    final_resources={r.id:r for _,r in batch_resources}
+    for i,b in enumerate(blocks):
+        if b["kind"]=="reference" and b["resource_id"] in final_resources and any(h["uid"]==b["uid"] for h in history):
+            blocks[i]={**b,"snapshot":bank.view(final_resources[b["resource_id"]])}
     before=d.revision
     d.blocks=blocks;d.subject=normalize_subject(body.subject);d.title=body.title.strip()
     d.revision+=1;d.updated_at=now();references(db,d)
@@ -956,8 +975,12 @@ def manual_review_data(db,d,only_uid=None):
             elif action=="append":
                 try:validate_append(resource,b,b.get("subject") if b.get("subject") is not None else d.subject)
                 except HTTPException as e:errors.append(e.detail)
-        elif action=="create" and actual_kind=="question" and any(x["uid"]!=b["uid"] and x["kind"]=="question" and matching.same_question(x["content"],b["content"]) for x in d.blocks[:n-1]):
-            errors.append("与本资料前面的题干重复，请先保留一条并整理全部解法")
+        elif action=="create" and actual_kind=="question" and (peer:=next((x for x in d.blocks[:n-1] if x["kind"]=="question" and matching.same_question(x["content"],b["content"])),None)) is not None:
+            if matching.answer_conflict(peer.get("answer",""),b.get("answer","")) or normalize_subject(peer.get("subject") if peer.get("subject") is not None else d.subject)!=normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject):
+                errors.append("本资料同题的答案或科目冲突，请核对")
+            else:
+                action="batch_reuse"
+                warnings.append("本批次已有相同题干；确认后复用同一编号，保留本题来源并追加非重复解法")
         elif action=="create" and not errors and not b.get("dedup_reason","").strip():
             matches=manual_matches(ManualSearch(kind=actual_kind,title=b.get("title",""),content=b["content"],answer=b.get("answer",""),solution=b.get("solution","")),db)
             if matches["total"]:errors.append("存在重复候选，请返回条目选择使用已有资源或说明独立保留原因")
@@ -976,7 +999,8 @@ def manual_review_state(db,d):
 
 def manual_item_digest(d,b):
     value={k:v for k,v in b.items() if k!="question_data"}
-    return hashlib.sha256(json.dumps([d.source_id,d.subject,value],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    peers=[{k:v for k,v in x.items() if k!="question_data"} for x in d.blocks if x["uid"]!=b["uid"] and x["kind"]=="question" and b["kind"]=="question" and matching.same_question(x["content"],b["content"])]
+    return hashlib.sha256(json.dumps([d.source_id,d.subject,value,peers],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 
 def manual_reviewed(d,state):
     return [b["uid"] for b in d.blocks if state.get(b["uid"])==manual_item_digest(d,b)]
@@ -1016,9 +1040,9 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     if (body.require_reviewed or db.get(Setting,manual_review_key(d)) is not None) and not {r["uid"] for r in review["rows"]}<=set(manual_reviewed(d,manual_review_state(db,d))):
         raise HTTPException(409,"请先逐条完成审核")
     if any(r["warnings"] for r in review["rows"]) and not body.accept_warnings:raise HTTPException(422,"请先确认缺失信息")
-    saved=manual_save(id,Draft.model_validate(public(d)),db,user)
+    saved=manual_save(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user)
     counts={"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0}
     for item in review["rows"]:
-        key="updated" if item["action"] in ("update","append") else item["kind"]+"_"+item["action"]
+        key="updated" if item["action"] in ("update","append") else "question_reuse" if item["action"]=="batch_reuse" else item["kind"]+"_"+item["action"]
         counts[key]+=1
     return {"document":saved,"counts":counts}

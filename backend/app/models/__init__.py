@@ -1,4 +1,6 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
@@ -64,6 +66,7 @@ class TeachingResource(Base):
     source_id: Mapped[str | None] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     stem_key: Mapped[str] = mapped_column(String(64), index=True, default="", server_default="")
+    search_features: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(),"postgresql"),default=dict,server_default="{}")
     code: Mapped[str] = mapped_column(String(16), unique=True)
     exam_type: Mapped[str] = mapped_column(String(80), default="", server_default="")
     chapter: Mapped[str] = mapped_column(String(120), default="", server_default="")
@@ -319,3 +322,11 @@ class WorkBatch(Base):
     job_id: Mapped[str | None]=mapped_column(ForeignKey("intake_jobs.id",ondelete="RESTRICT"),nullable=True,unique=True)
     created_at: Mapped[int]=mapped_column(BigInteger)
     updated_at: Mapped[int]=mapped_column(BigInteger)
+
+# All ORM write paths (intake, resource editing, registration) maintain the derived index.
+@event.listens_for(Session,"before_flush")
+def update_resource_search_features(session,flush_context,instances):
+    from app.core.search_features import search_features
+    for row in session.new.union(session.dirty):
+        if isinstance(row,TeachingResource) and (row in session.new or inspect(row).attrs.content.history.has_changes()):
+            row.search_features=search_features(row.content) if row.kind=="question" else {}

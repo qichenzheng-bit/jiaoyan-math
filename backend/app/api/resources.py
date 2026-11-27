@@ -135,7 +135,11 @@ def active_source(db,ident,lock=False):
     if src.kind!="source" or src.archived:raise HTTPException(422,"请选择未归档的来源资料")
     return src
 
-def guard_duplicate(db,d,exclude=None):
+def guard_duplicate(db,d,exclude=None,check_stem=True):
+    if d["kind"]=="question" and check_stem:
+        stmt=select(TeachingResource).where(TeachingResource.kind=="question",TeachingResource.archived==False,TeachingResource.stem_key==d["stem_key"])
+        if exclude:stmt=stmt.where(TeachingResource.id!=exclude)
+        if any(matching.same_question(r.content,d["content"]) for r in db.scalars(stmt)):raise HTTPException(409,"相同题干已存在，请在资料录入中复用原题或追加解法")
     if db.scalar(exact(db,d,exclude).limit(1)):
         if not d["dedup_override"] or not d["dedup_reason"]:
             raise HTTPException(409,"发现完全重复资源；请确认保留并填写原因")
@@ -257,7 +261,7 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if row.kind!=body.kind or row.archived: raise HTTPException(409,"不能修改资源类型或已归档资源")
     if body.revision!=row.revision: raise HTTPException(409,"资源已修改，请重新加载")
     d=clean(body,db)
-    if row.kind!="source" and d["fingerprint"]!=row.fingerprint: guard_duplicate(db,d,id)
+    if row.kind!="source" and d["fingerprint"]!=row.fingerprint: guard_duplicate(db,d,id,check_stem=not matching.same_question(row.content,d["content"]))
     if row.kind=="source" and any(d[k]!=getattr(row,k) for k in ("title","source_type","cohort_year","exam_type","edition","series_key")):guard_source_identity(db,d,id)
     before=view(row)
     primary=d.pop("source_id")

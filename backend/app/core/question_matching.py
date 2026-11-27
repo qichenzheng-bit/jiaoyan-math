@@ -1,10 +1,12 @@
 """Shared question-first retrieval. Fingerprints are candidates, not mathematical proofs."""
 from difflib import SequenceMatcher
 import re
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func, cast, Text
+from sqlalchemy.dialects.postgresql import ARRAY
 from app.models import TeachingResource as Resource, ResourceKnowledgeLink, KnowledgePointCatalog
 from app.core.content_normalization import canonical_text, question_stem_key, question_fingerprint, unit_fingerprint
 from app.core.solution_methods import parse_methods
+from app.core.search_features import search_features, formula_shape
 
 # Conservative equality: preserve case, whitespace between TeX command names and arguments,
 # superscripts, signs, font semantics, delimiters, option order and every condition.
@@ -20,11 +22,6 @@ def answer_conflict(a,b):
 def method_keys(text):
     return {strict_text(m["body"]) for m in parse_methods(text) if m["body"].strip()}
 
-def formula_shape(text):
-    # Candidate-only: replace numeric literals, never use this as a merge identity.
-    formulas=re.findall(r"\$(.*?)\$",text or "",re.S)
-    if not formulas:return ""
-    return "|".join(re.sub(r"(?<![A-Za-z])\d+(?:\.\d+)?", "#",canonical_text(x)) for x in formulas)
 
 def classify(content,answer,solution,r):
     equal=same_question(content,r.content)
@@ -38,7 +35,7 @@ def classify(content,answer,solution,r):
     a,b=formula_shape(content),formula_shape(r.content)
     return "similar",("公式结构相近，数字、符号或条件需核对" if a and a==b else "题干文本相似，不能证明数学等价"),False,False
 
-def search(db,kind,content,answer="",solution="",title="",threshold=.8,include_archived=False,exclude=None):
+def search(db,kind,content,answer="",solution="",title="",threshold=.8,include_archived=False,exclude=None,deep=False):
     """All active rows are eligible; return IDs first, then load only candidate objects.
     The existing indexed exact keys are retained. No recent-row limit or silent truncation."""
     fp=question_fingerprint(content,solution,answer) if kind=="question" else unit_fingerprint(title,content)
@@ -52,7 +49,14 @@ def search(db,kind,content,answer="",solution="",title="",threshold=.8,include_a
     found={r.id:("exact" if r.fingerprint==fp else "same_stem",1.0) for r in strict}
     query=canonical_text(content);shape=formula_shape(content) if kind=="question" else ""
     scanned=0
-    for ident,body,name in db.execute(select(Resource.id,Resource.content,Resource.title).where(*scope).execution_options(yield_per=100)):
+    # The full library is eligible regardless of age. GIN narrows approximate candidates;
+    # strict indexed matches are retrieved independently, and an explicit deep scan is available.
+    candidate_stmt=select(Resource.id,Resource.content,Resource.title).where(*scope)
+    terms=list(search_features(content))
+    if not deep and kind=="question" and len(terms)>=3 and db.get_bind().dialect.name=="postgresql":
+        if db.scalar(select(func.count()).select_from(Resource).where(*scope))>=1000:
+            candidate_stmt=candidate_stmt.where(or_(Resource.search_features.op("?|")(cast(terms,ARRAY(Text))),Resource.search_features=={},Resource.id.in_(found)))
+    for ident,body,name in db.execute(candidate_stmt.execution_options(yield_per=100)):
         scanned+=1
         if ident in found:continue
         if kind=="knowledge" and title and canonical_text(title)==canonical_text(name):

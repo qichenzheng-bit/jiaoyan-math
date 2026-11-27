@@ -217,15 +217,25 @@ def test_migration_and_login(tmp_path, monkeypatch):
         # More than ten equal stems must all survive duplicate search.
         match_ids=set()
         stem="求函数在给定区间上的极限值并写出详细计算步骤"
-        for j in range(12):
-            variant=client.post("/api/resources",headers=origin,json={"kind":"question","title":"查重测试","subject":"高等数学","content":stem,"answer":str(j),"solution":"逐步计算"})
-            assert variant.status_code==200,variant.text
-            match_ids.add(variant.json()["id"])
+        from app.models import TeachingResource
+        from app.core.content_normalization import question_fingerprint,question_stem_key
+        from uuid import uuid4
+        variant=client.post("/api/resources",headers=origin,json={"kind":"question","title":"查重测试","subject":"高等数学","content":stem,"answer":"0","solution":"逐步计算"})
+        assert variant.status_code==200,variant.text
+        match_ids.add(variant.json()["id"])
+        assert client.post("/api/resources",headers=origin,json={"kind":"question","title":"查重测试","subject":"高等数学","content":stem,"answer":"1","solution":"另一种解法","dedup_override":True,"dedup_reason":"测试"}).status_code==409
+        # Simulate historical duplicates created before question-first uniqueness.
+        with session_factory()() as db:
+            for j in range(1,12):
+                ident=str(uuid4());match_ids.add(ident)
+                db.add(TeachingResource(id=ident,code="Q"+uuid4().hex[:8].upper(),kind="question",title="旧查重测试",subject="高等数学",content=stem,answer=str(j),solution="逐步计算",tags=[],fingerprint=question_fingerprint(stem,"逐步计算",str(j)),stem_key=question_stem_key(stem),archived=False,created_at=1,updated_at=1))
+            db.commit()
         matched=client.post("/api/documents/manual-matches",headers=origin,json={"content":stem,"answer":"0","solution":"逐步计算"})
         assert matched.status_code==200,matched.text
         assert match_ids <= {x["resource"]["id"] for x in matched.json()["items"]}
         assert all(x["similarity"]>=0.8 for x in matched.json()["items"])
         assert matched.json()["total"]==len(matched.json()["items"])
+        assert "ix_resource_search_features" in {x["name"] for x in inspect(engine()).get_indexes("teaching_resources")}
 
         new_source=client.post("/api/documents/setup",headers=origin,json={"title":"复用试卷","subject":"线性代数","source_type":"exam"}).json()
         reuse_path="/api/documents/"+new_source["id"]+"/manual-save"
