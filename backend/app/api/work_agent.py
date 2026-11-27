@@ -108,7 +108,7 @@ def current(s):return (s.agent_history or [])[-1] if s.agent_history else None
 def save(db,s,r):
     s.agent_history=[*[x for x in (s.agent_history or []) if x["id"]!=r["id"]],r][-12:]
     s.updated_at=now()
-def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context","linked_chat"}} if r else None
+def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context","linked_chat","native_system","native_prompt","native_resume","native_amendment_count","native_restart","native_receipts"}} if r else None
 
 def workflow(db,s,r):
     """Derive progress from real extraction, review and registration records.
@@ -243,6 +243,9 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
         progress=workflow(db,s,previous)
         if progress and progress["stage"] in ("recognizing","organize","organizing"):
             raise HTTPException(409,"当前资料工作仍在执行，请先停止")
+    from app.core.native_work import enabled, begin
+    if body.auto and enabled():
+        return begin(db,s,body,user)
     rows,truncated=catalog(db,s,body)
     from app.core.ai_work import history_context
     recent=history_context(s)
@@ -305,6 +308,9 @@ def retry(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(cu
     r=dict(r)
     if len(r.get("steps",[]))>=MAX_TOTAL_STEPS:raise HTTPException(409,"当前工作已达总安全步骤上限，请另开工作并引用历史成果")
     r["stage_start"]=len(r.get("steps",[]))
+    if r.get("native"):
+        from app.core.native_work import retry as native_retry
+        return native_retry(db,s,r,user)
     if r.get("child"):
         r.update(state="running",phase="business",phase_at=now(),detail="重新查询原业务任务，不重复提交")
     else:

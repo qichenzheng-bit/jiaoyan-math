@@ -461,7 +461,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 13, "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 14, "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -526,8 +526,11 @@ def chat_event(event):
         return "", value if isinstance(value, str) else "", False
     return "", "", False
 
-def chat_snapshot(job):
-    return {k: job[k] for k in ("id","state","answer","detail")}
+def chat_snapshot(job,live=False):
+    result={k:job[k] for k in ("id","state","answer","detail")}
+    if job.get("native_session"):result["native_session"]=job["native_session"]
+    if live and job.get("pending"):result["pending_tool"]=job["pending"]
+    return result
 
 
 # Finished snapshots survive a worker restart until the web service reads them.
@@ -700,6 +703,174 @@ def chat_start(data, video=False, vision=False):
         threading.Thread(target=chat_run,args=(job,exe,model,prompt,attachment) if vision else (job,exe,model,prompt),daemon=True).start()
         return 200,chat_snapshot(job)
 
+
+# The SDK owns the reasoning loop. This subprocess exchanges only MCP calls/results
+# with the host; it never receives a database connection or arbitrary shell access.
+SDK_AGENT_SCRIPT = r"""
+import asyncio, json, sys
+from uuid import uuid4
+from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage
+
+def emit(value):
+    print(json.dumps(value,ensure_ascii=False),flush=True)
+
+async def main():
+    cfg=json.loads(sys.stdin.readline())
+    serial=asyncio.Lock()
+    def define(spec):
+        async def call(args):
+            async with serial:
+                ident=str(uuid4())
+                emit({"type":"call","id":ident,"name":spec["name"],"args":args})
+                line=await asyncio.to_thread(sys.stdin.readline)
+                if not line:raise RuntimeError("host disconnected")
+                result=json.loads(line)
+                if result.get("id")!=ident:raise RuntimeError("host result mismatch")
+                return result["result"]
+        return tool(spec["name"],spec["description"],spec["parameters"])(call)
+    server=create_sdk_mcp_server("weiguang",tools=[define(t) for t in cfg["tools"]])
+    names=["mcp__weiguang__"+t["name"] for t in cfg["tools"]]
+    opts=QoderAgentOptions(auth=qodercli_auth(),cwd=cfg["cwd"],cli_path=cfg["cli"],
+        model=cfg["model"],system_prompt=cfg["system"],tools=["TodoWrite"],
+        allowed_tools=["TodoWrite",*names],permission_mode="dontAsk",strict_mcp_config=True,
+        setting_sources=[],mcp_servers={"weiguang":server},
+        extra_args={"reasoning-effort":cfg["effort"]} if cfg["effort"]!="default" else {},
+        **({"resume":cfg["resume"]} if cfg.get("resume") else {"session_id":cfg["session_id"]}))
+    async with QoderSDKClient(options=opts) as client:
+        await client.query(cfg["prompt"])
+        async for message in client.receive_response():
+            if isinstance(message,SystemMessage) and message.subtype=="init":
+                emit({"type":"session","session_id":message.data.get("session_id") or cfg.get("resume") or cfg["session_id"]})
+            if isinstance(message,ResultMessage):
+                emit({"type":"result","success":message.subtype=="success","answer":message.result or "",
+                      "session_id":message.session_id})
+                return
+    emit({"type":"result","success":False,"answer":""})
+
+try:asyncio.run(main())
+except Exception as exc:
+    # Do not leak prompts, credentials or raw tool payloads into logs/UI.
+    emit({"type":"error","detail":"原生 Agent SDK 执行失败："+type(exc).__name__})
+    sys.exit(1)
+"""
+
+def agent_start(data):
+    global chat_active
+    if not isinstance(data,dict):return 422,{"detail":"原生Agent请求无效"}
+    ident,workspace,session=data.get("id"),data.get("workspace"),data.get("session_id")
+    resume=data.get("resume")
+    model,effort,prompt,system=data.get("model"),data.get("effort","default"),data.get("prompt"),data.get("system")
+    specs=data.get("tools")
+    def uid(value):return isinstance(value,str) and bool(JOB_ID.fullmatch(value))
+    if not all(uid(x) for x in (ident,workspace,session)) or (resume is not None and not uid(resume)):
+        return 422,{"detail":"原生会话编号无效"}
+    if not allowed_model(model) or effort!="default" and effort not in catalog_efforts.get(model,[]):
+        return 422,{"detail":"模型或推理强度无效"}
+    if not isinstance(prompt,str) or not 0<len(prompt.encode())<=100000 or not isinstance(system,str) or len(system.encode())>80000:
+        return 422,{"detail":"原生Agent上下文无效"}
+    if not isinstance(specs,list) or not 0<len(specs)<=100 or any(not isinstance(t,dict) or not isinstance(t.get("name"),str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}",t["name"]) or not isinstance(t.get("description"),str) or not isinstance(t.get("parameters"),dict) for t in specs):
+        return 422,{"detail":"业务工具目录无效"}
+    if len({t["name"] for t in specs})!=len(specs):return 422,{"detail":"业务工具重复"}
+    exe=executable()
+    if not exe or not SDK_PYTHON.is_file():return 503,{"detail":"原生Agent SDK尚未安装"}
+    with lock:
+        if ident in chat_jobs:return 200,chat_snapshot(chat_jobs[ident])
+        cached=load_snapshot(ident)
+        if cached:return 200,cached
+        if user_disconnected:return 409,{"detail":"已退出AI，请先登录"}
+        if chat_active or login_process is not None:return 409,{"detail":"当前已有模型任务或授权，请先完成"}
+        for old in list(chat_jobs)[:-31]:
+            if chat_jobs[old]["state"]!="running":del chat_jobs[old]
+        job={"id":ident,"state":"running","answer":"","detail":"原生Agent正在执行","proc":None,"cancel":False,"native":True}
+        try:save_snapshot(job)
+        except OSError:return 503,{"detail":"原生Agent任务缓存不可写"}
+        chat_jobs[ident]=job;chat_active=ident
+        threading.Thread(target=agent_run,args=(job,{**data,"cli":exe}),daemon=True).start()
+        return 200,chat_snapshot(job)
+
+def agent_run(job,cfg):
+    global chat_active,verified_at,retained_auth
+    proc=None;success=False;detail=""
+    try:
+        cwd=Path.home()/".jiaoyan-native-workspaces"/cfg["workspace"]
+        cwd.mkdir(mode=0o700,parents=True,exist_ok=True)
+        proc=subprocess.Popen([str(SDK_PYTHON),"-u","-c",SDK_AGENT_SCRIPT],cwd=cwd,
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+        with lock:
+            job["proc"]=proc
+            if job["cancel"]:stop_process(proc)
+        proc.stdin.write((json.dumps({**cfg,"cwd":str(cwd)},ensure_ascii=False)+"\n").encode());proc.stdin.flush()
+        deadline=time.monotonic()+1200;buf=b""
+        names={t["name"] for t in cfg["tools"]}
+        with selectors.DefaultSelector() as sel:
+            sel.register(proc.stdout,selectors.EVENT_READ)
+            while time.monotonic()<deadline:
+                with lock:
+                    if job["cancel"]:break
+                if not sel.select(.25):
+                    if proc.poll() is not None:break
+                    continue
+                chunk=os.read(proc.stdout.fileno(),65536)
+                if not chunk:break
+                buf+=chunk
+                if len(buf)>2_000_000:raise ValueError("SDK event too large")
+                while b"\n" in buf:
+                    raw,buf=buf.split(b"\n",1)
+                    event=json.loads(raw)
+                    kind=event.get("type")
+                    with lock:
+                        if kind=="call":
+                            if job.get("pending") or event.get("name") not in names or not JOB_ID.fullmatch(str(event.get("id",""))) or not isinstance(event.get("args"),dict):raise ValueError("invalid MCP call")
+                            job["pending"]={k:event[k] for k in ("id","name","args")}
+                            job["detail"]="等待微光数学业务工具"
+                        elif kind in ("session","result"):
+                            sid=event.get("session_id")
+                            if isinstance(sid,str) and JOB_ID.fullmatch(sid):
+                                job["native_session"]=sid
+                            if kind=="result":
+                                success=event.get("success") is True
+                                job["answer"]=str(event.get("answer") or "")[:48000]
+                        elif kind=="error":
+                            detail=str(event.get("detail",""))[:200]
+                if success:break
+            else:detail="原生Agent执行超时"
+    except (OSError,ValueError,TypeError,KeyError) as exc:
+        detail="原生Agent通信失败："+type(exc).__name__
+    finally:
+        if proc:
+            if proc.poll() is None:
+                try:proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:stop_process(proc)
+            proc.wait()
+            if proc.stdin:proc.stdin.close()
+            if proc.stdout:proc.stdout.close()
+        with lock:
+            state="stopped" if job["cancel"] else "done" if success and proc and proc.returncode==0 else "failed"
+            if state=="done":
+                verified_at=int(time.time());retained_auth=True;persist_auth_metadata()
+            job.update(state=state,detail=detail or ("原生Agent执行完成" if state=="done" else "原生Agent已停止或失败"),proc=None)
+            job.pop("pending",None)
+            try:save_snapshot(job);prune_snapshots()
+            except OSError:pass
+            chat_active=None
+
+def agent_reply(ident,data):
+    if not isinstance(data,dict) or not isinstance(data.get("id"),str) or not isinstance(data.get("result"),dict):
+        return 422,{"detail":"工具结果无效"}
+    with lock:
+        job=chat_jobs.get(ident)
+        if not job or not job.get("native") or job["state"]!="running":return 409,{"detail":"原生任务已停止"}
+        if job.get("last_reply")==data["id"]:return 200,chat_snapshot(job)
+        pending=job.get("pending")
+        if not pending or pending["id"]!=data["id"] or not job.get("proc"):return 409,{"detail":"工具调用已变化"}
+        try:
+            job["proc"].stdin.write((json.dumps(data,ensure_ascii=False)+"\n").encode())
+            job["proc"].stdin.flush()
+        except (OSError,ValueError):return 503,{"detail":"原生Agent工具结果未送达"}
+        job["last_reply"]=data["id"];job.pop("pending",None);job["detail"]="原生Agent正在继续工作"
+        return 200,chat_snapshot(job)
+
+
 def chat_state(ident, cancel=False):
     with lock:
         job=chat_jobs.get(ident)
@@ -709,7 +880,7 @@ def chat_state(ident, cancel=False):
         if cancel and job["state"]=="running":
             job["cancel"]=True
             if job["proc"]: stop_process(job["proc"])
-        return 200,chat_snapshot(job)
+        return 200,chat_snapshot(job,live=True)
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -737,6 +908,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
             return self.reply(*chat_state(self.path.split("/")[2], True))
+        if self.path=="/agent/start" or self.path.startswith("/agent/") and self.path.endswith("/tool-result"):
+            try:
+                n=int(self.headers.get("Content-Length","0"))
+                if not 0<n<=12*1024*1024:raise ValueError()
+                data=json.loads(self.rfile.read(n))
+            except (ValueError,UnicodeError):return self.reply(422,{"detail":"原生Agent请求无效"})
+            if self.path=="/agent/start":return self.reply(*agent_start(data))
+            return self.reply(*agent_reply(self.path.split("/")[2],data))
         if self.path in ("/chat/start", "/video/start", "/vision/start"):
             try:
                 n=int(self.headers.get("Content-Length","0"))

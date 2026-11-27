@@ -77,7 +77,7 @@ def session_view(s):
         if child.get("kind")=="intake" and child.get("id"):ids.add(child["id"])
         for step in record.get("steps") or []:
             result=step.get("result") or {}
-            if step.get("tool")=="intake_text" and isinstance(result,dict) and result.get("id"):ids.add(result["id"])
+            if step.get("tool") in ("intake_text","native_intake_review") and isinstance(result,dict) and result.get("id"):ids.add(result["id"])
     return {"id":s.id,"title":s.title,"created_at":s.created_at,"updated_at":s.updated_at,"intake_job_ids":sorted(ids)}
 def latest_job(db,b):
     j=db.get(IntakeJob,b.job_id) if b.job_id else None

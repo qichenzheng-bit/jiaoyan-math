@@ -95,7 +95,7 @@ def revise(db,s,r,body,user):
     if len(amendments)>=12:raise HTTPException(422,"追加要求已达上限，请另开工作")
     if len(r["instruction"])+sum(len(a["text"]) for a in amendments)+len(body.instruction)>10000:
         raise HTTPException(422,"累计工作指令过长")
-    amendments.append({"text":body.instruction.strip(),"at":now()})
+    amendments.append({"text":body.instruction.strip(),"at":now(),"selected_id":body.selected_id} if r.get("native") else {"text":body.instruction.strip(),"at":now()})
     r["outline_stale"]=True
     r["amendments"]=amendments
     r["detail"]="已记录追加要求，将保留已完成成果并调整后续步骤"
@@ -436,7 +436,11 @@ def tick():
                 r=dict(r);user=db.get(User,r["actor_id"])
                 if not user:
                     fail(db,s,r,"工作所属用户已不存在");continue
-                if r["state"]=="running":run_model(db,s,r,user)
+                if r["state"]=="running":
+                    if r.get("native"):
+                        from app.core.native_work import tick as native_tick
+                        native_tick(db,s,r,user)
+                    else:run_model(db,s,r,user)
                 else:intake_tick(db,s,r,user)
         except HTTPException as exc:
             with session_factory()() as db:
