@@ -91,6 +91,8 @@ def render_pdf(payload_path: Path, images: dict, output: Path, stage, cancelled,
             if cancelled():
                 return None
             request=json.loads(payload_path.read_text(encoding="utf-8"))
+            if request.get("page_ranges","").strip() and request.get("preview_pages")!=pages:
+                raise ValueError("服务器页数与预览不同，请重新检查后选择页码")
             indices=selected_pages(request.get("page_ranges",""),pages)
             stage("生成 PDF")
             page.pdf(path=str(output), prefer_css_page_size=True, print_background=True,
