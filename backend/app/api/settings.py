@@ -146,7 +146,13 @@ class DocumentLayout(BaseModel):
     originalNumbers: bool=False
     answerSpace: float=Field(default=0,ge=0,le=180)
     header: str=Field(default="",max_length=200)
-    footer: str=Field(default="",max_length=200)
+    footer: str=Field(default="第 {{当前页码}} 页，共 {{总页数}} 页",max_length=200)
+    toc: bool=False
+    tocDepth: Literal[1,2,3,4,5,6]=2
+    chapterNewPage: bool=False
+    mirrorMargins: bool=False
+    titleSize: float=Field(default=18,ge=8,le=36)
+    headingSize: float=Field(default=14,ge=8,le=36)
 
     @model_validator(mode="after")
     def printable_area(self):
