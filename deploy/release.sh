@@ -59,6 +59,24 @@ set -a
 # File is provisioned by the administrator; never source repository .env.
 source "$base/config/app.env"
 set +a
+# Provision the PDF browser before stopping the existing service. A missing
+# browser or sandbox must fail this release while the old version stays live.
+if [[ -z "${WG_PDF_CHROME:-}" ]] && ! command -v google-chrome >/dev/null && ! command -v chromium >/dev/null && ! command -v chromium-browser >/dev/null; then
+  "$release/venv/bin/python" -m playwright install chromium
+fi
+(cd "$release/backend" && "$release/venv/bin/python" - <<'PY'
+from playwright.sync_api import sync_playwright
+from app.services.document_pdf import launch_options
+with sync_playwright() as p:
+    browser=p.chromium.launch(**launch_options())
+    try:
+        page=browser.new_page()
+        page.set_content("<p>PDF smoke</p>")
+        assert page.pdf().startswith(b"%PDF-")
+    finally:
+        browser.close()
+PY
+)
 old=$(readlink -f "$base/current" || true)
 [[ -d "$old/backend" ]] || old=""
 switch_to() {
