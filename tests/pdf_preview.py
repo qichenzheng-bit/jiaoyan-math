@@ -30,7 +30,7 @@ def run():
         {**block("question-one", "question", r"MarkerAlpha 求极限 $ \lim_{x\to0}\frac{\sin x}{x} $"), "answer": "HiddenAnswerAlpha"},
         block("page-break", "pagebreak"),
         {**block("chapter-two", "heading", heading_level=1), "title": "第二章 Chapter Two"},
-        block("question-two", "question", r"MarkerBeta 计算 $\int_0^1 x^2\,dx$"),
+        block("question-two", "question", r"MarkerBeta 计算 $$\int_0^1 x^2\,dx$$"),
     ]
     for i in range(80):
         blocks.append(block("extra-"+str(i), "question", "ScaleMarker"+str(i)+" 练习题 $x^2+1$"))
