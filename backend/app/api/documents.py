@@ -401,14 +401,20 @@ def check_complete_export_size(size:int):
     if size>COMPLETE_EXPORT_MAX_BYTES:raise HTTPException(422,"完整资料预览超过 200 MB，请按章导出")
 
 @router.get("/{id}/export")
-def export_document(id:str,db:Session=Depends(get_db)):
+def export_document(id:str,db:Session=Depends(get_db),chapter:str|None=None):
     d=row(db,id)
     if d.kind=="intake":raise HTTPException(409,"录入文档不支持直接导出，请入库后从来源库导出")
     if d.parent_document_id:book_parent(db,d,False)
+    if chapter and d.kind not in ("textbook","handout"):
+        raise HTTPException(422,"仅讲义和教材支持按章导出")
     if d.chaptered:
         if d.archived:raise HTTPException(409,"资料已归档")
         result=public(d);blocks=[];size=0
-        for meta in chapter_index(db,d):
+        metadata=chapter_index(db,d)
+        if chapter:
+            metadata=[meta for meta in metadata if meta["id"]==chapter]
+            if not metadata:raise HTTPException(404,"未找到指定章节")
+        for meta in metadata:
             c=db.get(Doc,meta["id"])
             blocks.append(Block(uid=c.id,kind="heading",title=c.title,heading_level=1).model_dump())
             for b in public(c)["blocks"]:
@@ -416,8 +422,17 @@ def export_document(id:str,db:Session=Depends(get_db)):
             size+=len(json.dumps(c.blocks,ensure_ascii=False).encode("utf-8"))
             check_complete_export_size(size)
         result["blocks"]=blocks
+        if chapter:result["export_chapter_uid"]=chapter
         return export_token(result)
-    return export_token(public(d))
+    result=public(d)
+    if chapter:
+        blocks=result["blocks"]
+        start=next((i for i,b in enumerate(blocks) if b["uid"]==chapter and b["kind"]=="heading" and b.get("heading_level")==1),None)
+        if start is None:raise HTTPException(404,"未找到指定章节")
+        end=next((i for i in range(start+1,len(blocks)) if blocks[i]["kind"]=="heading" and blocks[i].get("heading_level")==1),len(blocks))
+        result["blocks"]=blocks[start:end]
+        result["export_chapter_uid"]=chapter
+    return export_token(result)
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):
