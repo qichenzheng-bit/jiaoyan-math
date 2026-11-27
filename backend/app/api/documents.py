@@ -471,6 +471,7 @@ class ReviewDecision(BaseModel):
     knowledge_ids:list[str]=Field(default_factory=list,max_length=20)
 class CommitBatch(BaseModel):
     revision:int=Field(ge=1)
+    preview_token:str=Field(min_length=64,max_length=64)
     bind_source:bool=True
     accept_warnings:bool=False
     items:list[ReviewDecision]=Field(min_length=1,max_length=20)
@@ -550,7 +551,9 @@ def registration_preview(id:str,body:ReviewBatch,db:Session=Depends(get_db)):
         peers=[blocks[j]["uid"] for j,w in enumerate(data) if j!=i and w["kind"]==v["kind"] and (w["fingerprint"]==v["fingerprint"] or v["kind"]=="question" and w["stem_key"]==v["stem_key"])]
         results.append({"uid":b["uid"],"candidates":candidates,"knowledge":points,"chapter_suggestion":chapter,"peer_ids":peers,
                         "missing":[k for k in ("answer","solution") if b["kind"]=="question" and not b.get(k,"").strip()]})
-    return {"revision":d.revision,"items":results,"similar_scan_limit":None,"exact_scope":"indexed_full_library","scope":"full_library"}
+    source=bank.active_source(db,d.source_id) if d.source_id else None
+    token=hashlib.sha256(json.dumps([d.id,d.revision,d.source_id,source.revision if source else None,sorted((b["uid"],manual_item_digest(d,b)) for b in blocks),sorted((r["uid"],sorted((c["id"],c["revision"],c.get("category")) for c in r["candidates"])) for r in results)],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    return {"revision":d.revision,"preview_token":token,"items":results,"similar_scan_limit":None,"exact_scope":"indexed_full_library","scope":"full_library"}
 
 def append_methods(old,new):
     existing=parse_methods(old);seen={canonical_text(m["body"]) for m in existing}
@@ -666,6 +669,8 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
     ensure_no_active_run(db,d)
     if d.kind!="intake" or not d.source_id or not body.bind_source:raise HTTPException(422,"正式录入必须绑定来源")
     blocks=review_blocks(d,body.revision,[x.uid for x in body.items])
+    preview=registration_preview(id,ReviewBatch(revision=body.revision,block_ids=[x.uid for x in body.items]),db)
+    if preview["preview_token"]!=body.preview_token:raise HTTPException(409,"文档入库预览或候选版本已变化，请重新审核")
     mapped={};overrides={}
     for b,decision in zip(blocks,body.items):
         item={**b,"chapter":decision.chapter or b.get("chapter",""),"dedup_reason":decision.reason or b.get("dedup_reason","")}

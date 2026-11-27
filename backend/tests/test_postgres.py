@@ -167,12 +167,12 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert any(p["id"]==k["id"] for p in review.json()["items"][0]["knowledge"])
         choices=[{"uid":"new","action":"create","reason":"测试独立题目"},{"uid":"same","action":"append","resource_id":rid,"resource_revision":match["revision"],"knowledge_ids":["missing"]}]
         count=client.get("/api/resources?kind=question").json()["total"]
-        failure=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True})
+        failure=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"preview_token":review.json()["preview_token"],"items":choices,"accept_warnings":True})
         assert failure.status_code==422,failure.text
         assert client.get("/api/resources?kind=question").json()["total"]==count
         assert client.get(base).json()["revision"]==batch["revision"]
         choices[1]["knowledge_ids"]=[k["id"]]
-        committed=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True})
+        committed=client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"preview_token":review.json()["preview_token"],"items":choices,"accept_warnings":True})
         assert committed.status_code==200,committed.text
         assert all(x["kind"]=="reference" for x in committed.json()["blocks"])
         assert "另一种解法" in client.get("/api/resources/"+rid).json()["solution"]
@@ -181,7 +181,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert history[0]["count"]==2
         record=client.get(base+"/registration-history/"+history[0]["id"]).json()
         assert next(e for e in record["entries"] if e["uid"]=="same")["input"]["solution"]=="另一种解法"
-        assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"items":choices,"accept_warnings":True}).status_code==409
+        assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"preview_token":review.json()["preview_token"],"items":choices,"accept_warnings":True}).status_code==409
         # Phone entry saves the entire draft and registers it atomically, without review.
         manual=reused.json()
         manual_path="/api/documents/"+manual["id"]
@@ -286,7 +286,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert any(l["source_id"]==new_source["source_id"] and l["occurrences"] for l in src_links)
         assert {"矩阵运算","矩阵乘法"}==set(same["tags"])
         assert new_source["source_id"] in {x["source_id"] for x in client.get("/api/resources/"+same["id"]+"/sources").json()["items"]}
-        fork={**reused_block,"uid":"fork-question","content":"另一个矩阵选择题","reuse_resource_id":None,"reuse_revision":None,"fork_from_id":same["id"]}
+        fork={**reused_block,"uid":"fork-question","content":"另一个矩阵选择题\nA. 1\nB. 2","reuse_resource_id":None,"reuse_revision":None,"fork_from_id":same["id"]}
         reused_doc=reused_saved.json()
         fork_draft=client.put(reuse_base+"/manual-draft",headers=origin,json={**reused_doc,"blocks":[*reused_doc["blocks"],{**fork,"dedup_reason":"独立矩阵测试"}]})
         assert fork_draft.status_code==200,fork_draft.text
@@ -708,7 +708,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert final_review.status_code==200,final_review.text
         final_match=next(c for c in final_review.json()["items"][0]["candidates"] if c["id"]==rid)
         assert final_match["kind"]=="same_stem"
-        final_commit=client.post(final_base+"/registration-commit",headers=origin,json={"revision":final_doc["revision"],"accept_warnings":True,"items":[{"uid":final_uid,"action":"append","resource_id":rid,"resource_revision":final_match["revision"],"knowledge_ids":[k["id"]]}]})
+        final_commit=client.post(final_base+"/registration-commit",headers=origin,json={"revision":final_doc["revision"],"preview_token":final_review.json()["preview_token"],"accept_warnings":True,"items":[{"uid":final_uid,"action":"append","resource_id":rid,"resource_revision":final_match["revision"],"knowledge_ids":[k["id"]]}]})
         assert final_commit.status_code==200,final_commit.text
         snapshot=final_commit.json()["blocks"][0]["snapshot"]
         assert snapshot["id"]==rid and snapshot["answer"]=="1" and "新解析" in snapshot["solution"]
