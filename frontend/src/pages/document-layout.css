@@ -63,3 +63,23 @@
  .layout-work .layout-sheet-columns{column-count:auto}
  html:has(.layout-pages),body:has(.layout-pages),#root:has(.layout-pages){margin:0!important;padding:0!important}
 }
+
+.layout-options{display:grid;gap:4pt 12pt;margin:4pt 0}
+.layout-option{min-width:0;overflow-wrap:anywhere}
+.layout-type-heading{margin-top:8pt!important}
+.layout-type-heading small{display:block}
+.layout-frame-border{border:1px solid #718b78;padding:6pt}
+.layout-frame-accent{border-left:3px solid #52765f;padding:4pt 7pt}
+.layout-frame-fill{background:#e8eee8;padding:6pt}
+.layout-rich-reference{white-space:pre-wrap;overflow-wrap:anywhere}
+.layout-cross-ref{color:inherit;text-decoration:underline}
+.layout-template-panel details{flex-basis:100%;min-width:0}
+.layout-template-panel details .layout-fields{margin-top:10px}
+.layout-pdf-job{display:grid;gap:6px;border-top:1px solid var(--line);padding:12px 0;min-width:0}
+.layout-pdf-job strong{overflow-wrap:anywhere}
+.layout-selection{max-height:320px;overflow:auto;display:grid;gap:6px}
+.layout-selection label{display:flex;gap:6px;align-items:flex-start}
+.layout-sheet-column .layout-keep{break-inside:avoid}
+.layout-work .layout-sheet h4,.layout-work .layout-sheet h5,.layout-work .layout-sheet h6{font-size:inherit;margin:0 0 5pt}
+@media screen{.layout-pages[data-ready="1"] .layout-sheet{content-visibility:auto;contain-intrinsic-size:var(--layout-width) var(--layout-height)}}
+@media print{.layout-pages .layout-sheet{content-visibility:visible!important}.layout-frame-fill{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
