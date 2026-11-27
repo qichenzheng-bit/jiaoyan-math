@@ -1450,6 +1450,55 @@ def test_migration_and_login(tmp_path, monkeypatch):
             db.rollback()
         assert client.delete(stats_path+"/scopes/"+saved_scope.json()["id"],headers=origin).status_code==200
 
+        # Full-sized HTTP export benchmark using isolated PostgreSQL synthetic rows.
+        # Direct seeding avoids thousands of repeated historical writes; this tests export,
+        # not the write-side capacity or the browser's PDF pagination performance.
+        from app.api.documents import Block, COMPLETE_EXPORT_MAX_BYTES
+        from uuid import uuid4
+        import resource
+        load_book_id=str(uuid4())
+        per_chapter=COMPLETE_EXPORT_MAX_BYTES//100
+        large_blocks=[]
+        for n in range(25):
+            large_blocks.append(Block(uid=f"t{n}",kind="text",content="数学"*9000).model_dump(mode="json"))
+        for n in range(25):
+            q=Block(uid=f"q{n}",kind="reference",resource_id=str(uuid4())).model_dump(mode="json")
+            q["snapshot"]={"kind":"question","content":"函数"*4000,"title":"容量测试","answer":"","solution":"","analysis":"","proof":"","revision":1}
+            large_blocks.append(q)
+        serialized=json.dumps(large_blocks,ensure_ascii=False)
+        remaining=per_chapter-len(serialized.encode("utf-8"))
+        assert 0<=remaining<=50000
+        large_blocks[-1]["snapshot"]["content"]+="x"*remaining
+        serialized=json.dumps(large_blocks,ensure_ascii=False)
+        assert len(serialized.encode("utf-8"))==per_chapter
+        try:
+            with session_factory()() as db:
+                db.execute(text("""
+                    INSERT INTO teaching_documents (id,title,kind,subject,source_id,blocks,revision,archived,created_at,updated_at,chaptered,parent_document_id,chapter_order,chapter_blocks_count)
+                    VALUES (:id,'200 MB容量测试','textbook','',NULL,'[]'::json,1,false,0,0,true,NULL,0,0)
+                """),{"id":load_book_id})
+                # Each chapter shares the same synthetic data; SQL generates independent chapter IDs.
+                db.execute(text("""
+                    INSERT INTO teaching_documents (id,title,kind,subject,source_id,blocks,revision,archived,created_at,updated_at,chaptered,parent_document_id,chapter_order,chapter_blocks_count)
+                    SELECT md5(:id || ':' || n::text),'章节 ' || n::text,'textbook','',NULL,CAST(:blocks AS json),1,false,0,0,false,:id,n,50
+                    FROM generate_series(1,100) AS n
+                """),{"id":load_book_id,"blocks":serialized})
+                db.commit()
+            start=time.monotonic()
+            response=client.get("/api/documents/"+load_book_id+"/export",timeout=180)
+            elapsed=time.monotonic()-start
+            assert response.status_code==200,response.text[:500] if response.status_code!=200 else ""
+            assert 195_000_000<=len(response.content)<=205_000_000
+            assert response.content.count(b'"heading_level":1')==100
+            print("EXPORT_200MB",json.dumps({"source_bytes":COMPLETE_EXPORT_MAX_BYTES,"http_bytes":len(response.content),"seconds":round(elapsed,3),"peak_rss_mib":round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1),"chapters":100,"blocks":5000}),flush=True)
+            assert elapsed<120,"200 MB export exceeds 120-second CI benchmark budget"
+            del response
+        finally:
+            with session_factory()() as db:
+                db.execute(text("DELETE FROM teaching_documents WHERE parent_document_id=:id"),{"id":load_book_id})
+                db.execute(text("DELETE FROM teaching_documents WHERE id=:id"),{"id":load_book_id})
+                db.commit()
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
