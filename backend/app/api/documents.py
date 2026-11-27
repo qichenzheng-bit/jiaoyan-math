@@ -981,9 +981,12 @@ def manual_review_data(db,d,only_uid=None):
             else:
                 action="batch_reuse"
                 warnings.append("本批次已有相同题干；确认后复用同一编号，保留本题来源并追加非重复解法")
-        elif action=="create" and not errors and not b.get("dedup_reason","").strip():
-            matches=manual_matches(ManualSearch(kind=actual_kind,title=b.get("title",""),content=b["content"],answer=b.get("answer",""),solution=b.get("solution","")),db)
-            if matches["total"]:errors.append("存在重复候选，请返回条目选择使用已有资源或说明独立保留原因")
+        elif action=="create" and not errors:
+            if actual_kind=="question" and any(matching.same_question(r.content,b["content"]) for r in db.scalars(select(Resource).where(Resource.kind=="question",Resource.archived==False,Resource.stem_key==matching.question_stem_key(b["content"])))):
+                errors.append("相同题干已存在，请选择复用或追加解法；答案冲突先核对")
+            elif not b.get("dedup_reason","").strip():
+                matches=manual_matches(ManualSearch(kind=actual_kind,title=b.get("title",""),content=b["content"],answer=b.get("answer",""),solution=b.get("solution","")),db)
+                if matches["total"]:errors.append("存在重复候选，请返回条目选择使用已有资源或说明独立保留原因")
         rows.append({"uid":b["uid"],"number":n,"kind":actual_kind,"title":b.get("title") or b.get("content","")[:80],"action":action,"errors":errors,"warnings":warnings})
     return {"revision":d.revision,"rows":rows}
 

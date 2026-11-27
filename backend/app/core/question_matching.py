@@ -33,7 +33,16 @@ def classify(content,answer,solution,r):
     if question_stem_key(content)==r.stem_key:
         return "similar","旧规范化指纹相同，但原始数学内容不完全一致，需人工核对",False,False
     a,b=formula_shape(content),formula_shape(r.content)
-    return "similar",("公式结构相近，数字、符号或条件需核对" if a and a==b else "题干文本相似，不能证明数学等价"),False,False
+    reason="公式结构相近，数字、符号或条件需核对" if a and a==b else "题干文本相似，不能证明数学等价"
+    # Small literal excerpts show real differences without claiming semantic equivalence.
+    lhs=strict_text(content)[:6000];rhs=strict_text(r.content)[:6000]
+    if max(len(lhs),len(rhs))<=600:
+        edits=[]
+        for tag,i,j,k,l in SequenceMatcher(None,lhs,rhs).get_opcodes():
+            if tag!="equal":edits.append("当前「"+lhs[i:j][:35]+"」 / 候选「"+rhs[k:l][:35]+"」")
+            if len(edits)==3:break
+        if edits:reason+="；文本差异："+ "；".join(edits)
+    return "similar",reason,False,False
 
 def search(db,kind,content,answer="",solution="",title="",threshold=.8,include_archived=False,exclude=None,deep=False):
     """All active rows are eligible; return IDs first, then load only candidate objects.

@@ -236,6 +236,23 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert all(x["similarity"]>=0.8 for x in matched.json()["items"])
         assert matched.json()["total"]==len(matched.json()["items"])
         assert "ix_resource_search_features" in {x["name"] for x in inspect(engine()).get_indexes("teaching_resources")}
+        # Exercise the actual indexed branch above its activation threshold, not only the small-library fallback.
+        from app.core.search_features import search_features
+        from sqlalchemy import delete
+        filler_ids=[]
+        with session_factory()() as db:
+            rows=[]
+            for i in range(1000):
+                ident=str(uuid4());filler_ids.append(ident)
+                text="几何图形陌生检索样本"+str(i)
+                rows.append(dict(id=ident,code="Q"+uuid4().hex[:12].upper(),kind="question",title="索引样本",subject="高等数学",content=text,answer="",solution="",tags=[],fingerprint=question_fingerprint(text,"",""),stem_key=question_stem_key(text),search_features=search_features(text),archived=False,created_at=now(),updated_at=now()))
+            db.bulk_insert_mappings(TeachingResource,rows);db.commit()
+        indexed=client.post("/api/documents/manual-matches",headers=origin,json={"content":stem,"answer":"0","solution":"逐步计算"})
+        assert indexed.status_code==200,indexed.text
+        assert match_ids<={x["resource"]["id"] for x in indexed.json()["items"]}
+        assert indexed.json()["scanned"]<1000
+        with session_factory()() as db:
+            db.execute(delete(TeachingResource).where(TeachingResource.id.in_(filler_ids)));db.commit()
 
         new_source=client.post("/api/documents/setup",headers=origin,json={"title":"复用试卷","subject":"线性代数","source_type":"exam"}).json()
         reuse_path="/api/documents/"+new_source["id"]+"/manual-save"
@@ -259,6 +276,28 @@ def test_migration_and_login(tmp_path, monkeypatch):
         new=fork_saved.json()["blocks"][1]["snapshot"]
         assert new["code"]!=same["code"] and new["id"]!=same["id"]
         assert client.get("/api/resources/"+same["id"]).json()["content"]==same["content"]
+        # Same-batch review merges only after explicit confirmation and records both source occurrences.
+        duplicate_batch=client.post("/api/documents/setup",headers=origin,json={"title":"同批同题专项","source_type":"exam"}).json()
+        duplicate_path="/api/documents/"+duplicate_batch["id"]
+        q="求特殊参数曲线的独立测试极限 $\\lim_{x\\to0} x$"
+        block={"kind":"question","content":q,"subject":"高等数学","question_type":"综合题","answer":"0","solution":"直接代入法","uid":"same-one","original_question_number":"1","source_page_start":2}
+        batch_draft=client.put(duplicate_path+"/manual-draft",headers=origin,json={**duplicate_batch,"blocks":[block,{**block,"uid":"same-two","solution":"连续性法","original_question_number":"7","source_page_start":5}]})
+        assert batch_draft.status_code==200,batch_draft.text
+        version=batch_draft.json()["revision"]
+        checks=client.post(duplicate_path+"/manual-review",headers=origin,json={"revision":version}).json()
+        assert [r["action"] for r in checks["rows"]]==["create","batch_reuse"],checks
+        for uid in ("same-one","same-two"):
+            checked=client.post(duplicate_path+"/manual-review-progress",headers=origin,json={"revision":version,"uid":uid,"approved":True})
+            assert checked.status_code==200,checked.text
+        merged=client.post(duplicate_path+"/manual-commit",headers=origin,json={"revision":version,"accept_warnings":True,"require_reviewed":True})
+        assert merged.status_code==200,merged.text
+        same_blocks=merged.json()["document"]["blocks"]
+        merged_id=same_blocks[0]["resource_id"]
+        assert same_blocks[1]["resource_id"]==merged_id
+        merged_resource=client.get("/api/resources/"+merged_id).json()
+        assert "直接代入法" in merged_resource["solution"] and "连续性法" in merged_resource["solution"]
+        occurrences=client.get("/api/resources/"+merged_id+"/sources").json()["items"][0]["occurrences"]
+        assert {(o["original_question_number"],o["page_start"]) for o in occurrences}=={("1",2),("7",5)}
         from app.api import qoder
         monkeypatch.setattr(qoder,"available_models",lambda:{"source":"cli","models":[{"id":"Auto","efforts":["high","medium"]},{"id":"Qwen4-Max","efforts":["low"]}]})
         assert client.get("/api/qoder/preferences").json()=={"model":"Auto","video_model":"Auto","effort":"default","video_effort":"default"}
@@ -269,6 +308,22 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Qwen4-Max","video_model":"Unknown"}).status_code==422
         assert client.put("/api/qoder/preferences",headers=origin,json={"model":"Unknown"}).status_code==422
         assert client.put("/api/qoder/preferences",json={"model":"Auto"}).status_code==403
+        # Fake model response exercises the durable AI recommendation lifecycle, not real teaching quality.
+        def fake_recommendation(method,path,body=None):
+            if path=="/chat/start":return {"state":"running"}
+            return {"state":"done","answer":json.dumps({"choices":{"main":2},"reason":"连续性法更便于课堂讲解"},ensure_ascii=False)}
+        monkeypatch.setattr(qoder,"request",fake_recommendation)
+        rec_path="/api/resources/"+merged_id+"/recommendation"
+        rec=client.get(rec_path).json()
+        assert len(rec["groups"][0]["methods"])==2
+        rec_revision=rec["revision"]
+        assert client.post(rec_path+"/start",headers=origin,json={"revision":rec_revision}).json()["state"]=="running"
+        suggested=client.post(rec_path+"/poll",headers=origin,json={"revision":rec_revision}).json()
+        assert suggested["state"]=="review",suggested
+        confirmed=client.post(rec_path+"/confirm",headers=origin,json={"revision":rec_revision,"choices":suggested["choices"]})
+        assert confirmed.status_code==200,confirmed.text
+        assert confirmed.json()["evaluation"]["reason"]=="连续性法更便于课堂讲解"
+        assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
         from app.api import qoder as chat_qoder
         worker_calls=[]
         def fake_worker(method,path,body=None):

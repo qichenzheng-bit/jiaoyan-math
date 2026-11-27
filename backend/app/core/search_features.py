@@ -4,7 +4,7 @@ import re
 from app.core.content_normalization import canonical_text
 
 def formula_shape(text):
-    formulas=re.findall(r"\$(.*?)\$",text or "",re.S)
+    formulas=re.findall(r"\$(.*?)\$",canonical_text(text),re.S)
     return "|".join(re.sub(r"(?<![A-Za-z])\d+(?:\.\d+)?","#",canonical_text(x)) for x in formulas)
 
 def search_features(text):
