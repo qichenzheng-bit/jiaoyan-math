@@ -51,6 +51,9 @@ def test_migration_and_login(tmp_path, monkeypatch):
         actual=client.get("/api/resources/"+created_doc["source_id"]+"/source-overview").json()
         assert actual["questions"]==actual["knowledge"]==actual["knowledge_tags"]==0
         assert "total_questions" not in actual
+        no_progress=client.get(catalog_url+"/file-progress")
+        assert no_progress.status_code==200,no_progress.text
+        assert no_progress.json()=={"items":[],"original_question_total":None}
         assert created_doc["blocks"][0]["content"]=="卷头说明"
         assert created_doc["subject"]==""
         assert client.get("/api/resources/"+created_doc["source_id"]).json()["subject"]==""
@@ -1144,6 +1147,30 @@ def test_migration_and_login(tmp_path, monkeypatch):
         bound=client.post("/api/documents/"+unbound["id"]+"/intake-source",headers=origin,json={"revision":unbound["revision"],"source_id":created_doc["source_id"]})
         assert bound.status_code==200,bound.text
         assert bound.json()["source_id"]==created_doc["source_id"]
+
+        # Explicitly linked work batch: report only real file units and retain unknown original question total.
+        from app.models import WorkSession,WorkMaterial,WorkBatch,IntakeJob
+        from uuid import uuid4
+        fixture_file=client.post("/api/files?name=source-progress-fixture.txt",headers=origin,content=b"isolated source progress fixture").json()
+        fixture_source=client.post("/api/resources",headers=origin,json={"kind":"source","title":"原件进度专项","source_type":"exam","content":"独立测试"}).json()
+        ws,mat,batch_id,job_id=(str(uuid4()) for _ in range(4))
+        with session_factory()() as db:
+            db.add(WorkSession(id=ws,title="原件进度测试",agent_history=[],created_at=now(),updated_at=now()))
+            db.flush()
+            db.add(WorkMaterial(id=mat,session_id=ws,file_id=fixture_file["id"],total_units=1,created_at=now()))
+            db.add(IntakeJob(id=job_id,title="已识别测试",subject="",input_text="fixture",provenance={"work_batch_id":batch_id},source_id=fixture_source["id"],model="Auto",state="done",detail="",items=[],revision=1,created_at=now(),updated_at=now()))
+            db.flush()
+            db.add(WorkBatch(id=batch_id,material_id=mat,start=1,end=1,units=[{"unit":1,"state":"done"}],verified_text="fixture",job_id=job_id,created_at=now(),updated_at=now()))
+            db.commit()
+        linked_progress=client.get("/api/source-catalog/sources/"+fixture_source["id"]+"/file-progress")
+        assert linked_progress.status_code==200,linked_progress.text
+        p=linked_progress.json()
+        assert p["original_question_total"] is None and len(p["items"])==1
+        f=p["items"][0]
+        assert f["total_units"]==f["recognized_units"]==f["verified_units"]==1
+        assert f["registered_units"]==0 and f["unverified_ranges"]==[]
+        assert f["recognized_ranges"]==[[1,1]] and f["registered_ranges"]==[]
+        assert client.get(catalog_url+"/file-progress").json()["items"]==[]
 
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200

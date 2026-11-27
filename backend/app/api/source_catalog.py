@@ -325,3 +325,68 @@ def statistics_export(body:StatisticsReport,db:Session=Depends(get_db)):
                          r["topic_source_question_count"] if body.knowledge_name.strip() else ""])
     return Response(content=("\ufeff"+out.getvalue()).encode("utf-8"),media_type="text/csv",
                     headers={"Content-Disposition":"attachment; filename=knowledge-statistics.csv","Cache-Control":"no-store"})
+
+
+def compact_ranges(values):
+    ranges=[]
+    for n in sorted(values):
+        if ranges and n==ranges[-1][1]+1:
+            ranges[-1][1]=n
+        else:ranges.append([n,n])
+    return ranges
+
+@router.get("/sources/{id}/file-progress")
+def file_progress(id:str,db:Session=Depends(get_db)):
+    """Only count work batches with explicit evidence of association to this source."""
+    from app.models import WorkBatch,WorkMaterial,StoredFile,IntakeJob,TeachingDocument
+    from app.api.workspaces import batch_states
+    source(db,id)
+    jobs=select(IntakeJob.id,IntakeJob.provenance).outerjoin(
+        TeachingDocument,TeachingDocument.id==IntakeJob.document_id
+    ).where(or_(IntakeJob.source_id==id,TeachingDocument.source_id==id))
+    job_ids=set()
+    batch_ids=set()
+    for jid,provenance in db.execute(jobs):
+        job_ids.add(jid)
+        if isinstance(provenance,dict) and isinstance(provenance.get("work_batch_id"),str):
+            batch_ids.add(provenance["work_batch_id"])
+    if not job_ids:return {"items":[],"original_question_total":None}
+    rows=list(db.execute(select(WorkBatch,WorkMaterial,StoredFile).join(
+        WorkMaterial,WorkMaterial.id==WorkBatch.material_id
+    ).join(StoredFile,StoredFile.id==WorkMaterial.file_id).where(
+        or_(WorkBatch.job_id.in_(job_ids),WorkBatch.id.in_(batch_ids))
+    ).order_by(StoredFile.name,StoredFile.id,WorkBatch.start,WorkBatch.id)))
+    latest,registered=batch_states(db,[b for b,_,_ in rows])
+    latest_ids={j.id for j in latest.values() if j}
+    ownership={}
+    if latest_ids:
+        for jid,source_id,doc_id,doc_source in db.execute(select(
+            IntakeJob.id,IntakeJob.source_id,IntakeJob.document_id,TeachingDocument.source_id
+        ).outerjoin(TeachingDocument,TeachingDocument.id==IntakeJob.document_id).where(IntakeJob.id.in_(latest_ids))):
+            ownership[jid]=doc_source if doc_id else source_id
+    grouped={}
+    for b,m,f in rows:
+        j=latest.get(b.id)
+        if not j or ownership.get(j.id)!=id:continue
+        row=grouped.setdefault(f.id,{"file_id":f.id,"name":f.name,"media_type":f.media_type,
+              "archived":f.archived,"purged":f.purged_at is not None,"totals":set(),
+              "recognized":set(),"verified":set(),"registered":set(),"batches":0})
+        if m.total_units is not None:row["totals"].add(m.total_units)
+        row["recognized"].update(u["unit"] for u in b.units if u.get("state")=="done" and isinstance(u.get("unit"),int) and b.start<=u["unit"]<=b.end)
+        if b.verified_text is not None:row["verified"].update(range(b.start,b.end+1))
+        if b.id in registered:row["registered"].update(range(b.start,b.end+1))
+        row["batches"]+=1
+    items=[]
+    for row in grouped.values():
+        totals=row.pop("totals")
+        total=next(iter(totals)) if len(totals)==1 else None
+        row["total_units"]=total
+        for key in ("recognized","verified","registered"):
+            units=row.pop(key)
+            if total is not None:units={n for n in units if 1<=n<=total}
+            row[key+"_units"]=len(units)
+            row[key+"_ranges"]=compact_ranges(units)
+            if key=="verified":
+                row["unverified_ranges"]=compact_ranges(set(range(1,total+1))-units) if total is not None and 0<total<=10000 else None
+        items.append(row)
+    return {"items":items,"original_question_total":None}
