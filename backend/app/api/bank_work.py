@@ -259,8 +259,7 @@ def bulk_step(id:str,body:BulkStep,db:Session=Depends(get_db),user:User=Depends(
                     bank.enqueue_recommendation(db,r,user.id)
                 if act!="evaluate":
                     r.revision+=1;r.updated_at=now()
-                    if act in ("knowledge_add","knowledge_remove"):
-                        db.flush();r.tags=[x.name for x in db.execute(select(P.name).join(K,K.knowledge_id==P.id).where(K.resource_id==r.id))]
+                    # Graph-only bulk actions do not rewrite recorded knowledge names.
                     # Metadata-only changes do not invalidate a confirmed recommendation.
                     if old_rec and act not in ("archive","restore","type"):bank.store_recommendation(db,r,{**old_rec,"revision":r.revision})
                 db.flush()

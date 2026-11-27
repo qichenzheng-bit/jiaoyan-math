@@ -179,7 +179,11 @@ def set_links(id:str,body:ResourceLinks,db:Session=Depends(get_db),user:User=Dep
     previous={l.knowledge_id for l in db.scalars(select(Link).where(Link.resource_id==id))}
     for i in body.items:
         if point(db,i.knowledge_id).status!="active" and i.knowledge_id not in previous:raise HTTPException(422,"知识标签已停用")
+    from app.core.bank_history import record
+    before=resource_links(db,r)
     db.execute(delete(Link).where(Link.resource_id==id))
     for i in body.items:db.add(Link(resource_id=id,**i.model_dump()))
-    r.tags=[point(db,i.knowledge_id).name for i in body.items][:20]
-    r.revision+=1;r.updated_at=now();audit(db,"resource.knowledge.update",user.id);db.commit();return resource_links(db,r)
+    # Graph mappings are independent from recorded knowledge names.
+    r.revision+=1;r.updated_at=now();db.flush()
+    after=resource_links(db,r);record(db,r.id,"knowledge_tag_mapping",before,after,user.id,r.revision)
+    audit(db,"resource.knowledge.update",user.id);db.commit();return after

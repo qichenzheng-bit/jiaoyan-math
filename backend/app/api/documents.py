@@ -759,7 +759,8 @@ def manual_knowledge(db,subject,chapter,names):
                 chapter=chapter,description="",status="active",replaced_by_id=None,revision=1,created_at=now(),updated_at=now())
             db.add(point);db.flush()
         if point.id not in ids:
-            tags.append(point.name);ids.append(point.id)
+            ids.append(point.id)
+        tags.append(name)
     return tags,ids
 
 def apply_reference_edit(db,block,user):
@@ -860,6 +861,9 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
                 if changed:evaluate[r.id]=r
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
+            merged=list(dict.fromkeys([*r.tags,*tags]))
+            if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
+            if merged!=r.tags:r.tags=merged;changed=True
             if changed:r.revision+=1;r.updated_at=now()
             action="append" if changed and (r.solution!=before["solution"] or r.answer!=before["answer"]) else "reuse"
         elif b.get("reuse_resource_id"):
@@ -881,8 +885,8 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
                 raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
-            merged=list(dict.fromkeys([*bank.view(r)["tags"],*tags]))
-            if len(merged)>20:raise HTTPException(422,"复用题目的知识标签总数超过20个")
+            merged=list(dict.fromkeys([*r.tags,*tags]))
+            if len(merged)>20:raise HTTPException(422,"复用题目的知识点总数超过20个")
             if merged!=r.tags:r.tags=merged;changed=True
             if changed:r.revision+=1;r.updated_at=now()
             action="append" if appended else "reuse"

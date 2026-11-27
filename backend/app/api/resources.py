@@ -90,18 +90,19 @@ def view(row,*,knowledge_lookup=None):
     db=object_session(row) if hasattr(row,"_sa_instance_state") else None
     if db is not None and row.kind in ("question","knowledge"):
         pts=knowledge_lookup.get(row.id,[]) if knowledge_lookup is not None else list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name).join(ResourceKnowledgeLink,ResourceKnowledgeLink.knowledge_id==KnowledgePointCatalog.id).where(ResourceKnowledgeLink.resource_id==row.id).order_by(KnowledgePointCatalog.name,KnowledgePointCatalog.id)))
-        data["knowledge_points"]=[{"id":p.id,"name":p.name} for p in pts]
-        if pts:data["tags"]=[p.name for p in pts][:20]
+        # Keep the legacy graph-link field for existing clients; recorded names are independent.
+        data["knowledge_tags"]=[{"id":p.id,"name":p.name} for p in pts]
+        data["knowledge_points"]=data["knowledge_tags"]
     return data
 
 def sync_knowledge_names(db,row,names):
-    # The names are an input convenience only; formal resource identity is the catalog ID.
+    # Initial intake can propose graph mappings; never delete an explicit graph mapping
+    # or replace recorded knowledge names when editing the resource.
     if row.kind not in ("question","knowledge") or not row.subject:return
     from app.api.documents import manual_knowledge
     labels,ids=manual_knowledge(db,row.subject,row.chapter,names)
-    current={l.knowledge_id:l for l in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==row.id))}
-    for ident in set(current)-set(ids):db.delete(current[ident])
-    for ident in set(ids)-set(current):db.add(ResourceKnowledgeLink(resource_id=row.id,knowledge_id=ident,role="related"))
+    current={l.knowledge_id for l in db.scalars(select(ResourceKnowledgeLink).where(ResourceKnowledgeLink.resource_id==row.id))}
+    for ident in set(ids)-current:db.add(ResourceKnowledgeLink(resource_id=row.id,knowledge_id=ident,role="related"))
     row.tags=labels
 def existing(db,ident,lock=False):
     stmt=select(TeachingResource).where(TeachingResource.id==ident)
@@ -301,7 +302,8 @@ def listing(kind:Kind|None=None,subject:str="",q:str=Query("",max_length=200),ch
         filters.append(used if usage_state=="used" else ~used)
     if q.strip():
         term=q.strip()
-        filters.append(or_(TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
+        recorded=cast(TeachingResource.tags,JSONB).contains([term])
+        filters.append(or_(recorded,TeachingResource.id.in_(select(ResourceKnowledgeLink.resource_id).join(KnowledgePointCatalog,KnowledgePointCatalog.id==ResourceKnowledgeLink.knowledge_id).where(or_(KnowledgePointCatalog.name.contains(term,autoescape=True),KnowledgePointCatalog.id.in_(select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.contains(term,autoescape=True)))))),TeachingResource.id.in_(select(ResourceSourceLink.resource_id).join(TeachingResource,TeachingResource.id==ResourceSourceLink.source_id).where(TeachingResource.title.contains(term,autoescape=True))),TeachingResource.title.contains(term,autoescape=True),TeachingResource.content.contains(term,autoescape=True),TeachingResource.code.ilike(term.upper().replace("%","\\%").replace("_","\\_"),escape="\\") if term.isalnum() else TeachingResource.code==term.upper()))
     total=db.scalar(select(func.count()).select_from(TeachingResource).where(*filters))
     if selection_only:
         if kind!="question" or total>2000:raise HTTPException(422,"一次最多选择2000道题，请缩小筛选范围")
@@ -383,7 +385,7 @@ def update(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(curren
     if body.difficulty is None:d.pop("difficulty",None)
     for k,v in d.items(): setattr(row,k,v)
     if row.source_id!=primary: change_primary(db,row,primary)
-    if row.kind in ("question","knowledge") and (body.tags!=before["tags"] or row.subject!=before["subject"]):sync_knowledge_names(db,row,row.tags)
+    # Recorded knowledge edits are independent from existing graph mappings.
     row.revision+=1;row.updated_at=now()
     if row.kind=="question" and (row.solution!=before["solution"] or row.answer!=before["answer"] or row.content!=before["content"]):
         enqueue_recommendation(db,row,user.id)

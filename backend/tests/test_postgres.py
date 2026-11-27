@@ -147,6 +147,8 @@ def test_migration_and_login(tmp_path, monkeypatch):
         link=client.get("/api/knowledge/resources/"+rid).json()
         assert client.put("/api/knowledge/resources/"+rid,headers=origin,json={"revision":link["revision"],"items":[{"knowledge_id":k["id"],"role":"core"}]}).status_code==200
         assert client.get("/api/knowledge/points/"+k["id"]+"/resources").json()[0]["id"]==rid
+        independent=client.get("/api/resources/"+rid).json()
+        assert independent["tags"]==[] and independent["knowledge_tags"][0]["id"]==k["id"]
         doc=client.post("/api/documents",headers=origin,json={"title":"录入测试","subject":"高数","source_id":created_doc["source_id"],"blocks":[{"uid":"a","kind":"question","title":"新题","content":"求导数","answer":"1","question_type":"综合题"}]})
         assert doc.status_code==200,doc.text
         d=doc.json()
@@ -433,6 +435,17 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get(stats_path+"/scopes").json()["items"][0]["id"]==stored.json()["id"]
         assert client.post(stats_path+"/scopes",headers=origin,json=scope_payload).status_code==409
         assert client.delete(stats_path+"/scopes/"+stored.json()["id"],headers=origin).json()["items"]==[]
+        # Explicit graph remapping must not modify the recorded names or statistical result.
+        old_mapping=client.get("/api/knowledge/resources/"+seed["id"]).json()
+        remapped=client.put("/api/knowledge/resources/"+seed["id"],headers=origin,json={"revision":old_mapping["revision"],"items":[{"knowledge_id":k["id"],"role":"related"}]})
+        assert remapped.status_code==200,remapped.text
+        independent_seed=client.get("/api/resources/"+seed["id"]).json()
+        assert set(independent_seed["tags"])=={"专项甲","专项乙"}
+        assert [r["id"] for r in independent_seed["knowledge_tags"]]==[k["id"]]
+        stat_after=client.post(stats_path,headers=origin,json={"source_ids":[source_a["id"],source_b["id"]]}).json()
+        assert {r["name"] for r in stat_after["items"]}=={"专项甲","专项乙"}
+        restore_mapping=client.put("/api/knowledge/resources/"+seed["id"],headers=origin,json={"revision":remapped.json()["revision"],"items":old_mapping["items"]})
+        assert restore_mapping.status_code==200,restore_mapping.text
         def seed_search(**kw):
             response=client.get("/api/resources",params={"kind":"question","bank_summary":True,"q":seed["code"],**kw})
             assert response.status_code==200,response.text
