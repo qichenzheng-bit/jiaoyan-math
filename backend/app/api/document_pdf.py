@@ -47,6 +47,14 @@ class LocalEdit(BaseModel):
     analysis: str | None = Field(default=None, max_length=50000)
     proof: str | None = Field(default=None, max_length=50000)
 
+class PrintWrap(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    spine: float=Field(ge=0,le=150)
+    bleed: float=Field(ge=0,le=20)
+    spineText: str=Field(default="",max_length=200)
+    background: str=Field(default="#ffffff",pattern=r"^#[0-9a-fA-F]{6}$")
+    foreground: str=Field(default="#222222",pattern=r"^#[0-9a-fA-F]{6}$")
+
 class PdfRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     export_token: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -59,6 +67,7 @@ class PdfRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=200)
     page_ranges: str = Field(default="", max_length=2000)
     preview_pages: int | None = Field(default=None, ge=1, le=10000)
+    wrap: PrintWrap|None=None
     confirmed: Literal[True]
 
     @model_validator(mode="after")
@@ -67,6 +76,10 @@ class PdfRequest(BaseModel):
             raise ValueError("导出内容为空或编号重复")
         if any(len(uid) > 100 for uid in (self.selected_uids or []) + list(self.overrides)):
             raise ValueError("内容编号无效")
+        if self.wrap:
+            if self.page_ranges.strip() or not self.layout.coverFileId or not self.layout.backCoverFileId or self.layout.sectionPages:
+                raise ValueError("书衣须使用统一开本与完整封面封底，不支持指定页码")
+            if self.wrap.spineText.strip() and self.wrap.spine<4:raise ValueError("书脊宽度不足")
         if self.page_ranges.strip():
             if self.preview_pages is None:raise ValueError("请先计算完整预览页数")
             selected_pages(self.page_ranges,self.preview_pages)
@@ -281,9 +294,10 @@ def resolve_images(db, data, layout=None):
 def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
                db: Session = Depends(get_db), user: User = Depends(current_user)):
     data = build_snapshot(scope, identity, body, db)
-    images = resolve_images(db, data, body.layout)
+    images = resolve_images(db, {"blocks":[]} if body.wrap else data, body.layout)
     payload = {"doc": data, "layout": body.layout.model_dump(), "stem": body.stem,
-               "answerOnly": body.answerOnly, "source": scope == "source", "page_ranges":body.page_ranges, "preview_pages":body.preview_pages}
+               "answerOnly": body.answerOnly, "source": scope == "source", "page_ranges":body.page_ranges, "preview_pages":body.preview_pages,"wrap":body.wrap.model_dump() if body.wrap else None}
+    if body.wrap:payload["doc"]={**data,"blocks":[]}
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
     check_complete_export_size(len(raw))
     filename = storage.safe_name(body.filename.strip().removesuffix(".pdf") + ".pdf")
