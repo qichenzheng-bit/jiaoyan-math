@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import App from './App'
+import PdfRender from './pages/PdfRender'
 
 /* Global tokens and base controls */
 import './theme.css'
@@ -48,5 +49,5 @@ import './styles/layout/persistent-work.css'
 
 const router=createBrowserRouter([{path:'*',element:<App/>}])
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><RouterProvider router={router} /></StrictMode>,
+  <StrictMode>{window.location.pathname==='/__layout_pdf'?<PdfRender/>:<RouterProvider router={router}/>}</StrictMode>,
 )
