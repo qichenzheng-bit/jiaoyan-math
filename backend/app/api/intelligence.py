@@ -100,7 +100,26 @@ def sync(db,j):
     j.revision+=1;j.updated_at=now();db.commit()
 @router.get("/jobs")
 def listing(db:Session=Depends(get_db)):
-    return [view(j) for j in db.scalars(select(Job).order_by(Job.created_at.desc()).limit(100))]
+    return [view(j) for j in db.scalars(select(Job).where(Job.provenance["history_removed"].as_boolean().is_not(True)).order_by(Job.created_at.desc()).limit(100))]
+class JobRename(BaseModel):
+    title:str=Field(min_length=1,max_length=200)
+
+@router.patch("/jobs/{id}",dependencies=[Depends(require_origin)])
+def rename_job(id:str,body:JobRename,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    j=get_job(db,id)
+    if (j.provenance or {}).get("history_removed"):raise HTTPException(404,"工作记录不存在")
+    if not body.title.strip():raise HTTPException(422,"请输入工作名称")
+    j.title=body.title.strip();j.updated_at=now();audit(db,"intelligence.rename",user.id);db.commit()
+    return view(j)
+
+@router.delete("/jobs/{id}",dependencies=[Depends(require_origin)])
+def remove_job(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.services.work_removal import chain, remove_jobs
+    j=get_job(db,id)
+    removed=remove_jobs(db,chain(db,[j.id]))
+    audit(db,"intelligence.delete",user.id);db.commit()
+    return {"deleted":True,"id":id,"removed_job_ids":sorted(removed)}
+
 @router.get("/jobs/{id}")
 def detail(id:str,db:Session=Depends(get_db)):
     j=get_job(db,id);sync(db,j);return view(j,True)

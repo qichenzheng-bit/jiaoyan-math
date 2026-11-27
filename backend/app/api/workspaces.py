@@ -275,6 +275,21 @@ def create(body:Create,db:Session=Depends(get_db),user:User=Depends(current_user
     if not body.title.strip():raise HTTPException(422,"请输入工作名称")
     s=WorkSession(id=str(uuid4()),title=body.title.strip(),created_at=now(),updated_at=now());db.add(s);audit(db,"work.create",user.id);db.commit()
     return session_view(s)
+@router.patch("/{ident}",dependencies=[Depends(require_origin)])
+def rename(ident:str,body:Create,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    s=workspace(db,ident,True)
+    if not body.title.strip():raise HTTPException(422,"请输入工作名称")
+    s.title=body.title.strip();s.updated_at=now();audit(db,"work.rename",user.id);db.commit()
+    return session_view(s)
+
+@router.delete("/{ident}",dependencies=[Depends(require_origin)])
+def remove(ident:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.services.work_removal import remove_workspace
+    s=workspace(db,ident,True)
+    removed=remove_workspace(db,s)
+    audit(db,"work.delete",user.id);db.commit()
+    return {"deleted":True,"id":ident,"removed_job_ids":removed}
+
 @router.get("/{ident}/recognition-plan")
 def recognition_plan(ident:str,instruction:str=Query(min_length=1,max_length=500),selected_id:str|None=None,db:Session=Depends(get_db)):
     s=workspace(db,ident)

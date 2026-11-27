@@ -1138,6 +1138,50 @@ with sync_playwright() as p:
                 expect(page.get_by_role("button",name="知识库",exact=True)).to_be_visible()
 
         if GROUP in {'all','mobile'}:
+            print('UI case: phone work record rename and permanent deletion',flush=True)
+            work_rows=[{"id":"agent-work-demo","title":"把题目录取","updated_at":1795656773}]
+            removed_work=[]
+            def work_nav(route):
+                route.fulfill(json=work_rows)
+            def work_record(route):
+                method=route.request.method
+                if method=="PATCH":
+                    work_rows[0]["title"]=route.request.post_data_json["title"]
+                    route.fulfill(json=work_rows[0])
+                elif method=="DELETE":
+                    removed_work.append(work_rows[0]["id"]);work_rows.clear()
+                    route.fulfill(json={"deleted":True,"id":"agent-work-demo","removed_job_ids":[]})
+                else:answer(route)
+            page.route("**/api/workspaces",work_nav)
+            page.route("**/api/workspaces/agent-work-demo",work_record)
+            try:
+                page.set_viewport_size({"width":393,"height":873})
+                visit(page,"/work?workspace=agent-work-demo",".agent-conversation")
+                page.get_by_role("button",name="打开导航",exact=True).click()
+                nav=page.locator("#workspace-navigation")
+                nav.get_by_role("button",name="管理工作 把题目录取",exact=True).click()
+                sheet=page.get_by_role("dialog",name="记录操作")
+                expect(sheet).to_be_visible()
+                sheet.get_by_role("button",name="重命名",exact=True).click()
+                sheet.get_by_label("新工作名称").fill("题目提取")
+                sheet.get_by_role("button",name="保存",exact=True).click()
+                expect(nav.get_by_role("button",name="管理工作 题目提取",exact=True)).to_be_visible()
+                nav.get_by_role("button",name="管理工作 题目提取",exact=True).click()
+                sheet.get_by_role("button",name="删除工作",exact=True).click()
+                confirm=page.get_by_role("dialog",name="删除工作？")
+                confirm.get_by_role("button",name="取消",exact=True).click()
+                expect(sheet).to_be_visible()
+                assert not removed_work
+                sheet.get_by_role("button",name="删除工作",exact=True).click()
+                confirm.get_by_role("button",name="删除",exact=True).click()
+                page.wait_for_url("**/work?new=1")
+                assert removed_work==["agent-work-demo"]
+                page.get_by_role("button",name="打开导航",exact=True).click()
+                expect(nav.get_by_role("link",name="题目提取",exact=True)).to_have_count(0)
+                nav.get_by_role("button",name="关闭导航",exact=True).click()
+            finally:
+                page.unroute("**/api/workspaces",work_nav)
+                page.unroute("**/api/workspaces/agent-work-demo",work_record)
             print('UI case: mobile Word layout preview before and after upload',flush=True)
             import io, zipfile
             word=io.BytesIO()
