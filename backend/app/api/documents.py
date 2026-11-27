@@ -392,7 +392,7 @@ def export_document(id:str,db:Session=Depends(get_db)):
             for b in public(c)["blocks"]:
                 blocks.append({**b,"uid":c.id+"-"+b["uid"]})
             size+=len(json.dumps(c.blocks,ensure_ascii=False).encode("utf-8"))
-            if size>20_000_000:raise HTTPException(422,"全书预览超过 20 MB，请按章导出")
+            if size>200_000_000:raise HTTPException(422,"完整资料预览超过 200 MB，请按章导出")
         result["blocks"]=blocks
         return result
     return public(d)
