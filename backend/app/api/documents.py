@@ -510,7 +510,7 @@ def review_blocks(d,revision,ids):
 def strict_candidates(db,values):
     criteria=[Resource.fingerprint==values["fingerprint"]]
     if values["kind"]=="question":criteria.append(Resource.stem_key==values["stem_key"])
-    return list(db.scalars(select(Resource).where(Resource.kind==values["kind"],or_(*criteria)).order_by(Resource.archived,Resource.updated_at.desc(),Resource.id).limit(12)))
+    return list(db.scalars(select(Resource).where(Resource.kind==values["kind"],or_(*criteria)).order_by(Resource.archived,Resource.updated_at.desc(),Resource.id)))
 
 def match_kind(r,values):
     if r.fingerprint==values["fingerprint"]:return "exact"
@@ -522,7 +522,7 @@ def answer_conflict(r,b):
 
 def candidate(r,values,b,similarity=None):
     return {"id":r.id,"code":r.code,"title":r.title,"revision":r.revision,"archived":r.archived,"kind":match_kind(r,values),
-        "content":r.content[:1200],"answer":r.answer[:600],"solution":r.solution[:1600],"similarity":similarity,
+        "content":r.content,"answer":r.answer,"solution":r.solution,"similarity":similarity,
         "answer_conflict":answer_conflict(r,b),"solution_differs":canonical_text(r.solution)!=canonical_text(b.get("solution","")),
         "appendable":r.kind=="question" and not r.archived and match_kind(r,values) in ("same_stem","exact") and not answer_conflict(r,b) and bool(parse_methods(b.get("solution","")))}
 

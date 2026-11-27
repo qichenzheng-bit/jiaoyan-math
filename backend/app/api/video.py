@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.db import get_db
+from app.core.method_recommendation import video_solution
 from app.core.security import current_user, require_origin, audit, now
 from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile
 from app.api.resources import admin_lock
@@ -65,7 +66,9 @@ def remote(row):
     return engine.engine_id(row.engine_id)
 
 def snapshot(r):
-    result = { "title": r.title, "problem": r.content, "reference_solution": r.solution,
+    try:solution=video_solution(r)
+    except ValueError as e:raise HTTPException(422,str(e))
+    result = { "title": r.title, "problem": r.content, "reference_solution": solution,
                "answer": r.answer, "subject": r.subject, "chapter": r.chapter,
                "exam_type": r.exam_type, "question_type": r.question_type,
                "analysis": r.analysis, "tags": r.tags or [], "fps": 60 }
