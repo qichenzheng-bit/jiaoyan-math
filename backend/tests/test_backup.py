@@ -83,3 +83,10 @@ def test_legacy_source_catalog_manifest(tmp_path):
     with pytest.raises(ValueError,match="incomplete"):backup.check_manifest(tmp_path,manifest)
     backup.check_manifest(tmp_path,manifest,allow_legacy=True)
     assert backup.CATALOG_EXPORTS=={"teaching/sources/catalog_details.csv"}
+
+
+def test_video_logical_paths_are_opaque_and_bounded():
+    assert backup.logical_allowed("production/video-engine/index.json")
+    assert backup.logical_allowed("production/video-engine/files/"+"a"*64)
+    assert not backup.logical_allowed("production/video-engine/files/../../secret")
+    assert not backup.logical_allowed("production/video-engine/engine.env")

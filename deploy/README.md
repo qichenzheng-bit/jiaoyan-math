@@ -45,3 +45,8 @@ sudo bash deploy/upgrade-qoder-usage.sh
 ## 独立业务数据备份
 
 参见 [业务数据异地备份](../docs/business-backup.md)。此功能与已关闭的本地部署备份独立，必须完成密钥配置及首次成功上传后才启用定时器。
+
+## V1 收尾
+仓库默认单文件上传上限为 200 MiB；实际 HTTPS 代理配置是独立的 root 管理文件，代码部署不能自动替换。由管理员确认实际站点后执行 `sudo bash deploy/upgrade-upload-limit.sh /etc/nginx/sites-available/实际站点文件`，脚本检查目标代理端口、配置语法并在 reload 失败时恢复原配置。验证 200 MiB 文件及超限拒绝。
+
+独立视频备份由管理员执行 `sudo bash deploy/install-video-backup.sh` 完成首次快照与定时器安装。只在引擎空闲时执行，不会复制账号凭据。然后在系统设置触发主备份并核对私有仓库提交、视频状态和恢复演练。数据库迁移必须先完成已配置的异地备份；若迁移改变 schema 后启动失败，禁止盲目自动 downgrade，应以已核验的备份在独立库验证恢复再切换生产。

@@ -71,6 +71,10 @@ def backup_state():
                 allowed["commit"] = raw["commit"]
             if type(raw.get("entries")) is int and raw["entries"] >= 0:
                 allowed["entries"] = raw["entries"]
+            if raw.get("video_state") in ("included","stale","not_configured"):
+                allowed["video_state"]=raw["video_state"]
+            if type(raw.get("snapshot_cipher_bytes")) is int and raw["snapshot_cipher_bytes"]>=0:
+                allowed["snapshot_cipher_bytes"]=raw["snapshot_cipher_bytes"]
             if raw.get("state") == "failed":
                 allowed["error"] = "备份失败，请查看服务器服务状态"
             return allowed
