@@ -998,6 +998,21 @@ with sync_playwright() as p:
             assert "fromWorkspace=agent-work-demo" in page.url
             page.get_by_role("link",name="返回资料工作").click()
             expect(page.get_by_label("实际工作进度")).to_be_visible()
+            if GROUP=="mobile":
+                def single_review_agent(route):
+                    route.fulfill(json={"id":"agent-single","instruction":"录入这套题目","model":"Auto","effort":"medium","state":"dispatched","auto":True,"single_review":True,"detail":"待逐题核对","plan":{"action":"recognize","file_id":"agent-pdf","file_name":"高等数学.pdf","start":1,"end":5,"unit":"页","goal":"document","focus":"question","explanation":"折叠的详细计划"},"result":{"material_id":"agent-material","action":"recognize","batch_id":"agent-batch"},"workflow":{"stage":"review","detail":"待逐题核对","material_id":"agent-material","batch_id":"agent-batch","job_id":"review-clean","goal":"document","recognized":5,"total":5,"verified":False,"item_count":2,"reviewed":0,"references":[]}})
+                page.route("**/api/workspaces/agent-work-demo/agent",single_review_agent)
+                try:
+                    visit(page,"/work?workspace=agent-work-demo",".phone-work-progress")
+                    expect(page.get_by_text("折叠的详细计划",exact=True)).not_to_be_visible()
+                    expect(page.get_by_role("button",name="打开执行结果 / 继续本批",exact=True)).to_have_count(0)
+                    expect(page.get_by_text("待审核",exact=True)).to_be_visible()
+                    page.get_by_role("link",name="开始逐题核对",exact=True).click()
+                    expect(page.locator(".wg-review-workbench")).to_be_visible()
+                    expect(page.locator(".phone-review-navigation").get_by_role("button",name="通过并继续",exact=True)).to_be_visible()
+                finally:
+                    page.unroute("**/api/workspaces/agent-work-demo/agent",single_review_agent)
+
             visit(page,"/work?job=review-agent-match&review=1&fromWorkspace=agent-work-demo",".agent-reference-match")
             expect(page.locator(".agent-reference-match")).to_contain_text("匹配字段：答案")
             expect(page.get_by_label("计划参考批次")).to_have_value("reference-batch")

@@ -144,7 +144,7 @@ def progress(db,f,batches,total,states=None):
     return {"total_units":total,"recognized_units":len(recognized),"verified_units":len(done),"registered_units":len(saved),"next_unit":next_unit,"complete":total is not None and total>0 and sum(1 for n in saved if 1<=n<=total)==total}
 def batch_view(db,b,full=False,states=None):
     j=latest_job(db,b) if states is None else states[0].get(b.id)
-    result={"id":b.id,"material_id":b.material_id,"start":b.start,"end":b.end,"units":[{k:v for k,v in u.items() if k!="image_results" and (full or k!="text")} for u in b.units],"verified":b.verified_text is not None,"job_id":j.id if j else None,"job_state":j.state if j else None,"document_id":j.document_id if j else None,"created_at":b.created_at}
+    result={"id":b.id,"material_id":b.material_id,"start":b.start,"end":b.end,"units":[{k:v for k,v in u.items() if k!="image_results" and (full or k!="text")} for u in b.units],"verified":b.verified_text is not None,"item_reviewed":reviewed_batch(j),"job_id":j.id if j else None,"job_state":j.state if j else None,"document_id":j.document_id if j else None,"created_at":b.created_at}
     if full:result["verified_text"]=b.verified_text
     return result
 def material_view(db,m):
@@ -408,7 +408,7 @@ def organize_unverified(ident,bid,body,db,user):
         raise HTTPException(409,"请先完成本批识别")
     m=db.get(WorkMaterial,b.material_id);f=file_for(db,m,True)
     raw="\n\n".join("【原文位置 "+str(u["unit"])+"】\n"+u.get("text","") for u in sorted(b.units,key=lambda x:x["unit"]))
-    if not raw.strip() or len(raw)>24000:raise HTTPException(422,"原文过长或为空，请缩小批次")
+    if not any((u.get("text") or "").strip() for u in b.units) or len(raw)>24000:raise HTTPException(422,"原文过长或为空，请缩小批次")
     warnings=sorted({w for u in b.units for w in u.get("warnings",[])})
     metadata={"method":"work_batch","start":b.start,"end":b.end,"total_units":m.total_units,"warnings":warnings}
     record=IntakeImport(id=str(uuid4()),file_id=f.id,text=raw,metadata_json=metadata,created_at=now());db.add(record);db.flush()
