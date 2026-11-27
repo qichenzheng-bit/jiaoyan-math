@@ -843,6 +843,50 @@ with sync_playwright() as p:
 
                 capture(page,path=str(OUT/(name+".png")),full_page=False)
         if GROUP in {'all','desktop','mobile'}:
+            print('UI case: source statistics scope and distribution on both screen sizes',flush=True)
+            page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
+            stats_requests=[]
+            def stats_api(route):
+                endpoint=route.request.url.split("/statistics",1)[1].split("?",1)[0]
+                if endpoint=="/scopes":
+                    route.fulfill(json={"items":[]});return
+                body=route.request.post_data_json
+                stats_requests.append((endpoint,body))
+                assert body["years"]==["2026"] and body["institutions"]==["郑州大学"]
+                if endpoint=="/distribution":
+                    name={"question_type":"综合题","method":"泰勒展开","cooccurrence":"极限运算"}[body["dimension"]]
+                    if body["dimension"]=="cooccurrence":
+                        assert body["knowledge_name"]=="重要极限" and body["knowledge_subject"]=="高等数学"
+                    result={"question_count":2,"classified_questions":1,"total":1,"limit":30,"offset":0,"items":[{"subject":"高等数学","name":name,"question_count":1,"source_question_count":2}]}
+                elif endpoint=="/questions":
+                    assert body["knowledge_name"]=="重要极限"
+                    result={"total":1,"limit":30,"offset":0,"items":[{"id":items[0]["id"],"code":items[0]["code"],"title":items[0]["title"],"subject":"高等数学","question_type":"综合题","source_count":2,"revision":1}]}
+                else:
+                    assert endpoint==""
+                    result={"source_count":2,"confirmed_complete_sources":0,"question_count":2,"source_question_count":3,"questions_with_knowledge":2,"knowledge_count":1,"limit":50,"offset":0,"items":[{"subject":"高等数学","name":"重要极限","question_count":1,"source_question_count":2}]}
+                route.fulfill(json=result)
+            page.route("**/api/source-catalog/statistics**",stats_api)
+            visit(page,"/source-catalog/statistics",".source-statistics")
+            page.get_by_placeholder("2026，2025",exact=True).fill("2026")
+            page.get_by_placeholder("郑州大学",exact=True).fill("郑州大学")
+            page.get_by_role("button",name="开始统计",exact=True).click()
+            expect(page.get_by_role("heading",name="统计结果",exact=True)).to_be_visible()
+            page.get_by_role("button",name="重要极限",exact=True).click()
+            expect(page.get_by_role("heading",name="重要极限 · 关联题目")).to_be_visible()
+            expect(page.get_by_text(items[0]["code"],exact=False).last).to_be_visible()
+            page.get_by_role("button",name="关闭",exact=True).click()
+            for dimension,button_name,expected in (("question_type","题型分布","综合题"),("method","解析中的方法名称","泰勒展开"),("cooccurrence","知识点共现","极限运算")):
+                page.get_by_role("button",name=button_name,exact=True).click()
+                if dimension=="cooccurrence":
+                    expect(page.get_by_role("button",name="生成分布",exact=True)).to_be_disabled()
+                    page.get_by_label("选择指定知识点").select_option(label="高等数学 · 重要极限")
+                page.get_by_role("button",name="生成分布",exact=True).click()
+                expect(page.get_by_role("cell",name=expected,exact=True)).to_be_visible()
+            assert [x[0] for x in stats_requests]==["","/questions","/distribution","/distribution","/distribution"]
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+            capture(page,path=str(OUT/("f43-statistics-"+GROUP+".png")),full_page=False)
+            page.unroute("**/api/source-catalog/statistics**",stats_api)
+        if GROUP in {'all','desktop','mobile'}:
             print('UI case: persisted agent workflow and confirmed advance',flush=True)
             page.set_viewport_size({"width":393,"height":873} if GROUP=="mobile" else {"width":1600,"height":900})
             visit(page,"/work?workspace=agent-work-demo",".agent-workflow")

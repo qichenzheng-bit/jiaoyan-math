@@ -1259,6 +1259,41 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get(unit_url).json()["knowledge_tags"]==unit["knowledge_tags"]
         assert client.put(unit_url+"/teaching-detail",headers=origin,json={**payload,"revision":saved_detail["revision"],"example_ids":[unit["id"]]}).status_code==422
 
+        # Exercise the real backup selector and PostgreSQL CSV restore format in the CI DB.
+        import csv, io, importlib.util
+        from pathlib import Path
+        from app.models import Setting
+        from sqlalchemy import text
+        backup_spec=importlib.util.spec_from_file_location("backup_contract",Path(__file__).resolve().parents[2]/"deploy"/"backup.py")
+        backup_module=importlib.util.module_from_spec(backup_spec);backup_spec.loader.exec_module(backup_module)
+        saved_scope=client.post(stats_path+"/scopes",headers=origin,json=scope_payload)
+        assert saved_scope.status_code==200,saved_scope.text
+        required={"knowledge.library.directories.v1","knowledge.unit.detail."+unit["id"],
+                  "source.file.versions."+fixture_source["id"],"source.statistics.scopes.1"}
+        with session_factory()() as db:
+            db.merge(Setting(key="ci.synthetic.excluded",value="synthetic-only"));db.flush()
+            conn=db.connection().connection.driver_connection
+            with conn.cursor() as cur:
+                selected=backup_module.business_settings(cur)
+                assert required<=set(selected)
+                assert "ci.synthetic.excluded" not in selected
+                assert any(k.startswith("bank.history.") for k in selected)
+                output=io.StringIO(newline="")
+                writer=csv.writer(output,quoting=csv.QUOTE_ALL)
+                writer.writerow(["key","value"])
+                rows={k:v for k,v in selected.items() if k!="qiandao.qoder_cn.v1"}
+                writer.writerows(rows.items())
+                cur.execute("CREATE TEMP TABLE ci_restored_preferences (key text PRIMARY KEY,value text NOT NULL) ON COMMIT DROP")
+                with cur.copy("COPY ci_restored_preferences FROM STDIN WITH (FORMAT CSV, HEADER TRUE, ENCODING 'UTF8')") as cp:
+                    cp.write(output.getvalue().encode("utf-8"))
+                cur.execute("SELECT key,value FROM ci_restored_preferences")
+                restored=dict(cur.fetchall())
+                assert restored==rows
+                assert json.loads(restored["knowledge.unit.detail."+unit["id"]])["example_ids"]==[seed["id"]]
+                assert json.loads(restored["source.file.versions."+fixture_source["id"]])["items"][0]["active"] is False
+            db.rollback()
+        assert client.delete(stats_path+"/scopes/"+saved_scope.json()["id"],headers=origin).status_code==200
+
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

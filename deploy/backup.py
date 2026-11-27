@@ -74,6 +74,10 @@ FIXED.update({"system/settings/preferences.csv": "settings", "system/checkin/sta
 FILE_KEY = re.compile(r"(original|generated)/([0-9a-f-]{36})\Z")
 
 
+def business_settings(cur):
+    cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
+    return dict(cur.fetchall())
+
 def digest(path):
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -256,8 +260,7 @@ def capture(work, publish):
                 for path, table, predicate, order in EXPORTS:
                     copy_out(cur, "SELECT * FROM public." + table + " WHERE " + predicate + " ORDER BY " + order, tmp)
                     publish(path + ".csv", tmp)
-                cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' ORDER BY key", (list(SAFE_SETTINGS),))
-                settings = dict(cur.fetchall())
+                settings = business_settings(cur)
                 for name, rows in (
                     ("system/settings/preferences.csv", [(k,v) for k,v in settings.items() if k != "qiandao.qoder_cn.v1"]),
                     ("system/checkin/state.csv", [("qiandao.qoder_cn.v1", sanitize_checkin(settings["qiandao.qoder_cn.v1"]))] if "qiandao.qoder_cn.v1" in settings else []),
