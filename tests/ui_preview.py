@@ -52,7 +52,6 @@ def answer(route):
         rows=[finished_demo] if (not q.get("kind") or q["kind"][0]=="handout") and (not q.get("q") or q["q"][0] in finished_demo["title"]) else []
         result={"items":rows,"total":len(rows)}
     if p=="/teaching-works/subjects":result=["高等数学"]
-    if p=="/teaching-works/handoffs/list":result=[]
     if p=="/teaching-works/work-preview":result={**finished_demo,"versions":[finished_version,{**finished_version,"number":1}],"pending_cover":None}
     if p=="/teaching-works/work-preview/versions/2/questions":
         result={"items":[{"uid":"q1","title":items[0]["title"],"content":items[0]["content"],"answer":items[0]["answer"],"solution":items[0]["solution"],"chapter":"极限"}],"total":1,"question_count":1,"knowledge_points":["重要极限"],"knowledge_tags":["微积分"],"source_count":1,"partial_pages":False}
@@ -361,7 +360,7 @@ with sync_playwright() as p:
             page.unroute("**/api/chat/sessions/chat-demo",read_retry)
             visit(page,"/",".chat-home-recent")
         if GROUP in {'all','desktop','editors'}:
-            for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/products","14-products"),("/operations","15-operations"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
+            for path,name in [("/","00-home"),("/overview","29-overview"),("/library","11-library"),("/create","12-create"),("/videos","13-video"),("/project/publishing","15-works-and-covers"),("/intake","01-intake"),("/intake?mode=document","16-intake-document"),("/intake-single?kind=knowledge","17-intake-knowledge"),("/intelligence","18-intelligence"),("/intelligence?job=review-demo","22-intake-supplement"),("/resources","02-bank"),("/graph","03-graph"),("/intake?doc=demo","04-word"),("/intake?doc=ai-demo","25-word-ai"),("/chat","05-chat"),("/chat?session=chat-demo","19-intake-intent"),("/covers","06-cover"),("/checkin","07-checkin"),("/settings","08-settings")]:
                 if GROUP!="all" and ((name in EDITOR_PAGES) != (GROUP=="editors")):
                     continue
                 print("UI case:",name,flush=True)
@@ -597,19 +596,14 @@ with sync_playwright() as p:
                     expect(nav.get_by_role("link",name="组卷",exact=True)).to_be_visible()
                     nav.get_by_role("button",name="收起教学制作",exact=True).click()
                     expect(nav.get_by_role("link",name="组卷",exact=True)).to_have_count(0)
-                    page.locator("#workspace-navigation").get_by_role("link",name="内容发布",exact=True).click()
+                    page.locator("#workspace-navigation").get_by_role("link",name="作品与封面",exact=True).click()
                     page.wait_for_url("**/project/publishing")
-                    page.locator(".project-hub").get_by_role("heading",name="内容发布",exact=True).wait_for()
-                    expect(page.locator(".project-hub .project-link")).to_have_count(3)
-                    expect(page.locator(".project-hub").get_by_role("link",name="发布准备",exact=True)).to_be_visible()
+                    page.locator(".project-hub").get_by_role("heading",name="作品与封面",exact=True).wait_for()
+                    expect(page.locator(".project-hub .project-link")).to_have_count(2)
                     expect(page.locator(".project-hub").get_by_role("link",name="封面设计",exact=True)).to_be_visible()
                     expect(page.locator(".project-hub").get_by_role("link",name="作品管理",exact=True)).to_be_visible()
-                    page.locator("#workspace-navigation").get_by_role("link",name="商品售卖",exact=True).click()
-                    page.wait_for_url("**/project/sales")
-                    page.locator(".project-hub").get_by_role("heading",name="商品售卖",exact=True).wait_for()
-                    page.locator(".project-hub").get_by_role("link",name="商品售卖",exact=True).click()
-                    page.get_by_text("商品上架",exact=True).wait_for()
-                    assert page.locator(".module-hub").get_by_role("link",name="教学作品",exact=True).count()==0
+                    expect(page.locator("#workspace-navigation").get_by_role("link",name="商品售卖",exact=True)).to_have_count(0)
+                    expect(page.locator(".project-hub").get_by_role("link",name="发布准备",exact=True)).to_have_count(0)
                     visit(page,"/create",".project-hub .project-link")
                     assert page.locator(".clean-context-menu").count()==0
                 if name=="13-video":
