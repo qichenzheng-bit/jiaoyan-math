@@ -141,11 +141,13 @@ def get_job(user, job_id):
     return job
 
 def build_snapshot(scope, identity, request, db):
-    data = source_export(identity, db) if scope == "source" else export_document(identity, db)
+    data = source_export(identity, db) if scope == "source" else export_document(identity, db, chapter=request.chapter_uid)
     if data["export_token"] != request.export_token:
         raise HTTPException(409, "资料在预览后发生变化，请重新打开并检查排版")
     blocks = data["blocks"]
-    if request.chapter_uid:
+    if request.chapter_uid and scope=="source":
+        raise HTTPException(422,"来源资料请使用自由选取内容")
+    if request.chapter_uid and data.get("export_chapter_uid")!=request.chapter_uid:
         start = next((i for i, b in enumerate(blocks) if b["uid"] == request.chapter_uid and b["kind"] == "heading" and b.get("heading_level") == 1), None)
         if start is None:
             raise HTTPException(422, "未找到选定章节")
