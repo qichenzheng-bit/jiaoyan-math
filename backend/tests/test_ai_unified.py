@@ -97,3 +97,18 @@ def test_child_tracking_uses_real_job_id():
     assert ai_work.child_task("video_edit",{"ident":"p"},{"job":{"id":"edit-job"}})["id"]=="edit-job"
     assert ai_work.child_task("question_search",{},{"id":"question"}) is None
     assert ai_work.child_task("intake_text",{},{"id":"intake","state":"running"})=={"kind":"intake","id":"intake"}
+
+def test_planning_does_not_count_as_business_result(monkeypatch):
+    from app.api import work_agent as wa, qoder
+    monkeypatch.setattr(wa,"save",lambda db,s,r:setattr(s,"agent_history",[dict(r)]))
+    s=SimpleNamespace(agent_history=[],id="w")
+    r={"id":"r","model":"Auto","effort":"default","model_job":"m","phase":"model","phase_at":ai_work.now(),"state":"running","instruction":"选题","steps":[]}
+    s.agent_history=[r]
+    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"plan","outline":["检索题库","生成试卷"]})})
+    ai_work.run_model(Mock(),s,r,SimpleNamespace(id=1))
+    planned=s.agent_history[-1]
+    assert planned["outline"]==["检索题库","生成试卷"] and planned["phase"]=="pending"
+    planned["phase"]="model"
+    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"finish","explanation":"完成"})})
+    ai_work.run_model(Mock(),s,planned,SimpleNamespace(id=1))
+    assert s.agent_history[-1]["state"]=="failed"

@@ -237,6 +237,24 @@ def cancel(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(c
         except HTTPException:
             detail+="；业务任务未确认停止，请在对应模块查看"
     r={**r,"state":"cancelled","detail":detail};save(db,s,r);audit(db,"work.agent.cancel",user.id);db.commit();return public(r)
+@router.post("/{ident}/agent/retry",dependencies=[Depends(require_origin)])
+def retry(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.api import workspaces as w
+    from app.core.ai_work import later_prompt
+    s=w.workspace(db,ident,True);r=current(s)
+    if not r or r["id"]!=body.plan_id or not r.get("auto") or r["state"]!="failed":
+        raise HTTPException(409,"仅失败的自动工作支持继续")
+    if r.get("actor_id")!=user.id:raise HTTPException(403,"无权操作")
+    if r.get("phase")=="executing":raise HTTPException(409,"上次写入结果不明确，请先在业务模块核对")
+    r=dict(r)
+    if len(r.get("steps",[]))>=48:raise HTTPException(409,"当前工作已达安全步骤上限，请另开工作并引用历史成果")
+    if r.get("child"):
+        r.update(state="running",phase="business",phase_at=now(),detail="重新查询原业务任务，不重复提交")
+    else:
+        r.update(state="running",phase="pending",model_job=str(uuid4()),phase_at=now(),attempts=0,detail="继续未完成工作",prompt=later_prompt(r))
+    save(db,s,r);audit(db,"work.agent.retry",user.id);db.commit()
+    return public(r)
+
 @router.post("/{ident}/agent/confirm",dependencies=[Depends(require_origin)])
 def confirm(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(current_user)):
     from app.api import workspaces as w
