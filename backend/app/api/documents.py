@@ -329,6 +329,13 @@ def assemble_source_export(source, documents, resources, *, latest=False):
             "blocks":blocks,"source_export":True,"batch_count":len(batches),
             "has_source_content":has_content}
 
+def export_token(data):
+    # Canonical server snapshot identity; never hash a browser-supplied document.
+    value={k:v for k,v in data.items() if k!="export_token"}
+    raw=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":"),default=str).encode("utf-8")
+    check_complete_export_size(len(raw))
+    return {**value,"export_token":hashlib.sha256(raw).hexdigest()}
+
 @router.get("/source-export/{source_id}")
 def source_export(source_id:str,db:Session=Depends(get_db)):
     source=bank.existing(db,source_id)
@@ -341,10 +348,10 @@ def source_export(source_id:str,db:Session=Depends(get_db)):
     promoted=next((d for d in documents if d.chaptered and source.content.endswith("对应文档编号 "+d.id)),None)
     if promoted:
         result=export_document(promoted.id,db)
-        return {**result,"source_export":True,"batch_count":len(chapter_index(db,promoted)),"has_source_content":bool(result["blocks"])}
+        return export_token({**result,"source_export":True,"batch_count":len(chapter_index(db,promoted)),"has_source_content":bool(result["blocks"])})
     result=assemble_source_export(source,documents,resources,latest=True)
     if not result["has_source_content"]:raise HTTPException(409,"该来源尚无已入库资料，不能导出")
-    return result
+    return export_token(result)
 
 @router.get("/{id}/reference-updates")
 def reference_updates(id:str,db:Session=Depends(get_db)):
@@ -409,8 +416,8 @@ def export_document(id:str,db:Session=Depends(get_db)):
             size+=len(json.dumps(c.blocks,ensure_ascii=False).encode("utf-8"))
             check_complete_export_size(size)
         result["blocks"]=blocks
-        return result
-    return public(d)
+        return export_token(result)
+    return export_token(public(d))
 
 @router.get("/{id}")
 def read(id:str,db:Session=Depends(get_db)):
