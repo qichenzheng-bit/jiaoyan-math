@@ -140,6 +140,19 @@ class DocumentBlockStyle(BaseModel):
     headingLevel: Literal[1,2,3,4,5,6]|None=None
     optionColumns: Literal["auto",1,2,4]|None=None
 
+class DocumentSectionPage(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    paper: Literal["A4","A3","A5","B5","A6","custom"]|None=None
+    width: float|None=Field(default=None,ge=50,le=1000)
+    height: float|None=Field(default=None,ge=50,le=1000)
+    landscape: bool|None=None
+    top: float|None=Field(default=None,ge=0,le=100)
+    bottom: float|None=Field(default=None,ge=0,le=100)
+    left: float|None=Field(default=None,ge=0,le=100)
+    right: float|None=Field(default=None,ge=0,le=100)
+    columns: Literal[1,2,3]|None=None
+    gap: float|None=Field(default=None,ge=3,le=30)
+
 class DocumentLayout(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paper: Literal["A4","A3","A5","B5","A6","custom"]="A4"
@@ -175,19 +188,22 @@ class DocumentLayout(BaseModel):
     numbering: Literal["continuous","section"]="continuous"
     optionColumns: Literal["auto",1,2,4]="auto"
     blankWidth: float=Field(default=0,ge=0,le=100)
+    sectionPages: dict[str,DocumentSectionPage]=Field(default_factory=dict,max_length=100)
     typeStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=100)
     chapterStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=5100)
     blockStyles: dict[str,DocumentBlockStyle]=Field(default_factory=dict,max_length=5100)
 
     @model_validator(mode="after")
     def printable_area(self):
-        if any(not key or len(key)>100 or key in {"__proto__","constructor","prototype"} for rules in (self.typeStyles,self.chapterStyles,self.blockStyles) for key in rules):
+        if any(not key or len(key)>100 or key in {"__proto__","constructor","prototype"} for rules in (self.typeStyles,self.chapterStyles,self.blockStyles,self.sectionPages) for key in rules):
             raise ValueError("样式编号无效")
         dims={"A4":(210,297),"A3":(297,420),"A5":(148,210),"B5":(176,250),"A6":(105,148)}
-        w,h=sorted(dims.get(self.paper,(self.width,self.height)))
-        if self.landscape:w,h=h,w
-        if w-self.left-self.right-(self.columns-1)*self.gap<self.columns*20 or h-self.top-self.bottom<25:
-            raise ValueError("页面有效排版空间不足")
+        base={k:getattr(self,k) for k in ("paper","width","height","landscape","top","bottom","left","right","columns","gap")}
+        for page in [base,*[{**base,**section.model_dump(exclude_none=True)} for section in self.sectionPages.values()]]:
+            w,h=sorted(dims.get(page["paper"],(page["width"],page["height"])))
+            if page["landscape"]:w,h=h,w
+            if w-page["left"]-page["right"]-(page["columns"]-1)*page["gap"]<page["columns"]*20 or h-page["top"]-page["bottom"]<25:
+                raise ValueError("页面或分节有效排版空间不足")
         return self
 
 class DocumentLayoutTemplate(BaseModel):
@@ -216,7 +232,7 @@ class TemplateUpdate(BaseModel):
         default_kinds=[t.kind for t in self.value if t.isDefault]
         if len(set(default_kinds))!=len(default_kinds):
             raise ValueError("同类模板只能设置一个默认项")
-        if any(t.layout.blockStyles or t.layout.chapterStyles for t in self.value):
+        if any(t.layout.blockStyles or t.layout.chapterStyles or t.layout.sectionPages for t in self.value):
             raise ValueError("模板不能携带特定文档的局部样式")
         if any(not t.name.strip() for t in self.value):
             raise ValueError("模板名称不能为空")
