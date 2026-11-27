@@ -2,7 +2,7 @@
 from typing import Literal
 from uuid import uuid4
 from pathlib import Path
-import os, shutil, tempfile, zipfile, threading
+import os, shutil, tempfile, zipfile, threading, time, re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
@@ -399,6 +399,30 @@ def download_zip(body:Choices,db:Session=Depends(get_db),user:User=Depends(curre
         if folder:shutil.rmtree(folder,ignore_errors=True)
         raise
     finally:zip_slots.release()
+
+@router.get("/manage/zip-file")
+def download_zip_file(item:list[str]=Query(...,min_length=1,max_length=100),db:Session=Depends(get_db),user:User=Depends(current_user)):
+    choices=[]
+    for value in item:
+        ident,sep,version=value.partition(":")
+        if not sep or not re.fullmatch(r"[0-9a-f-]{36}",ident) or not version.isdigit() or len(version)>10:
+            raise HTTPException(422,"下载选项无效")
+        choices.append(WorkChoice(id=ident,version=int(version)))
+    return download_zip(Choices(items=choices),db,user)
+
+
+def cleanup_stale_zips():
+    # Normal responses remove their folder immediately. Recover interrupted downloads
+    # after a full day; never remove a folder while it is being built.
+    if not zip_slots.acquire(blocking=False):
+        return
+    try:
+        for folder in storage.root().glob("work-zip-*"):
+            if folder.is_dir() and not folder.is_symlink() and time.time()-folder.stat().st_mtime>86400:
+                shutil.rmtree(folder,ignore_errors=True)
+    finally:
+        zip_slots.release()
+
 
 @router.get("/handoffs/list")
 def list_handoffs(purpose:Literal["publish","product"],db:Session=Depends(get_db),user:User=Depends(current_user)):

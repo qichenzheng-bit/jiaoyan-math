@@ -204,6 +204,8 @@ async def pdf_maintenance_loop():
                     if settings.database_url:
                         with session_factory()() as db:
                             teaching_works.retire_files(db)
+                        from app.api.teaching_works import cleanup_stale_zips
+                        cleanup_stale_zips()
                 await asyncio.to_thread(maintain)
         except Exception as exc:
             logger.warning("PDF maintenance unavailable: %s",type(exc).__name__)

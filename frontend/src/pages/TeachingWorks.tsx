@@ -84,9 +84,8 @@ export default function TeachingWorks(){
     await api('/teaching-works/manage/delete',{method:'POST',body:JSON.stringify(choices(ws))})
     setSelected([]);setMulti(false);setPage(0);if(id)closeWork();setReload(n=>n+1)
    }else if(action==='zip'){
-    const response=await fetch('/api/teaching-works/manage/zip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(choices(ws))})
-    if(!response.ok){const e=await response.json();throw Error(e.detail||'打包失败')}
-    const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='教学作品.zip';a.click();window.setTimeout(()=>URL.revokeObjectURL(url),60000)
+    const query=new URLSearchParams();ws.forEach(w=>query.append('item',w.id+':'+w.current_version))
+    const a=document.createElement('a');a.href='/api/teaching-works/manage/zip-file?'+query;a.target='_blank';a.rel='noopener noreferrer';a.click()
    }else{
     const result=await api<{id:string}>('/teaching-works/handoffs/create',{method:'POST',body:JSON.stringify({...choices(ws),purpose:action})})
     navigate((action==='publish'?'/publishing':'/products')+'?handoff='+encodeURIComponent(result.id))
