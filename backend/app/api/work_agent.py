@@ -19,6 +19,7 @@ class Start(BaseModel):
     effort:str|None=Field(default=None,max_length=16)
     selected_id:str|None=Field(default=None,max_length=36)
     auto:bool=True
+    priority:Literal["normal","high"]="normal"
 class Confirm(BaseModel):
     plan_id:str=Field(min_length=1,max_length=36)
 class Intent(BaseModel):
@@ -59,7 +60,7 @@ def current(s):return (s.agent_history or [])[-1] if s.agent_history else None
 def save(db,s,r):
     s.agent_history=[*[x for x in (s.agent_history or []) if x["id"]!=r["id"]],r][-12:]
     s.updated_at=now()
-def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot"}} if r else None
+def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context"}} if r else None
 
 def workflow(db,s,r):
     """Derive progress from real extraction, review and registration records.
@@ -176,6 +177,9 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
     s=w.workspace(db,ident,True)
     if not body.instruction.strip():raise HTTPException(422,"请输入工作要求")
     previous=current(s)
+    if previous and previous.get("auto") and previous["state"]=="running" and body.auto:
+        from app.core.ai_work import revise
+        return revise(db,s,dict(previous),body,user)
     if previous and (previous["state"] in ("running","ready","confirmed") or previous.get("phase")=="executing" and previous["state"]=="cancelled"):
         raise HTTPException(409,"已有工作正在执行，请先停止或等待当前步骤结束")
     if previous and previous.get("auto") and previous["state"]=="dispatched":
@@ -183,7 +187,8 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
         if progress and progress["stage"] in ("recognizing","organize","organizing"):
             raise HTTPException(409,"当前资料工作仍在执行，请先停止")
     rows,truncated=catalog(db,s,body)
-    recent=[{"instruction":r["instruction"],"plan":r.get("plan"),"state":r["state"]} for r in (s.agent_history or [])[-4:]]
+    from app.core.ai_work import history_context
+    recent=history_context(s)
     prompt=("你是数学教研工作意图助手。理解用户的自然语言和上下文，自主规划下一项操作。只输出JSON对象，不执行代码。"
     "资料录入动作可选recognize(识别原文),open_batch(打开批次),organize(整理已核对原文),review(审核已有整理),attach(关联资料),clarify(澄清)。"
     "字段action,file_id,batch_id,start,count,reference_ids,match_fields,focus,goal,explanation。只能使用真实目录ID；歧义或缺少页数时clarify并提问。"
@@ -201,8 +206,8 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
     effort=qoder.assistant_effort(db,body.model,body.effort)
     ident_job=str(uuid4())
     r={"id":ident_job,"instruction":body.instruction.strip(),"model":body.model,"effort":effort.get("effort","default"),
-       "state":"running","detail":"正在排队并理解工作要求","created_at":now(),"allowed_files":[x["id"] for x in rows],
-       "auto":True,"actor_id":user.id,"phase":"pending","phase_at":now(),"model_job":ident_job,"prompt":prompt,"preference_snapshot":preference_snapshot,"steps":[]}
+       "priority":body.priority,"state":"running","detail":"正在排队并理解工作要求","created_at":now(),"allowed_files":[x["id"] for x in rows],
+       "auto":True,"initial_context":json.dumps(rows,ensure_ascii=False)[:12000],"actor_id":user.id,"phase":"pending","phase_at":now(),"model_job":ident_job,"prompt":prompt,"preference_snapshot":preference_snapshot,"steps":[]}
     if not body.auto:
         # Compatibility for explicit manual intake planning; work UI defaults to autonomous.
         qoder.request("POST","/chat/start",{"id":ident_job,"model":body.model,"prompt":prompt,**effort})
