@@ -161,6 +161,9 @@ def child_tick(db,s,r,user):
     try:
         if child["kind"]=="video":
             value=video.job_read(child["project"],child["id"],db)
+            if value.get("kind")=="generate" and value.get("status")=="succeeded":
+                value=video.followup_render(child["project"],value,db)
+                child={**child,"id":value["id"]}
             status=value.get("status")
             running=status in ("queued","running","cancelling")
             success=status=="succeeded"
@@ -185,6 +188,7 @@ def child_tick(db,s,r,user):
         entry["state"]="done" if success else "failed"
     r["steps"]=[*r["steps"][:-1],entry]
     if running:
+        r["child"]=child
         r["detail"]=entry["detail"]
         wa.save(db,s,r);db.commit();return
     r.pop("child",None)

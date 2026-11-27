@@ -214,7 +214,7 @@ def create_app():
     @app.post('/api/v1/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):
         authorize(request)
-        if '\\x00' in body.text or len(body.text.encode())>PROMPT_LIMIT:
+        if '\x00' in body.text or len(body.text.encode())>PROMPT_LIMIT:
             raise HTTPException(422,'VIDEO_PROMPT_TOO_LONG')
         token=_job_prompt.set(body.model_dump())
         try:return original(id)

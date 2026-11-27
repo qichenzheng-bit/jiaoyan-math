@@ -169,12 +169,27 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db), user:User
 def history(ident: str, db: Session = Depends(get_db)):
     return engine.call("GET", f"/videos/{remote(row_for(db,ident))}/edits/history")
 
+def followup_render(ident:str,generation:dict,db):
+    """Generation succeeds before its automatically enqueued render completes."""
+    rid=remote(row_for(db,ident))
+    started=generation.get("created_at")
+    revision=generation.get("expected_revision")
+    if not isinstance(started,str) or revision is None:
+        raise HTTPException(502,"引擎未返回生成任务的版本或时间")
+    jobs=engine.call("GET",f"/jobs?lesson_id={rid}&limit=200")
+    if not isinstance(jobs,list):raise HTTPException(502,"引擎任务列表无效")
+    candidates=[j for j in jobs if isinstance(j,dict) and j.get("lesson_id")==rid and j.get("kind")=="render"
+        and j.get("expected_revision")==revision and isinstance(j.get("created_at"),str) and j["created_at"]>=started]
+    if not candidates:raise HTTPException(502,"生成已结束但未找到对应渲染任务")
+    first=min(candidates,key=lambda j:(j["created_at"],j.get("id","")))
+    return job_read(ident,first.get("id"),db)
+
 def job_read(ident:str,job_id:str,db:Session=Depends(get_db)):
     row=row_for(db,ident)
     job=engine.call("GET",f"/jobs/{engine.engine_id(job_id)}")
     if not isinstance(job,dict) or job.get("lesson_id")!=remote(row):
         raise HTTPException(404,"任务不属于当前视频项目")
-    return {k:job.get(k) for k in ("id","lesson_id","kind","status","phase","overall","error")}
+    return {k:job.get(k) for k in ("id","lesson_id","kind","status","phase","overall","error","expected_revision","created_at")}
 
 @router.get("/projects/{ident}/code")
 def code(ident: str, db: Session = Depends(get_db)):
