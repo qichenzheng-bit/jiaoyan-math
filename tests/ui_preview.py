@@ -957,7 +957,17 @@ with sync_playwright() as p:
             expect(page.locator(".agent-manual")).to_have_count(0)
             page.get_by_role("button",name="资料与识别").first.click()
             expect(page.locator(".agent-manual")).to_be_visible()
+            expect(page.locator(".agent-workspace-body")).to_have_attribute("data-panel-open","true")
+            expect(page.locator(".agent-workspace-panel")).to_be_visible()
+            if GROUP=="mobile":
+                assert page.locator(".agent-workspace-panel").evaluate("(el)=>getComputedStyle(el).position")=="absolute"
+            else:
+                chat_box=page.locator(".agent-chat-column").bounding_box()
+                panel_box=page.locator(".agent-workspace-panel").bounding_box()
+                assert panel_box["x"]>chat_box["x"]+chat_box["width"]-2
+            capture(page,path=str(OUT/("31-agent-work-split-mobile.png" if GROUP=="mobile" else "31-agent-work-split-desktop.png")),full_page=False)
             page.locator(".agent-manual").get_by_role("button",name="收起",exact=True).click()
+            expect(page.locator(".agent-workspace-panel")).to_have_count(0)
             page.get_by_role("button",name="添加资料",exact=True).click()
             expect(page.get_by_role("dialog",name="添加资料")).to_be_visible()
             page.keyboard.press("Escape")

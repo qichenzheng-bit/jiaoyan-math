@@ -31,3 +31,26 @@ def test_ocr_no_capability_and_range(tmp_path,monkeypatch):
     assert e.value.status_code==422
     with pytest.raises(HTTPException) as e:imp.extract(file,"ocr",1,1)
     assert e.value.status_code==503
+
+
+def test_capabilities_reports_exact_missing_ocr_dependencies(monkeypatch):
+    available={"prlimit":"/usr/bin/prlimit","tesseract":"/usr/bin/tesseract",
+               "pdftotext":"/usr/bin/pdftotext","pdftoppm":None}
+    monkeypatch.setattr(imp.shutil,"which",lambda name:available.get(name))
+    monkeypatch.setattr(imp.subprocess,"run",lambda *args,**kwargs:SimpleNamespace(
+        returncode=0,stdout=b'List of available languages in tessdata (1):\neng\n'))
+    cap=imp.capabilities()
+    assert cap["pdf_text"] is True
+    assert cap["image_ocr"] is False
+    assert "tesseract-ocr-chi-sim（中文语言包）" in cap["image_ocr_missing"]
+    assert "poppler-utils（pdftoppm）" in cap["pdf_ocr_missing"]
+    assert cap["repair_command"].endswith("deploy/repair-ocr.sh")
+
+
+def test_capabilities_reports_missing_engine_and_resource_limiter(monkeypatch):
+    monkeypatch.setattr(imp.shutil,"which",lambda name:None)
+    cap=imp.capabilities()
+    assert cap["image_ocr"] is False and cap["pdf_ocr"] is False
+    assert "util-linux（prlimit）" in cap["image_ocr_missing"]
+    assert "tesseract-ocr" in cap["image_ocr_missing"]
+    assert "poppler-utils（pdftoppm）" in cap["pdf_ocr_missing"]
