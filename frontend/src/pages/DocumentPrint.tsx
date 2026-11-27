@@ -13,6 +13,7 @@ import {api} from '../auth'
 import ChatText from './ChatText'
 type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:{stem:string;options?:{label:string;content:string}[];blanks?:unknown[]}}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
+type SourceDraft={export_token:string;selected_uids?:string[]|null;overrides:Record<string,Partial<Content>>;stem:boolean;answerOnly:boolean;filename:string}
 type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
 export type PrintDoc={export_token?:string;parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
 
@@ -30,15 +31,16 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const [applyMode,setApplyMode]=useState<'keep'|'replace'|'partial'>('keep'),[applyParts,setApplyParts]=useState(['page','body','special','header','types'])
  const [layoutHistory,setLayoutHistory]=useState<Saved<Layout|null>['history']>([]),[templateHistory,setTemplateHistory]=useState<Saved<LayoutTemplate[]>['history']>([])
  const [cloudRevision,setCloudRevision]=useState<number|null>(null),[templateRevision,setTemplateRevision]=useState<number|null>(null),[cloudBusy,setCloudBusy]=useState(false),[cloudLayout,setCloudLayout]=useState<Layout|null>(null)
- const [hasDraft,setHasDraft]=useState(false)
+ const [hasDraft,setHasDraft]=useState(false),[draftRevision,setDraftRevision]=useState<number|null>(null),[localRecovery,setLocalRecovery]=useState<Layout|null>(null)
  const routeRef=useRef('')
  const storageKey='wg-layout-v1:'+String(source?'source':'doc')+':'+id+':'+(chapterUid??'all')
+ const draftPath='/settings/source-layout-draft/'+encodeURIComponent(id??'')
  const layoutPath='/settings/document-layout/'+(source?'source':'doc')+'/'+encodeURIComponent(id??'')
  routeRef.current=storageKey
  const back=source?'/sources':(doc?.kind==='paper'?'/papers':doc?.kind==='handout'?'/handouts':doc?.kind==='textbook'?'/textbooks':'/intake')+'?doc='+id
  useWorkspaceBack(()=>{if(!doc&&!source)return false;navigate(back);return true})
  useEffect(()=>{
-  const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('');setScope([]);setScopeMode('all');setOverrides({});setEditUid('');setFilename('');setPageCount(0);setPicked('');setLayoutHistory([]);setTemplateHistory([])
+  const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('');setScope([]);setScopeMode('all');setOverrides({});setEditUid('');setFilename('');setPageCount(0);setPicked('');setLayoutHistory([]);setTemplateHistory([]);setDraftRevision(null);setLocalRecovery(null)
   api<PrintDoc>((source?'/documents/source-export/':'/documents/')+encodeURIComponent(id??'')+(source?'':'/export'),{signal:c.signal}).then(async data=>{
    if(c.signal.aborted)return
    if(chapterUid){
@@ -50,22 +52,34 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
    }
    const base=builtins.find(t=>t.kind===data.kind)??builtins[builtins.length-1]
    const stored=readLocal<unknown>(storageKey,null)
-   const [remote,library]=await Promise.allSettled([chapterUid?Promise.resolve(null):api<Saved<Layout|null>>(layoutPath,{signal:c.signal}),api<Saved<LayoutTemplate[]>>('/settings/document-templates',{signal:c.signal})])
+   const local=stored&&typeof stored==='object'&&'value' in stored?stored as {value:unknown;baseRevision:number|null}:null
+   const [remote,library,draft]=await Promise.allSettled([chapterUid?Promise.resolve(null):api<Saved<Layout|null>>(layoutPath,{signal:c.signal}),api<Saved<LayoutTemplate[]>>('/settings/document-templates',{signal:c.signal}),source&&data.export_token?api<Saved<SourceDraft|null>>(draftPath,{signal:c.signal}):Promise.resolve(null)])
    if(c.signal.aborted)return
    const saved=remote.status==='fulfilled'?remote.value:null
    const lib=library.status==='fulfilled'?library.value:null
    if(saved&&Number.isInteger(saved.revision)){setCloudRevision(saved.revision);setCloudLayout(saved.value?sanitizeLayout(saved.value):null);setLayoutHistory(saved.history??[])}
    if(lib&&Number.isInteger(lib.revision)&&Array.isArray(lib.value)){setTemplateRevision(lib.revision);setTemplateHistory(lib.history??[]);if(lib.revision>0){const list=lib.value.map(t=>({...t,layout:templateLayout(sanitizeLayout(t.layout))}));setTemplates(list);writeLocal('wg-layout-templates-v1',list)}}
    const defaultTemplate=lib?.value?.find(t=>t.isDefault&&t.kind===data.kind)??lib?.value?.find(t=>t.isDefault&&t.kind==='all')??base
-   const current=saved?.value??stored
-   setHasDraft(Boolean(current));setTemplateId(defaultTemplate.id);setLayout(current?sanitizeLayout(current):{...sanitizeLayout(defaultTemplate.layout),originalNumbers:source});setDoc(data);setFilename(data.title);setLoadedKey(storageKey)
+   const localValue=local?.value??stored
+   const sameRevision=!!local&&local.baseRevision===(saved?.revision??null)
+   const current=sameRevision?localValue:saved?.value??localValue
+   if(local&&saved?.value&&!sameRevision&&JSON.stringify(sanitizeLayout(local.value))!==JSON.stringify(sanitizeLayout(saved.value))){setLocalRecovery(sanitizeLayout(local.value));setMessage('服务器版本已更新，保留了本地排版恢复副本。')}
+   const remoteDraft=draft.status==='fulfilled'?draft.value:null
+   if(remoteDraft&&Number.isInteger(remoteDraft.revision))setDraftRevision(remoteDraft.revision)
+   const localDraft=readLocal<{baseRevision:number|null;value:SourceDraft} | null>(storageKey+':source-draft',null)
+   const draftValue=localDraft&&localDraft.baseRevision===(remoteDraft?.revision??null)?localDraft.value:remoteDraft?.value??localDraft?.value
+   if(source&&draftValue?.export_token===data.export_token){setScopeMode(draftValue.selected_uids==null?'all':'selected');setScope(draftValue.selected_uids??[]);setOverrides(draftValue.overrides??{});setStem(draftValue.stem);setAnswerOnly(draftValue.answerOnly);setFilename(draftValue.filename||data.title)}
+   else if(draftValue)setMessage('来源内容已更新，旧内容草稿不会自动应用。')
+   setHasDraft(Boolean(current));setTemplateId(defaultTemplate.id);setLayout(current?sanitizeLayout(current):{...sanitizeLayout(defaultTemplate.layout),originalNumbers:source});setDoc(data);if(!source||!draftValue||draftValue.export_token!==data.export_token)setFilename(data.title);setLoadedKey(storageKey)
   }).catch(e=>{if(!c.signal.aborted)setError(e.message)})
   return()=>c.abort()
- },[id,source,chapterUid,storageKey,layoutPath])
+ },[id,source,chapterUid,storageKey,layoutPath,draftPath])
  useEffect(()=>{
   if(!doc||loadedKey!==storageKey||layoutError(layout))return
-  if(!writeLocal(storageKey,layout))setMessage('浏览器无法保存排版设置，请保持当前页面。')
- },[doc,layout,loadedKey,storageKey])
+  if(!writeLocal(storageKey,{value:layout,baseRevision:cloudRevision}))setMessage('浏览器无法保存排版设置，请保持当前页面。')
+ },[doc,layout,loadedKey,storageKey,cloudRevision])
+ const draftValue:SourceDraft|undefined=source&&doc?.export_token?{export_token:doc.export_token,selected_uids:scopeMode==='all'?null:scope,overrides,stem,answerOnly,filename}:undefined
+ useEffect(()=>{if(draftValue&&loadedKey===storageKey&&editing&&!writeLocal(storageKey+':source-draft',{baseRevision:draftRevision,value:draftValue}))setMessage('浏览器无法保存内容草稿，请保存到服务器。')},[doc,scope,scopeMode,overrides,stem,answerOnly,filename,loadedKey,storageKey,draftRevision,editing])
  const viewDoc=useMemo(()=>doc?{...doc,blocks:doc.blocks.filter(b=>scopeMode==='all'||scope.includes(b.uid)).map(b=>{
   const edit=overrides[b.uid];if(!edit)return b
   return {...b,...edit,local_fields:Array.from(new Set([...(b.local_fields??[]),...Object.keys(edit)])) as Block['local_fields']}
@@ -91,8 +105,18 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  async function saveCloud(){
   if(cloudRevision===null||cloudBusy||layoutError(layout))return
   const key=storageKey;setCloudBusy(true)
-  try{const saved=await api<Saved<Layout>>(layoutPath,{method:'PUT',body:JSON.stringify({revision:cloudRevision,value:layout})});if(routeRef.current!==key)return;setCloudRevision(saved.revision);setCloudLayout(sanitizeLayout(saved.value));setLayoutHistory(saved.history??[]);setMessage('排版配置已保存到服务器，可跨设备读取。')}
+  try{const saved=await api<Saved<Layout>>(layoutPath,{method:'PUT',body:JSON.stringify({revision:cloudRevision,value:layout})});if(routeRef.current!==key)return;setCloudRevision(saved.revision);setCloudLayout(sanitizeLayout(saved.value));setLayoutHistory(saved.history??[]);
+   if(draftValue&&draftRevision!==null){const draft=await api<Saved<SourceDraft>>(draftPath,{method:'PUT',body:JSON.stringify({revision:draftRevision,value:draftValue})});if(routeRef.current!==key)return;setDraftRevision(draft.revision)}
+   setMessage('排版配置已保存到服务器，可跨设备读取。')}
   catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'服务器保存失败，当前浏览器草稿仍保留。')}
+  finally{if(routeRef.current===key)setCloudBusy(false)}
+ }
+ async function clearDraft(){
+  if(!source||cloudBusy||!window.confirm('清除来源导出草稿？原资料不会改变。'))return
+  const key=storageKey;setCloudBusy(true)
+  try{if(draftRevision!==null){await api(draftPath+'?revision='+draftRevision,{method:'DELETE'});if(routeRef.current!==key)return;setDraftRevision(0)}
+   localStorage.removeItem(storageKey+':source-draft');setOverrides({});setScope([]);setScopeMode('all');setStem(false);setAnswerOnly(false);setFilename(doc?.title??'');invalidate();setMessage('内容草稿已清除。')
+  }catch(e){if(routeRef.current===key)setMessage(e instanceof Error?e.message:'草稿清除失败')}
   finally{if(routeRef.current===key)setCloudBusy(false)}
  }
  async function persistTemplates(list:LayoutTemplate[],messageText:string,choose?:string){
@@ -181,6 +205,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
     {templateHistory.map(v=><button key={v.revision} disabled={cloudBusy} onClick={()=>{if(window.confirm('恢复模板历史版本 '+v.revision+'？'))void persistTemplates(v.value.map(t=>({...t,layout:templateLayout(sanitizeLayout(t.layout))})),'模板历史已恢复','general')}}>恢复模板版本 {v.revision}</button>)}
     {layoutHistory.filter(v=>v.value).map(v=><button key={v.revision} onClick={()=>{if(window.confirm('恢复排版版本 '+v.revision+'？')){invalidate();setLayout(sanitizeLayout(v.value));setMessage('已载入历史排版，请保存确认。')}}}>载入排版版本 {v.revision}</button>)}
    </div></details>}
+   {localRecovery&&<button onClick={()=>{setLayout(localRecovery);setLocalRecovery(null);invalidate();setMessage('本地排版已恢复，请检查并保存。')}}>恢复未同步的本地排版</button>}
    {message&&<p role="status">{message}</p>}
    <small className="muted">{cloudRevision===null?'排版草稿自动保存在当前浏览器。':cloudLayout&&JSON.stringify(cloudLayout)===JSON.stringify(layout)?'排版已同步至服务器。':'本地草稿自动保存，点击保存排版到服务器后可跨设备使用。'} 不修改题库或来源。</small>
   </div>}
@@ -193,7 +218,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
     <label>仅修改当前导出副本<select value={editUid} onChange={e=>setEditUid(e.target.value)}><option value="">选择内容</option>{doc.blocks.map((b,i)=><option key={b.uid} value={b.uid}>{i+1}. {(b.snapshot??b).title||b.kind}</option>)}</select></label>
     {activeEdit&&(['title','content','answer','solution','analysis','proof'] as const).map(field=><label key={field}>{({title:'标题',content:'正文',answer:'答案',solution:'解析',analysis:'思路',proof:'证明'})[field]}<textarea rows={3} value={overrides[editUid]?.[field]??(activeEdit.local_fields?.includes(field)?activeEdit[field]:(activeEdit.snapshot??activeEdit)[field])??''} onChange={e=>{invalidate();setOverrides(old=>({...old,[editUid]:{...old[editUid],[field]:e.target.value}}))}}/></label>)}
     {activeEdit&&<button onClick={()=>{invalidate();setOverrides(old=>Object.fromEntries(Object.entries(old).filter(([k])=>k!==editUid)))}}>恢复该条原内容</button>}
-    <small>仅影响本次导出副本，不写回来源库或题库。</small>
+    <button disabled={cloudBusy} onClick={()=>void clearDraft()}>清除来源内容草稿</button><small>仅影响本次导出副本，不写回来源库或题库；保存排版到服务器时同步保存内容草稿。</small>
    </details></section>}
    {controls&&<section className="print-controls layout-settings">
     <details open><summary>页面与分栏</summary><div className="layout-fields">
