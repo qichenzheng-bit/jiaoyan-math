@@ -680,7 +680,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
     blocks=review_blocks(d,body.revision,[x.uid for x in body.items])
     if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):
         raise HTTPException(409,"请先处理当前AI编辑建议")
-    replacements={};history=[]
+    replacements={};history=[];evaluate={}
     for b,decision in zip(blocks,body.items):
         values=registration_values(db,d,b,body.bind_source,decision.reason,decision.chapter)
         source=values.pop("source_id")
@@ -695,6 +695,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
             db.add(r);db.flush()
             attach_review_source(db,r,source,source_occurrence(db,d,b,source));attach_review_knowledge(db,r,decision.knowledge_ids)
             audit(db,"resource.create",user.id)
+            if r.kind=="question":evaluate[r.id]=r
         else:
             if not decision.resource_id or decision.resource_revision is None:raise HTTPException(422,"请选择已有资源及版本")
             r=bank.existing(db,decision.resource_id,True)
@@ -706,6 +707,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
                 if r.kind!="question" or answer_conflict(r,b):raise HTTPException(422,"答案冲突或不是题目，不能追加解法")
                 changed=merge_question_methods(r,b,values["subject"])
                 if not changed:raise HTTPException(422,"没有可追加的新解法")
+                evaluate[r.id]=r
                 audit(db,"resource.methods.append",user.id)
             elif (match_kind(r,values)!="exact" or r.subject!=values["subject"] or answer_conflict(r,b) or canonical_text(r.analysis)!=canonical_text(b.get("analysis","")) or canonical_text(r.proof)!=canonical_text(b.get("proof",""))) and not decision.reason.strip():
                 raise HTTPException(422,"复用会保留已有资源内容，请填写确认原因；草稿保存在入库历史")
@@ -718,6 +720,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
         history.append({"uid":b["uid"],"action":decision.action,"reason":decision.reason,"input":b,"before":before,"after":bank.view(r),"knowledge_ids":decision.knowledge_ids,"source_id":source})
     d.blocks=[replacements.get(b["uid"],b) for b in d.blocks];d.revision+=1;d.updated_at=now();references(db,d)
     record=DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=body.revision,result_revision=d.revision,entries=history,created_at=now())
+    for r in evaluate.values():bank.enqueue_recommendation(db,r,user.id)
     db.add(record);audit(db,"document.registration.batch",user.id);db.commit()
     return public(d)
 
@@ -739,6 +742,18 @@ def manual_matches(body:ManualSearch,db:Session=Depends(get_db)):
         items.append({**m,"resource":resource})
     return {"items":items,"scanned":scanned,"threshold":.8,"total":len(items),"scope":"full_active_question_bank" if body.kind=="question" else "full_active_knowledge_bank"}
 
+
+class RelatedSearch(BaseModel):
+    content:str=Field(min_length=1,max_length=50000)
+    solution:str=Field(default="",max_length=50000)
+    subject:str=Field(default="",max_length=40)
+    tags:list[str]=Field(default_factory=list,max_length=20)
+    exclude_id:str|None=Field(default=None,max_length=36)
+
+@router.post("/related-questions",dependencies=[Depends(require_origin)])
+def related_questions(body:RelatedSearch,db:Session=Depends(get_db)):
+    rows=matching.related_questions(db,body.content,body.solution,normalize_subject(body.subject),body.tags,body.exclude_id)
+    return {"items":[{"resource":bank.view(x["resource"]),"reason":x["reason"]} for x in rows],"scope":"bounded_suggestions","blocking":False}
 
 def manual_knowledge(db,subject,chapter,names):
     from app.api.knowledge import norm
@@ -803,13 +818,14 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
     original_revisions={}
     count=0
     edited_refs=set()
-    batch_resources=[]
+    batch_resources=[];evaluate={}
     for i,b in enumerate(blocks):
         if b.get("edit_reference_revision") is not None:
             if b["resource_id"] in edited_refs:
                 raise HTTPException(409,"同一原题存在多处微调，请只修改一次")
             edited_refs.add(b["resource_id"])
             before,r=apply_reference_edit(db,b,user)
+            if r.kind=="question" and r.solution!=before["solution"]:evaluate[r.id]=r
             replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
             replacement["snapshot"]=bank.view(r)
             blocks[i]=replacement
@@ -843,7 +859,9 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             r=peer;before=bank.view(r)
             if r.subject!=item_subject or matching.answer_conflict(r.answer,b["answer"]):raise HTTPException(422,"本批次同题的答案或科目冲突，请核对")
             changed=False
-            if matching.method_keys(b["solution"])-matching.method_keys(r.solution) or not r.answer.strip() and b["answer"].strip():changed=merge_question_methods(r,b,item_subject)
+            if matching.method_keys(b["solution"])-matching.method_keys(r.solution) or not r.answer.strip() and b["answer"].strip():
+                changed=merge_question_methods(r,b,item_subject)
+                if changed:evaluate[r.id]=r
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
             changed=attach_review_knowledge(db,r,knowledge_ids) or changed
             if changed:r.revision+=1;r.updated_at=now()
@@ -855,6 +873,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             before=bank.view(r)
             appended=b.get("reuse_mode")=="append"
             changed=merge_question_methods(r,b,item_subject) if appended else False
+            if changed:evaluate[r.id]=r
             # Prevent an edited draft from silently reusing a different question.
             if not appended and any(data[k]!=getattr(r,k) for k in (("kind","content","answer","solution","subject","chapter","question_type","difficulty") if b["kind"]=="question" else ("kind","title","content","proof","subject","chapter","unit_type"))):
                 raise HTTPException(409,"题目内容或属性已修改，请选择另存为新题")
@@ -880,6 +899,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
             attach_review_knowledge(db,r,knowledge_ids)
             audit(db,"resource.create",user.id)
             action="create"
+            if r.kind=="question":evaluate[r.id]=r
         db.flush();protect_resource_images(db,r)
         if b["kind"]=="question":batch_resources.append((b["content"],r))
         replacement=Block(uid=b["uid"],kind="reference",resource_id=r.id,score=b.get("score",0)).model_dump()
@@ -896,6 +916,7 @@ def manual_save(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(c
     d.blocks=blocks;d.subject=normalize_subject(body.subject);d.title=body.title.strip()
     d.revision+=1;d.updated_at=now();references(db,d)
     db.add(DocumentRegistration(id=str(uuid4()),document_id=d.id,base_revision=before,result_revision=d.revision,entries=history,created_at=now()))
+    for r in evaluate.values():bank.enqueue_recommendation(db,r,user.id)
     audit(db,"document.manual.save",user.id);db.commit()
     return public(d)
 

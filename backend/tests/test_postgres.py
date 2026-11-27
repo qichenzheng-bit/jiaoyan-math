@@ -15,6 +15,7 @@ from app.models import User
 @pytest.mark.skipif(os.environ.get("RUN_POSTGRES_INTEGRATION") != "1",
                     reason="requires dedicated PostgreSQL test database")
 def test_migration_and_login(tmp_path, monkeypatch):
+    monkeypatch.setenv("WG_RECOMMENDATION_SCHEDULER","0")
     from dataclasses import replace
     from app.services import storage
     monkeypatch.setattr(storage, 'settings', replace(storage.settings, storage_root=str(tmp_path)))
@@ -316,14 +317,23 @@ def test_migration_and_login(tmp_path, monkeypatch):
         rec_path="/api/resources/"+merged_id+"/recommendation"
         rec=client.get(rec_path).json()
         assert len(rec["groups"][0]["methods"])==2
+        assert rec["evaluation"]["state"]=="queued"
         rec_revision=rec["revision"]
-        assert client.post(rec_path+"/start",headers=origin,json={"revision":rec_revision}).json()["state"]=="running"
+        from app.services.recommendation_worker import process_one
+        process_one(merged_id,1)
+        assert client.get(rec_path).json()["evaluation"]["state"]=="running"
+        process_one(merged_id,1)
         suggested=client.post(rec_path+"/poll",headers=origin,json={"revision":rec_revision}).json()
         assert suggested["state"]=="review",suggested
         confirmed=client.post(rec_path+"/confirm",headers=origin,json={"revision":rec_revision,"choices":suggested["choices"]})
         assert confirmed.status_code==200,confirmed.text
         assert confirmed.json()["evaluation"]["reason"]=="连续性法更便于课堂讲解"
         assert client.get("/api/resources/"+merged_id+"/methods").json()["recommended"]=="连续性法"
+        related_seed=client.post("/api/resources",headers=origin,json={"kind":"question","title":"关联方法专项","subject":"高等数学","content":"计算某项幂函数的定积分","answer":"1","solution":"分部积分法","tags":["相关专题"]}).json()
+        related=client.post("/api/documents/related-questions",headers=origin,json={"content":"计算另一个三角函数的积分","solution":"分部积分法","subject":"高等数学","tags":["相关专题"]})
+        assert related.status_code==200,related.text
+        assert related.json()["blocking"] is False
+        assert any(x["resource"]["id"]==related_seed["id"] and "共同方法名称" in x["reason"] and "共同知识点" in x["reason"] for x in related.json()["items"])
         from app.api import qoder as chat_qoder
         worker_calls=[]
         def fake_worker(method,path,body=None):

@@ -11,6 +11,7 @@ from app.api.files import router as files_router
 from app.api.settings import router as settings_router
 from app.core.config import settings
 from app.api.resources import router as resource_router
+from app.services.recommendation_worker import recommendation_loop
 from app.api.qoder import router as qoder_router, model_refresh_loop
 from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler())]
+    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop())]
     try:
         yield
     finally:

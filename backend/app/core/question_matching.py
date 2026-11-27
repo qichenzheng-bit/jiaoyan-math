@@ -3,7 +3,7 @@ from difflib import SequenceMatcher
 import re
 from sqlalchemy import select, or_, func, cast, Text
 from sqlalchemy.dialects.postgresql import ARRAY
-from app.models import TeachingResource as Resource, ResourceKnowledgeLink, KnowledgePointCatalog
+from app.models import TeachingResource as Resource, ResourceKnowledgeLink, KnowledgePointCatalog, KnowledgeAlias
 from app.core.content_normalization import canonical_text, question_stem_key, question_fingerprint, unit_fingerprint
 from app.core.solution_methods import parse_methods
 from app.core.search_features import search_features, formula_shape
@@ -94,3 +94,35 @@ def search(db,kind,content,answer="",solution="",title="",threshold=.8,include_a
     order={"answer_conflict":0,"same_question":1,"new_method":2,"exact":3,"same_title":4,"similar":5}
     results.sort(key=lambda x:(order.get(x["category"],6),x["resource"].archived,-x["similarity"],x["resource"].id))
     return results,scanned
+
+# Explicit method names only; don't infer equivalence from a broad term like "计算".
+METHOD_NAMES=("泰勒展开","泰勒公式","洛必达法则","等价无穷小","分部积分","换元积分","第一类换元","第二类换元","夹逼定理","单调有界","拉格朗日中值定理","柯西中值定理","拉格朗日乘数","参数方程","待定系数","特征值分解","正交变换","高斯消元","初等行变换","贝叶斯公式","全概率公式","条件概率","矩估计","极大似然","中心极限定理")
+METHOD_ALIASES={"泰勒公式":"泰勒展开","第一类换元":"换元积分","第二类换元":"换元积分"}
+def method_names(solution):
+    return {METHOD_ALIASES.get(m,m) for m in METHOD_NAMES if m in (solution or "")}
+
+def related_questions(db,content,solution,subject="",tags=(),exclude=None,limit=12):
+    """Bounded suggestions only. Exact duplicates are excluded, no write or approval implications."""
+    from app.api.knowledge import norm
+    tags={norm(t) for t in tags if t.strip()}
+    methods=method_names(solution)
+    scope=[Resource.kind=="question",Resource.archived==False,Resource.stem_key!=question_stem_key(content)]
+    if subject:scope.append(Resource.subject==subject)
+    if exclude:scope.append(Resource.id!=exclude)
+    found={}
+    def add(row,why,score):
+        item=found.setdefault(row.id,{"resource":row,"reason":set(),"score":0})
+        if why not in item["reason"]:item["reason"].add(why);item["score"]+=score
+    if tags and subject:
+        # Resolve user-specified names and aliases against the official knowledge catalog.
+        points=list(db.execute(select(KnowledgePointCatalog.id,KnowledgePointCatalog.name,KnowledgeAlias.alias).outerjoin(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.status=="active")))
+        matched={p.id:p.name for p in points if norm(p.name) in tags or p.alias and norm(p.alias) in tags}
+        if matched:
+            for row,kid in db.execute(select(Resource,ResourceKnowledgeLink.knowledge_id).join(ResourceKnowledgeLink,ResourceKnowledgeLink.resource_id==Resource.id).where(*scope,ResourceKnowledgeLink.knowledge_id.in_(matched)).order_by(Resource.updated_at.desc(),Resource.id).limit(200)):
+                add(row,"共同知识点："+matched[kid],3)
+    if methods:
+        terms=[m for m in METHOD_NAMES if METHOD_ALIASES.get(m,m) in methods]
+        for row in db.scalars(select(Resource).where(*scope,or_(*(Resource.solution.contains(t,autoescape=True) for t in terms))).order_by(Resource.updated_at.desc(),Resource.id).limit(200)):
+            for m in sorted(methods&method_names(row.solution)):add(row,"共同方法名称："+m,2)
+    out=sorted(found.values(),key=lambda x:(-x["score"],-x["resource"].updated_at,x["resource"].id))
+    return [{**x,"reason":"；".join(sorted(x["reason"]))} for x in out[:limit]]
