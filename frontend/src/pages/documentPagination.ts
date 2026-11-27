@@ -4,6 +4,13 @@ export type PaginationResult={pages:number;error:string}
 const el=(tag:string,cls:string,text?:string)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n}
 function copy(n:Element){const c=n.cloneNode(true) as HTMLElement;c.querySelectorAll('.print-controls').forEach(x=>x.remove());return c}
 function overflow(n:HTMLElement){return n.scrollHeight>n.clientHeight+2||n.scrollWidth>n.clientWidth+2}
+function fitOptions(part:HTMLElement){
+ for(const grid of part.querySelectorAll<HTMLElement>('.layout-options')){
+  const mode=grid.dataset.optionLayout??'auto'
+  const cols=mode==='auto'?[4,2,1]:[Number(mode)]
+  for(const n of cols){grid.style.gridTemplateColumns='repeat('+n+',minmax(0,1fr))';if(Array.from(grid.querySelectorAll<HTMLElement>('.layout-option')).every(o=>o.scrollWidth<=o.clientWidth+2))break}
+ }
+}
 export function pageVariables(l:Layout,w:number,h:number){
  return {'--layout-width':w+'mm','--layout-height':h+'mm','--layout-top':l.top+'mm','--layout-bottom':l.bottom+'mm','--layout-left':l.left+'mm','--layout-right':l.right+'mm','--layout-columns':l.columns,'--layout-gap':l.gap+'mm','--layout-size':l.size+'pt','--layout-line':l.lineHeight,'--layout-paragraph':l.paragraphGap+'pt','--layout-font':l.font==='sans'?'"Noto Sans CJK SC","Microsoft YaHei",sans-serif':'"Noto Serif CJK SC",SimSun,serif'}
 }
@@ -37,7 +44,7 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
  const next=()=>{if(col+1<layout.columns)col++;else{current=addPage();col=0}}
  const newPage=()=>{if(sheets[current].columns.some(n=>n.childElementCount)){current=addPage();col=0}}
  function appendPart(part:HTMLElement,uid:string,attempt=0):boolean{
-  let dest=active();dest.append(part)
+  let dest=active();dest.append(part);fitOptions(part)
   if(!overflow(dest))return true
   part.remove()
   if(dest.childElementCount){next();return appendPart(part,uid,attempt+1)}
@@ -68,9 +75,9 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   const node=copy(item)
   if(node.id)node.removeAttribute('id')
   node.dataset.layoutUid=uid
-  if(level)node.id='layout-heading-'+uid
+  node.id='layout-block-'+uid
   if(!appendPart(node,uid)){error='内容 '+(i+1)+' 超过单栏页面且无法安全拆分，请在内容中插入换行或调整页面参数。';break}
-  if(level)headings.push({id:'layout-heading-'+uid,title:item.querySelector('h2,h3,h4,h5,h6')?.textContent?.trim()||item.textContent?.trim()||'',level,page:current+1})
+  if(level){const first=target.querySelector('#'+CSS.escape('layout-block-'+uid))?.closest('.layout-sheet');headings.push({id:'layout-block-'+uid,title:item.querySelector('h2,h3,h4,h5,h6')?.textContent?.trim()||item.textContent?.trim()||'',level,page:Math.max(0,sheets.findIndex(p=>p.sheet===first))+1})}
   if(level===1)sheets[current].chapter=chapter
   if((pageBreak==='after'||pageBreak==='alone')&&i<contents.length-1)newPage()
  }
@@ -99,6 +106,8 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   p.footer.textContent=field(layout.footer,title,subject,i+1,total,p.chapter)
   if(p.columns.some(overflow)&&!error)error='第 '+(i+1)+' 页内容超出可用区域，请调整排版。'
  })
+ if(!error&&target.querySelector('[data-layout-reference-error]'))error='存在失效的内容引用，请返回修改。'
+ if(!error&&Array.from(target.querySelectorAll<HTMLElement>('.layout-option')).some(n=>n.scrollWidth>n.clientWidth+2))error='存在超过选项栏宽度的内容，请调整选项排列。'
  if(!error&&target.querySelector('.formula-error,.katex-error'))error='存在无法渲染的数学公式。'
  if(!error&&Array.from(target.querySelectorAll<HTMLElement>('.katex-display,.formula-block,.math-text-block')).some(n=>n.clientWidth>0&&n.scrollWidth>n.clientWidth+2))error='存在超出正文宽度的数学公式，请调整版式。'
  return {pages:total,error}
