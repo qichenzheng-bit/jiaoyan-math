@@ -1,8 +1,11 @@
 """Structured source metadata. The original source and all associations remain unchanged."""
+import csv
+import io
 import json
 from uuid import uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, or_, text
 from sqlalchemy.orm import Session
@@ -122,7 +125,8 @@ def statistics_scope(body:StatisticsRequest):
         params["subject"]=normalize_subject(body.subject.strip())
     cte="""
     WITH selected AS (
-        SELECT s.id,coalesce(d.intake_status,'unknown') AS intake_status
+        SELECT s.id,coalesce(d.intake_status,'unknown') AS intake_status,
+               s.cohort_year,coalesce(d.institution,'') AS institution,s.exam_type
         FROM teaching_resources s LEFT JOIN source_catalog_details d ON d.source_id=s.id
         WHERE """+" AND ".join(filters)+"""
     ), pairs AS (
@@ -241,3 +245,83 @@ def delete_scope(id:str,db:Session=Depends(get_db),user:User=Depends(current_use
     if len(remaining)==len(items):raise HTTPException(404,"统计方案不存在")
     store_scopes(db,user,remaining)
     return {"items":remaining}
+
+
+class StatisticsReport(StatisticsRequest):
+    dimension:Literal["year","institution","exam_type"]="year"
+    knowledge_name:str=Field(default="",max_length=180)
+    knowledge_subject:str=Field(default="",max_length=40)
+
+def report_data(body,db,export=False):
+    cte,params=statistics_scope(body)
+    dim={"year":"cohort_year","institution":"institution","exam_type":"exam_type"}[body.dimension]
+    params.update(knowledge_name=body.knowledge_name.strip(),knowledge_subject=body.knowledge_subject)
+    if export:params.update(limit=5000,offset=0)
+    # Empty metadata has its own bucket. Include sources without any recorded questions.
+    query=cte+"""
+    , source_groups AS (
+        SELECT id,coalesce(nullif(btrim("""+dim+"""),''),'') AS group_name,intake_status FROM selected
+    ), source_totals AS (
+        SELECT group_name,count(*) AS source_count,
+               count(*) FILTER (WHERE intake_status='completed') AS confirmed_complete_sources
+        FROM source_groups GROUP BY group_name
+    ), group_pairs AS (
+        SELECT DISTINCT s.group_name,p.question_id,p.source_id
+        FROM pairs p JOIN source_groups s ON s.id=p.source_id
+    ), question_totals AS (
+        SELECT group_name,count(DISTINCT question_id) AS question_count,count(*) AS source_question_count
+        FROM group_pairs GROUP BY group_name
+    ), tagged AS (
+        SELECT p.group_name,
+               count(DISTINCT n.question_id) AS questions_with_knowledge,
+               count(DISTINCT (n.subject,n.name)) AS knowledge_count,
+               count(DISTINCT n.question_id) FILTER (WHERE n.name=:knowledge_name AND n.subject=:knowledge_subject) AS topic_question_count,
+               count(DISTINCT (n.question_id,p.source_id)) FILTER (WHERE n.name=:knowledge_name AND n.subject=:knowledge_subject) AS topic_source_question_count
+        FROM group_pairs p JOIN names n ON n.question_id=p.question_id GROUP BY p.group_name
+    ), report AS (
+        SELECT s.group_name,s.source_count,s.confirmed_complete_sources,
+               coalesce(q.question_count,0) AS question_count,
+               coalesce(q.source_question_count,0) AS source_question_count,
+               coalesce(t.questions_with_knowledge,0) AS questions_with_knowledge,
+               coalesce(t.knowledge_count,0) AS knowledge_count,
+               coalesce(t.topic_question_count,0) AS topic_question_count,
+               coalesce(t.topic_source_question_count,0) AS topic_source_question_count
+        FROM source_totals s LEFT JOIN question_totals q USING(group_name)
+        LEFT JOIN tagged t USING(group_name)
+    )
+    SELECT (SELECT count(*) FROM report) AS total,
+           coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY (r.group_name=''),r.group_name)
+                     FROM (SELECT * FROM report ORDER BY (group_name=''),group_name
+                           LIMIT :limit OFFSET :offset) r),'[]'::jsonb) AS items
+    """
+    result=dict(db.execute(text(query),params).mappings().one())
+    return {**result,"dimension":body.dimension,"knowledge_name":body.knowledge_name.strip(),
+            "knowledge_subject":body.knowledge_subject,"offset":params["offset"],"limit":params["limit"],
+            "scope":"recorded_questions_only","original_question_total":None}
+
+@router.post("/statistics/report",dependencies=[Depends(require_origin)])
+def statistics_report(body:StatisticsReport,db:Session=Depends(get_db)):
+    return report_data(body,db)
+
+def csv_cell(value):
+    # Prevent spreadsheet formula execution when a user-defined label starts with a formula prefix.
+    if isinstance(value,str) and value.lstrip().startswith(("=","+","-","@")):return "'"+value
+    return value
+
+@router.post("/statistics/report/export",dependencies=[Depends(require_origin)])
+def statistics_export(body:StatisticsReport,db:Session=Depends(get_db)):
+    data=report_data(body,db,export=True)
+    if data["total"]>5000:raise HTTPException(422,"统计分组超过5000，请缩小范围后导出")
+    out=io.StringIO(newline="")
+    writer=csv.writer(out)
+    writer.writerow(["统计口径","仅已入库题目；零记录不等于未考查；原件总题数未知"])
+    writer.writerow(["统计维度",{"year":"年份","institution":"院校或机构","exam_type":"考试类型"}[body.dimension]])
+    writer.writerow(["统计范围",csv_cell(json.dumps(body.model_dump(exclude={"limit","offset"}),ensure_ascii=False))])
+    writer.writerow(["分组","来源数","人工确认完成的来源","独立题目数","题目来源关联数","有知识点的题目数","知识点数","指定知识点题目数","指定知识点来源关联数"])
+    for r in data["items"]:
+        writer.writerow([csv_cell(r["group_name"] or "未确认"),r["source_count"],r["confirmed_complete_sources"],
+                         r["question_count"],r["source_question_count"],r["questions_with_knowledge"],r["knowledge_count"],
+                         r["topic_question_count"] if body.knowledge_name.strip() else "",
+                         r["topic_source_question_count"] if body.knowledge_name.strip() else ""])
+    return Response(content=("\ufeff"+out.getvalue()).encode("utf-8"),media_type="text/csv",
+                    headers={"Content-Disposition":"attachment; filename=knowledge-statistics.csv","Cache-Control":"no-store"})

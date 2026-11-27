@@ -418,6 +418,15 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert drill.json()["items"][0]["source_count"]==2
         wrong=client.post(stats_path+"/questions",headers=origin,json={"source_ids":[source_a["id"]],"knowledge_name":"专项甲","knowledge_subject":"线性代数"})
         assert wrong.status_code==200 and wrong.json()["total"]==0
+        report_payload={"source_ids":[source_a["id"],source_b["id"]],"dimension":"year","knowledge_name":"专项甲","knowledge_subject":"高等数学"}
+        report=client.post(stats_path+"/report",headers=origin,json=report_payload)
+        assert report.status_code==200,report.text
+        assert report.json()["total"]==2
+        assert [r["group_name"] for r in report.json()["items"]]==["2018","2025"]
+        assert all(r["topic_question_count"]==1 and r["question_count"]==1 and r["source_count"]==1 for r in report.json()["items"])
+        exported=client.post(stats_path+"/report/export",headers=origin,json=report_payload)
+        assert exported.status_code==200 and "text/csv" in exported.headers["content-type"]
+        assert "2018" in exported.text and "2025" in exported.text and "原件总题数未知" in exported.text
         scope_payload={"name":"组合统计测试","scope":{"source_ids":[source_a["id"],source_b["id"]]}}
         stored=client.post(stats_path+"/scopes",headers=origin,json=scope_payload)
         assert stored.status_code==200,stored.text
