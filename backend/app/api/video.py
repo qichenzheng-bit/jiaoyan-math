@@ -143,9 +143,16 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
     rid=remote(row)
     if action=="generate":
         with production_model_lock:
-            prepare_model(db,body.effort if body else None,body.model if body else None)
             from app.core.ai_preferences import video_supplement
             supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
+            if supplement["text"]:
+                try:
+                    supported=engine.call("GET","/jiaoyan/prompt-capability")
+                except HTTPException as e:
+                    if e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
+                    raise
+                if not supported.get("supported") or supported.get("snapshot")!="job":raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
+            prepare_model(db,body.effort if body else None,body.model if body else None)
             if supplement["text"]:
                 return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",supplement)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})

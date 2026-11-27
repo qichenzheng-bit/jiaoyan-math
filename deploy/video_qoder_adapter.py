@@ -8,6 +8,7 @@ import socket
 import time
 import os
 import hmac
+from threading import Event
 from contextvars import ContextVar
 from uuid import uuid4
 
@@ -16,9 +17,13 @@ MAX_RESPONSE = 2_000_000
 PROMPT_LIMIT = 32000
 _job_prompt = ContextVar('job_prompt', default=None)
 _session_factory = None
+_factory_ready=Event()
+_initializing=False
 
 
 def job_supplement():
+    if _initializing and not _factory_ready.wait(30):
+        raise RuntimeError('VIDEO_PROMPT_STORE_NOT_READY')
     if _session_factory is None:return ''
     from sqlalchemy import select
     from weiguang_backend.services.task_control import active_job
@@ -177,23 +182,10 @@ def chat_cli(*args, **kwargs):
     return {"status":"failed","error":"QODER_VIDEO_NO_RESULT"}
 
 
-def create_app():
-    global _session_factory
+def add_prompt_routes(router):
     from fastapi import HTTPException, Request
     from pydantic import BaseModel, ConfigDict, Field
-    from weiguang_backend.api.routers import production
-    production.job_add=capture_job_add(production.job_add)
-    from weiguang_backend.ai import cli_login, cli_probe, model_selection, model_runtime
-    cli_login.chat_target = target
-    cli_probe.chat_cli = chat_cli
-    cli_probe.chat_cli_stream = chat_cli_stream
-    model_selection.CLI_PROTOCOLS = ("qoder_cli",)
-    model_runtime.CLI_PROTOCOLS = ("qoder_cli",)
-    from weiguang_backend.main import create_app as upstream
-    from weiguang_backend.core.models import AiProvider, GlobalAiSetting
-    app = upstream()
-    _session_factory=app.state.SessionLocal
-    original=next((r.endpoint for r in app.routes if getattr(r,'path',None)=='/api/v1/lessons/{id}/generate' and 'POST' in getattr(r,'methods',set())),None)
+    original=next((r.endpoint for r in router.routes if getattr(r,'path',None)=='/lessons/{id}/generate' and 'POST' in getattr(r,'methods',set())),None)
     if original is None:raise RuntimeError('VIDEO_GENERATION_ROUTE_MISSING')
 
     class Supplement(BaseModel):
@@ -206,12 +198,12 @@ def create_app():
         if not expected or not hmac.compare_digest(request.headers.get('X-API-Key','').encode(),expected.encode()):
             raise HTTPException(403,'VIDEO_ENGINE_TOKEN_REQUIRED')
 
-    @app.get('/api/v1/jiaoyan/prompt-capability')
+    @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):
         authorize(request)
         return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job'}
 
-    @app.post('/api/v1/jiaoyan/lessons/{id}/generate',status_code=202)
+    @router.post('/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):
         authorize(request)
         if '\x00' in body.text or len(body.text.encode())>PROMPT_LIMIT:
@@ -219,6 +211,34 @@ def create_app():
         token=_job_prompt.set(body.model_dump())
         try:return original(id)
         finally:_job_prompt.reset(token)
+    return router
+
+
+def create_app():
+    global _session_factory,_initializing
+    from weiguang_backend.api import routers
+    from weiguang_backend.api.routers import production
+    production.job_add=capture_job_add(production.job_add)
+    original_builder=routers.build_production_router
+    def build_with_prompt_routes(ctx,exports):
+        return add_prompt_routes(original_builder(ctx,exports))
+    routers.build_production_router=build_with_prompt_routes
+    from weiguang_backend.ai import cli_login, cli_probe, model_selection, model_runtime
+    cli_login.chat_target = target
+    cli_probe.chat_cli = chat_cli
+    cli_probe.chat_cli_stream = chat_cli_stream
+    model_selection.CLI_PROTOCOLS = ("qoder_cli",)
+    model_runtime.CLI_PROTOCOLS = ("qoder_cli",)
+    from weiguang_backend.main import create_app as upstream
+    from weiguang_backend.core.models import AiProvider, GlobalAiSetting
+    _initializing=True
+    _factory_ready.clear()
+    try:
+        app=upstream()
+        _session_factory=app.state.SessionLocal
+    finally:
+        _initializing=False
+        _factory_ready.set()
     with app.state.SessionLocal() as db:
         provider = db.query(AiProvider).filter_by(protocol="qoder_cli",deleted_at=None).first()
         if provider is None:
