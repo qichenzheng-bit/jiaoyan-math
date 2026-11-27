@@ -20,10 +20,10 @@ import DocWork from './pages/DocWork'
 import Intake from './pages/Intake'
 import DocumentPrint from './pages/DocumentPrint'
 import Studio from './pages/Studio'
+import TeachingWorks from './pages/TeachingWorks'
 import Checkin from './pages/Checkin'
 import Cover from './pages/Cover'
 import VideoWork from './pages/VideoWork'
-import ModuleHub from './pages/ModuleHub'
 import ProjectHub from './pages/ProjectHub'
 import Sidebar from './components/Sidebar'
 import {usePhoneLayout} from './hooks/usePhoneLayout'
@@ -84,15 +84,17 @@ export default function App(){
     <Route path="/research" element={<Navigate to="/intake" replace/>}/>
     <Route path="/work" element={<Work/>}/>
     <Route path="/tasks" element={<Navigate to="/work" replace/>}/>
-    <Route path="/publishing" element={<Navigate to="/project/publishing" replace/>}/>
-    <Route path="/analytics" element={<Navigate to="/project/publishing" replace/>}/>
+    <Route path="/publishing" element={<Navigate to="/covers" replace/>}/>
+    <Route path="/products" element={<Navigate to="/works" replace/>}/>
+    <Route path="/project/sales" element={<Navigate to="/works" replace/>}/>
+    <Route path="/analytics" element={<Navigate to="/works" replace/>}/>
     <Route path="/resource-edit/:id" element={<ResourceEdit/>}/>
     <Route path="/source-catalog/statistics" element={<SourceStatistics/>}/>
     <Route path="/source-catalog/:id" element={<SourceCatalog/>}/>
     <Route path="/project/intake" element={<Navigate to="/intake" replace/>}/>
     <Route path="/project/:id" element={<ProjectHub/>}/>
     <Route path="/selection" element={<SelectionPage/>}/>
-    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/original-library'?<OriginalLibrary/>:m.path==='/teaching-library'?<TeachingLibrary/>:m.path==='/products'?<ModuleHub key={m.path} path={m.path}/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?<Studio key="works" kind="work"/>:m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/intelligence'?<Navigate to={'/work'+location.search} state={location.state} replace/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
+    {modules.slice(1).map(m=><Route key={m.path} path={m.path} element={m.path==='/original-library'?<OriginalLibrary/>:m.path==='/teaching-library'?<TeachingLibrary/>:m.path==='/videos'?<VideoWork/>:m.path==='/knowledge-library'?<Resources key="knowledge-library" initialKind="knowledge"/>:m.path==='/covers'?<Cover/>:m.path==='/works'?(new URLSearchParams(location.search).has('legacy')?<><Link to="/works" className="button-link">返回教学作品</Link><Studio key="works" kind="work"/></>:<TeachingWorks/>):m.path==='/checkin'?<Checkin/>:m.path==='/papers'?<DocWork key="paper" docKind="paper"/>:m.path==='/handouts'?<DocWork key="handout" docKind="handout"/>:m.path==='/textbooks'?<DocWork key="textbook" docKind="textbook"/>:m.path==='/intelligence'?<Navigate to={'/work'+location.search} state={location.state} replace/>:m.path==='/graph'?<Graph/>:m.path==='/chat'?<Chat/>:m.path==='/intake'?<Intake/>:m.path==='/resources'?<Resources key="library"/>:m.path==='/sources'?<Resources key="sources" initialKind="source"/>:m.path==='/qoder'?<Qoder/>:m.path==='/settings'?<><div className="page-heading"><h1>系统设置</h1><p className="muted">{m.desc}</p></div><Settings preferences={preferences} onChange={setPreferences}/></>:<Pending module={m}/>}/>)}
     <Route path="/print/:id" element={<DocumentPrint/>}/>
     <Route path="/source-print/:id" element={<DocumentPrint source/>}/>
     <Route path="/intake-single" element={<Resources key="intake-single" intake/>}/>

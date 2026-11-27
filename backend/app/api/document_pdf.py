@@ -20,11 +20,11 @@ from sqlalchemy.orm import Session
 
 from app.api.documents import source_export, export_document, check_complete_export_size
 from app.api.settings import DocumentLayout
-from app.core.db import get_db
+from app.core.db import get_db, session_factory
 from app.core.config import settings
 from app.core.security import current_user, require_origin
 from app.models import User, StoredFile
-from app.services import storage
+from app.services import storage, teaching_works, work_facets
 from app.services.document_pdf import render_pdf, selected_pages
 from app.services.inline_images import image_ids
 
@@ -103,6 +103,9 @@ class Job:
     page_ranges: str = ""
     changed: float = field(default_factory=time.time)
     stop: threading.Event = field(default_factory=threading.Event)
+    work_id: str | None = None
+    work_version: int | None = None
+    work_error: str = ""
 
     @property
     def output(self):
@@ -114,7 +117,8 @@ class Job:
 
     def view(self):
         return {"id": self.id, "state": self.state, "stage": self.stage, "detail": self.detail,
-                "filename": self.filename, "pages": self.pages, "bytes": self.bytes, "total_pages": self.total_pages, "page_ranges":self.page_ranges}
+                "filename": self.filename, "pages": self.pages, "bytes": self.bytes, "total_pages": self.total_pages, "page_ranges":self.page_ranges,
+                "work_id":self.work_id,"work_version":self.work_version,"work_error":self.work_error}
 
 def persist(job):
     """Only server-created files and validated snapshots enter the private queue."""
@@ -163,7 +167,8 @@ def ensure_loaded():
                     images[key]=(str(path),media)
             job=Job(meta["id"],meta["user_id"],meta["scope"],meta["identity"],meta["filename"],folder,images,
                 state=meta["state"],stage=meta["stage"],detail=meta.get("detail",""),pages=meta.get("pages",0),
-                bytes=meta.get("bytes",0),total_pages=meta.get("total_pages",0),page_ranges=meta.get("page_ranges",""),changed=meta["changed"])
+                bytes=meta.get("bytes",0),total_pages=meta.get("total_pages",0),page_ranges=meta.get("page_ranges",""),changed=meta["changed"],
+                work_id=meta.get("work_id"),work_version=meta.get("work_version"),work_error=meta.get("work_error",""))
             jobs[job.id]=job
             if job.state not in TERMINAL:
                 if meta.get("cancel_requested"):
@@ -196,6 +201,11 @@ async def pdf_maintenance_loop():
             if settings.storage_root:
                 def maintain():
                     with lock:cleanup()
+                    if settings.database_url:
+                        with session_factory()() as db:
+                            teaching_works.retire_files(db)
+                        from app.api.teaching_works import cleanup_stale_zips
+                        cleanup_stale_zips()
                 await asyncio.to_thread(maintain)
         except Exception as exc:
             logger.warning("PDF maintenance unavailable: %s",type(exc).__name__)
@@ -221,7 +231,28 @@ def run(job):
             job.output.unlink(missing_ok=True)
             change(job, state="cancelled", stage="已取消")
         else:
-            change(job, state="ready", stage="生成完成", pages=result["pages"], bytes=result["bytes"], total_pages=result.get("total_pages",result["pages"]))
+            # Finish registration before exposing ready; cancellation and registration
+            # share the queue lock so a cancelled job cannot publish a work.
+            with lock:
+                if job.stop.is_set():
+                    job.output.unlink(missing_ok=True)
+                    change(job, state="cancelled", stage="已取消")
+                else:
+                    work_id, work_version, work_error = None, None, ""
+                    try:
+                        payload = json.loads(job.payload.read_text(encoding="utf-8"))
+                        with session_factory()() as db:
+                            work_id, work_version = teaching_works.register_pdf(
+                                db, user_id=job.user_id, scope=job.scope, identity=job.identity,
+                                filename=job.filename, path=job.output, payload=payload, pages=result["pages"])
+                            db.commit()
+                    except Exception as exc:
+                        logger.warning("PDF work registration failed: %s", type(exc).__name__)
+                        work_id, work_version = None, None
+                        work_error = "PDF 已生成，但作品入库失败，请下载成品并重新导出。"
+                    change(job, state="ready", stage="生成完成", pages=result["pages"],
+                           bytes=result["bytes"], total_pages=result.get("total_pages",result["pages"]),
+                           work_id=work_id, work_version=work_version, work_error=work_error)
     except ValueError as exc:
         job.output.unlink(missing_ok=True)
         change(job, state="failed", stage="排版检查失败", detail=str(exc)[:300])
@@ -297,6 +328,12 @@ def create_pdf(scope: Literal["source", "doc"], identity: str, body: PdfRequest,
     images = resolve_images(db, {"blocks":[]} if body.wrap else data, body.layout)
     payload = {"doc": data, "layout": body.layout.model_dump(), "stem": body.stem,
                "answerOnly": body.answerOnly, "source": scope == "source", "page_ranges":body.page_ranges, "preview_pages":body.preview_pages,"wrap":body.wrap.model_dump() if body.wrap else None}
+    payload["overrides"] = {key: value.model_dump(exclude_none=True) for key, value in body.overrides.items()}
+    payload["snapshot_image_ids"] = [key.split("/")[-2] for key in images]
+    payload["chapter_uid"] = body.chapter_uid
+    payload["selected_uids"] = body.selected_uids
+    payload["work_context"] = teaching_works.context(payload)
+    payload["work_facets"] = work_facets.capture(db, data, identity if scope == "source" else None)
     if body.wrap:payload["doc"]={**data,"blocks":[]}
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
     check_complete_export_size(len(raw))

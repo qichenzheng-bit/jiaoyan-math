@@ -15,6 +15,7 @@ import {api} from '../auth'
 import ChatText from './ChatText'
 type Content={title:string;content:string;answer:string;solution:string;analysis:string;proof:string;kind:string;question_type?:string;unit_type?:string;question_data?:{stem:string;options?:{label:string;content:string}[];blanks?:unknown[]}|null}
 type Block=Content&{original_question_number?:string;resource_id?:string|null;heading_level?:1|2|null;uid:string;score?:number;subquestion_scores?:number[];local_fields?:('title'|'content'|'answer'|'solution'|'analysis'|'proof')[];hidden_fields?:('answer'|'solution'|'analysis'|'proof')[];file_id:string|null;width:number;snapshot?:Content}
+type WorkContext={origin_scope:string;origin_id:string;version:number;layout:Layout;edition:{selection?:string[]|null;stem?:boolean;answerOnly?:boolean;page_ranges?:string};export_token?:string;overrides?:Record<string,Partial<Content>>;wrap?:unknown}
 type SourceDraft={export_token:string;selected_uids?:string[]|null;overrides:Record<string,Partial<Content>>;stem:boolean;answerOnly:boolean;filename:string}
 type Saved<T>={revision:number;value:T;history:{revision:number;value:T}[]}
 export type PrintDoc={export_token?:string;export_chapter_uid?:string;parent_document_id?:string|null;chaptered?:boolean;title:string;subject:string;kind:string;blocks:Block[];source_export?:boolean;has_source_content?:boolean;batch_count?:number}
@@ -27,6 +28,8 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const [templateId,setTemplateId]=useState('general'),[templateName,setTemplateName]=useState(''),[message,setMessage]=useState('')
  const [editing,setEditing]=useState(!source),[controls,setControls]=useState(true),[loadedKey,setLoadedKey]=useState('')
  const [pageCount,setPageCount]=useState(0)
+ const fromWork=params.get('from_work'),[workContext,setWorkContext]=useState<WorkContext>(),[workContextError,setWorkContextError]=useState('')
+ useEffect(()=>{setWorkContext(undefined);setWorkContextError('');if(!fromWork)return;const c=new AbortController();api<WorkContext>('/teaching-works/'+encodeURIComponent(fromWork)+'/edit-context',{signal:c.signal}).then(v=>{if(!c.signal.aborted&&v.origin_id===id&&v.origin_scope===(source?'source':'doc'))setWorkContext(v)}).catch(e=>{if(!c.signal.aborted)setWorkContextError(e.message)});return()=>c.abort()},[fromWork,id,source])
  const [scope,setScope]=useState<string[]>([]),[scopeMode,setScopeMode]=useState<'all'|'selected'>('all')
  const [editUid,setEditUid]=useState(''),[overrides,setOverrides]=useState<Record<string,Partial<Content>>>({})
  const [filename,setFilename]=useState(''),[picked,setPicked]=useState('')
@@ -39,7 +42,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  const draftPath='/settings/source-layout-draft/'+encodeURIComponent(id??'')
  const layoutPath='/settings/document-layout/'+(source?'source':'doc')+'/'+encodeURIComponent(id??'')
  routeRef.current=storageKey
- const back=source?'/sources':(doc?.kind==='paper'?'/papers':doc?.kind==='handout'?'/handouts':doc?.kind==='textbook'?'/textbooks':'/intake')+'?doc='+id
+ const back=fromWork?'/works?work='+encodeURIComponent(fromWork):source?'/sources':(doc?.kind==='paper'?'/papers':doc?.kind==='handout'?'/handouts':doc?.kind==='textbook'?'/textbooks':'/intake')+'?doc='+id
  useWorkspaceBack(()=>{if(!doc&&!source)return false;navigate(back);return true})
  useEffect(()=>{
   const c=new AbortController();setDoc(undefined);setError('');setConfirmed(false);setReady(false);setLoadedKey('');setEditing(!source);setControls(true);setCloudRevision(null);setTemplateRevision(null);setCloudLayout(null);setHasDraft(false);setCloudBusy(false);setMessage('');setScope([]);setScopeMode('all');setOverrides({});setEditUid('');setFilename('');setPageCount(0);setPicked('');setLayoutHistory([]);setTemplateHistory([]);setDraftRevision(null);setLocalRecovery(null)
@@ -89,6 +92,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  })}:undefined,[doc,scopeMode,scopeSet,overrides])
  const renderVersion=useMemo(()=>({viewDoc,stem,answerOnly}),[viewDoc,stem,answerOnly])
  const activeEdit=doc?.blocks.find(b=>b.uid===editUid)
+ function applyWorkContext(){if(!doc||!workContext)return;setLayout(sanitizeLayout(workContext.layout));setStem(Boolean(workContext.edition.stem));setAnswerOnly(Boolean(workContext.edition.answerOnly));const same=doc.export_token===workContext.export_token;if(same&&source){const selected=workContext.edition.selection;setScopeMode(selected==null?'all':'selected');setScope(selected??[]);setOverrides(workContext.overrides??{})}setEditing(true);invalidate();setMessage('已应用成品 V'+workContext.version+' 的排版配置。'+(same?'':'原项目内容已更新，保留当前内容及选取草稿。')+(workContext.edition.page_ranges?' 原成品指定页码：'+workContext.edition.page_ranges+'，请重新核对。':''))}
  function invalidate(){setConfirmed(false);setReady(false)}
  const patch=(values:Partial<Layout>)=>{setConfirmed(false);setReady(false);setLayout(old=>({...old,...values}))}
  const compatible=[...builtins,...templates].filter(t=>t.kind==='all'||t.kind===doc?.kind)
@@ -271,6 +275,8 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
     <button className="primary" disabled={!ready||!confirmed||!!invalid} onClick={async()=>{await document.fonts.ready;window.print()}}>打印 / 保存为 PDF</button>
     <label>文件名<input value={filename} onChange={e=>setFilename(e.target.value)} maxLength={200}/></label><small className="muted">{pageCount?`共 ${pageCount} 页`:"正在计算页数"} · 当前分页预览使用实际纸张尺寸。</small>
    </div>
+   {workContextError&&<p role="alert">{workContextError}</p>}
+   {workContext&&<div className="button-row"><span className="muted">来自作品 V{workContext.version}，当前草稿未被自动覆盖。</span><button type="button" onClick={applyWorkContext}>应用成品排版配置</button></div>}
    {doc.export_token&&<PdfJobs path={'/document-pdf/'+(source?'source':'doc')+'/'+encodeURIComponent(id??'')} canExport={ready&&confirmed&&!invalid&&!!filename.trim()} pageCount={pageCount} layout={layout} title={doc.title} request={{export_token:doc.export_token,layout,stem,answerOnly,selected_uids:scopeMode==='all'?null:scope,overrides,chapter_uid:chapterUid,filename,confirmed:true}}/>}
    {invalid&&<p role="alert">{invalid}</p>}{previewError&&<p role="alert" className="print-controls">{previewError}</p>}
    {!invalid&&viewDoc&&viewDoc.blocks.length>0&&<div className="print-preview-content layout-preview" onClick={e=>{const target=e.target as HTMLElement;if(target.closest("a"))return;const uid=target.closest<HTMLElement>(".layout-pages [data-layout-uid]")?.dataset.layoutUid;if(uid&&doc.blocks.some(b=>b.uid===uid)){setPicked(uid);setControls(true)}}}><PagedPreview layout={layout} title={viewDoc.title} subject={viewDoc.subject??''} version={renderVersion} onResult={result=>{setPageCount(result.pages);setPreviewError(result.error);setReady(Boolean(result.pages)&&!result.error);setConfirmed(false)}}><PrintableDocument doc={viewDoc} stem={stem} answerOnly={answerOnly} source={source} layout={layout}/></PagedPreview></div>}

@@ -1,7 +1,6 @@
 export type Module={path:string;name:string;desc:string;icon:string;group:string;ready:boolean}
 export const modules:Module[]=[
  {path:'/',name:'聊天',desc:'数学答疑与教研工作入口',icon:'home',group:'overview',ready:true},
- {path:'/products',name:'商品售卖',desc:'课程与资料商品、订单及收入（待接入）',icon:'works',group:'production',ready:false},
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
  {path:'/knowledge-library',name:'知识库',desc:'知识点、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
@@ -41,8 +40,7 @@ export const workspaceGroups:WorkspaceGroup[]=[
  {id:'creation',name:'教学制作',icon:'media',sections:[
   {id:'creation',name:'制作与导出',entries:[entry('/videos'),entry('/papers'),entry('/handouts'),entry('/textbooks')]},
  ]},
- {id:'publishing',name:'内容发布',icon:'publishing',sections:[{id:'release',name:'作品与封面',entries:[entry('/covers'),entry('/works','作品管理')]}]},
- {id:'sales',name:'商品售卖',icon:'works',sections:[{id:'store',name:'商品与交易',entries:[entry('/products','商品售卖')]}]},
+ {id:'publishing',name:'作品与封面',icon:'works',sections:[{id:'release',name:'制作与管理',entries:[entry('/covers'),entry('/works','作品管理')]}]},
 ]
 
 export function workspaceParent(path:string,search:string):string{
@@ -57,7 +55,7 @@ export function workspaceParent(path:string,search:string):string{
  if(path==='/intake-single')return '/intake'
  if(path==='/work'&&params.has('job')&&params.has('review'))return '/work?job='+encodeURIComponent(params.get('job')!)
  if(path==='/work'&&(params.has('job')||params.has('history')))return '/work'
- if(path==='/works')return '/project/publishing'
+ if(path==='/works')return params.has('work')||params.has('legacy')?'/works':'/project/publishing'
  const group=workspaceGroups.find(g=>g.sections.some(s=>s.entries.some(e=>e.path===path)))
  return group?'/project/'+group.id:'/'
 }

@@ -58,6 +58,10 @@ EXPORTS = [
     ("ai/chats/messages", "chat_messages", "true", "id"),
     ("production/covers/assets", "studio_items", "kind='asset'", "id"),
     ("production/works/works", "studio_items", "kind='work'", "id"),
+    ("production/finished/works", "teaching_works", "true", "id"),
+    ("production/finished/versions", "teaching_work_versions", "true", "work_id,number"),
+    ("production/finished/assets", "teaching_work_assets", "true", "work_id,version,role"),
+    ("production/finished/pending_covers", "teaching_work_pending_covers", "true", "work_id"),
     ("operations/publishing/publications", "studio_items", "kind='publication'", "id"),
     ("system/checkin/accounts", "studio_items", "kind='account'", "id"),
     ("system/checkin/history", "studio_items", "kind='checkin'", "id"),
@@ -171,6 +175,7 @@ def logical_allowed(name):
 WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
 CATALOG_EXPORTS={"teaching/sources/catalog_details.csv"}
 DOCUMENT_VERSION_EXPORTS={"production/documents/versions.csv"}
+FINISHED_WORK_EXPORTS={name+".csv" for name,table,_,_ in EXPORTS if name.startswith("production/finished/")}
 
 def check_manifest(repo, manifest, allow_legacy=False):
     if manifest.get("format") != 2 or not isinstance(manifest.get("entries"), dict):
@@ -183,8 +188,8 @@ def check_manifest(repo, manifest, allow_legacy=False):
             if part.get("path") != expected or digest(safe_path(repo, expected)) != part.get("sha256"):
                 raise ValueError("ciphertext verification failed")
     missing=(set(FIXED) | set(SCHEMAS))-set(manifest["entries"])
-    legacy_groups=(WORK_EXPORTS,CATALOG_EXPORTS,DOCUMENT_VERSION_EXPORTS)
-    allowed_missing={frozenset().union(*(group for i,group in enumerate(legacy_groups) if mask&(1<<i))) for mask in range(1,8)}
+    legacy_groups=(WORK_EXPORTS,CATALOG_EXPORTS,DOCUMENT_VERSION_EXPORTS,FINISHED_WORK_EXPORTS)
+    allowed_missing={frozenset().union(*(group for i,group in enumerate(legacy_groups) if mask&(1<<i))) for mask in range(1,1<<len(legacy_groups))}
     if missing and not (allow_legacy and frozenset(missing) in allowed_missing):
         raise ValueError("incomplete database backup")
 

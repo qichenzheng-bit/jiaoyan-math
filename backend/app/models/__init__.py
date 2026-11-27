@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect, Index
+from sqlalchemy import ForeignKeyConstraint, BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +27,8 @@ class Setting(Base):
 
 class StoredFile(Base):
     __tablename__ = "files"
+    work_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    work_retired_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255))
@@ -312,6 +314,7 @@ class StudioRevision(Base):
 
 class VideoProject(Base):
     __tablename__ = "video_projects"
+    work_facets: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), default=dict, server_default="{}")
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     resource_id: Mapped[str] = mapped_column(ForeignKey("teaching_resources.id", ondelete="RESTRICT"))
     resource_revision: Mapped[int] = mapped_column(Integer)
@@ -319,7 +322,8 @@ class VideoProject(Base):
     engine_id: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True)
     work_id: Mapped[str | None] = mapped_column(ForeignKey("studio_items.id", ondelete="RESTRICT"), nullable=True, unique=True)
     created_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),)
+    __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),
+                      Index("ix_video_work_facets", "work_facets", postgresql_using="gin"))
 
 # Persistent AI work sessions; legacy intake jobs remain independent.
 class WorkSession(Base):
@@ -363,3 +367,57 @@ def update_resource_search_features(session,flush_context,instances):
         if isinstance(row,TeachingResource) and (row in session.new or any(inspect(row).attrs[k].history.has_changes() for k in ("content","answer","solution","question_type","question_data"))):
             from app.core.bank_filter_facts import filter_facts
             row.bank_facts=filter_facts(row.content,row.answer or "",row.solution or "",row.question_type or "",row.question_data) if row.kind=="question" else {}
+
+
+class TeachingWork(Base):
+    """A durable finished work; origin and variant identify a logical work."""
+    __tablename__ = "teaching_works"
+    __table_args__ = (
+        UniqueConstraint("user_id", "origin_scope", "origin_id", "variant", name="uq_work_origin_variant"),
+        Index("ix_teaching_works_user_updated", "user_id", "updated_at", "id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # Single administrator id is recreated as 1 on credential-free backup restore.
+    user_id: Mapped[int] = mapped_column(Integer)
+    origin_scope: Mapped[str] = mapped_column(String(16))
+    origin_id: Mapped[str] = mapped_column(String(36))
+    variant: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(20))
+    title: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(40), default="")
+    current_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class TeachingWorkVersion(Base):
+    __tablename__ = "teaching_work_versions"
+    __table_args__ = (Index("ix_work_version_facets", "facets", postgresql_using="gin"),)
+    facets: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), default=dict, server_default="{}")
+    work_id: Mapped[str] = mapped_column(ForeignKey("teaching_works.id", ondelete="CASCADE"), primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class TeachingWorkAsset(Base):
+    __tablename__ = "teaching_work_assets"
+    __table_args__ = (ForeignKeyConstraint(["work_id", "version"], ["teaching_work_versions.work_id", "teaching_work_versions.number"], ondelete="CASCADE"),)
+    work_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role: Mapped[str] = mapped_column(String(20), primary_key=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    pages: Mapped[int] = mapped_column(Integer)
+
+
+class TeachingWorkPendingCover(Base):
+    """A cover exported before the matching body; never replace an unrelated body."""
+    __tablename__ = "teaching_work_pending_covers"
+    work_id: Mapped[str] = mapped_column(ForeignKey("teaching_works.id", ondelete="CASCADE"), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[int] = mapped_column(BigInteger)
