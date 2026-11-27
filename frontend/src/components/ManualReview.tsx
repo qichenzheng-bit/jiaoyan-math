@@ -15,7 +15,7 @@ type Row={uid:string;number:number;kind:'question'|'knowledge';title:string;acti
 export type ReviewData={revision:number;rows:Row[];reviewed_uids?:string[]}
 export type ResultCounts={question_create:number;question_reuse:number;knowledge_create:number;knowledge_reuse:number;updated:number}
 type Origin=Omit<SourceJob,'id'>&{job_id:string;item_uids?:string[];batches?:Origin[]}
-function formulaWarnings(doc:Doc,uid:string){const b=doc.blocks.find(x=>x.uid===uid);if(!b)return [];for(const s of [b.title,b.content,b.answer,b.solution,b.proof])for(const t of mathTokens(s)){if(t.kind==='math'){try{renderMathHtml(t.value,true)}catch{return ['存在无法渲染的 LaTeX 公式']}}}return []}
+export function formulaWarnings(doc:Doc,uid:string){const b=doc.blocks.find(x=>x.uid===uid);if(!b)return [];for(const s of [b.title,b.content,b.answer,b.solution,b.proof])for(const t of mathTokens(s)){if(t.kind==='math'){try{renderMathHtml(t.value,true)}catch{return ['存在无法渲染的 LaTeX 公式']}}}return []}
 export function ManualReview({doc,data,busy,error,onBack,onEdit,onConfirm,onProgress}:{doc:Doc;data:ReviewData;busy:boolean;error:string;onBack:()=>void;onEdit:(uid:string)=>void;onConfirm:(accept:boolean)=>void;onProgress:(uid:string,approved:boolean)=>Promise<boolean>}){
  const [current,setCurrent]=useState(()=>data.rows.find(r=>!(data.reviewed_uids??[]).includes(r.uid))?.uid??data.rows[0]?.uid??''),[origins,setOrigins]=useState<Origin[]>([]),[sourceError,setSourceError]=useState(''),[tab,setTab]=useState<'compare'|'matches'>('compare')
  const rows=data.rows.map(r=>({...r,errors:[...r.errors,...formulaWarnings(doc,r.uid)]})),approved=new Set(data.reviewed_uids??[])

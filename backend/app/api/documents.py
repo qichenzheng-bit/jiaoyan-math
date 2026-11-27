@@ -984,7 +984,8 @@ def manual_review_data(db,d,only_uid=None):
             if not b.get("question_type","").strip():errors.append("请选择题型")
             if b.get("question_type") in ("选择题","单选题","多选题") and not b.get("reuse_resource_id"):
                 import re
-                options=set(re.findall(r"(?m)^([A-Z])[.、)]\s+\S",b.get("content","")))
+                structured=resolve(b.get("content",""),b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data"))
+                options={o.label for o in structured.options} or set(re.findall(r"(?m)^([A-Z])[.、)]\s+\S",b.get("content","")))
                 if len(options)<2:errors.append("选择题至少需要两个有效选项")
                 letters=set(re.findall(r"[A-Z]",b.get("answer",""))) if re.fullmatch(r"[A-Z\s,，、]+",b.get("answer","")) else set()
                 if letters-options:errors.append("答案包含不存在的选项")
@@ -1049,7 +1050,7 @@ def manual_review_progress(id:str,body:ManualProgress,db:Session=Depends(get_db)
     ensure_no_active_run(db,d)
     checked=manual_review_data(db,d,body.uid)["rows"]
     if not checked:raise HTTPException(422,"待审核条目不存在")
-    if body.approved and checked[0]["errors"]:raise HTTPException(422,"请先处理本条审核问题")
+    if body.approved and checked[0]["errors"]:raise HTTPException(422,"请先处理本条审核问题："+ "；".join(checked[0]["errors"]))
     state=manual_review_state(db,d)
     valid=set(manual_reviewed(d,state));state={uid:state[uid] for uid in valid}
     b=next(b for b in d.blocks if b["uid"]==body.uid)
@@ -1126,6 +1127,14 @@ def run_view(run):
 def registration_counts():
     return {"question_create":0,"question_reuse":0,"knowledge_create":0,"knowledge_reuse":0,"updated":0,"methods_added":0,"source_occurrences":0,"evaluation_queued":0}
 
+def method_count_keys(row):
+    if not row:return set()
+    try:
+        data=resolve(row.get("content",""),row.get("answer",""),row.get("solution",""),row.get("question_type",""),row.get("question_data"))
+        groups=[(str(p.number),p.methods) for p in data.subquestions] if data.subquestions else [("main",data.methods)]
+        return {(k,matching.strict_text((m.name+"\n" if m.name else "")+m.body)) for k,methods in groups for m in methods if m.body.strip()}
+    except (ValueError,TypeError):return {("main",x) for x in matching.method_keys(row.get("solution",""))}
+
 def actual_counts(db,entries):
     counts=registration_counts();evaluations=set()
     for e in entries:
@@ -1134,7 +1143,7 @@ def actual_counts(db,entries):
         elif action=="update":counts["updated"]+=1
         else:counts[kind+"_reuse"]+=1
         if kind=="question" and action!="create":
-            counts["methods_added"]+=len(matching.method_keys(r["solution"])-matching.method_keys(old.get("solution","")))
+            counts["methods_added"]+=len(method_count_keys(r)-method_count_keys(old))
         if e.get("source_occurrence"):counts["source_occurrences"]+=1
         if kind=="question":
             resource=db.get(Resource,r["id"])
