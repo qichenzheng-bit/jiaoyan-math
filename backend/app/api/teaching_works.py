@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.security import current_user
-from app.models import User, TeachingWork, TeachingWorkVersion, TeachingWorkAsset, StoredFile
+from app.models import User, TeachingWork, TeachingWorkVersion, TeachingWorkAsset, TeachingWorkPendingCover, StoredFile
 from app.services import storage
 
 router = APIRouter(prefix="/teaching-works", tags=["teaching-works"], dependencies=[Depends(current_user)])
@@ -45,7 +45,8 @@ def detail(ident: str, db: Session = Depends(get_db), user: User = Depends(curre
         TeachingWorkVersion.work_id == work.id).order_by(TeachingWorkVersion.number.desc())))
     assets = list(db.execute(select(TeachingWorkAsset, StoredFile).join(
         StoredFile, StoredFile.id == TeachingWorkAsset.file_id).where(TeachingWorkAsset.work_id == work.id)))
-    return {**summary(work), "versions": [
+    pending = db.get(TeachingWorkPendingCover, work.id)
+    return {**summary(work), "pending_cover": {"filename":pending.filename,"created_at":pending.created_at} if pending else None, "versions": [
         {"number": v.number, "created_at": v.created_at, "files": [
             {"role": a.role, "filename": a.filename, "pages": a.pages,
              "size_bytes": f.size_bytes, "media_type": f.media_type}

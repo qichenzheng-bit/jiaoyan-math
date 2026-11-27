@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect, Index
+from sqlalchemy import ForeignKeyConstraint, BigInteger, Boolean, ForeignKey, Integer, String, Text, JSON, UniqueConstraint, CheckConstraint, event, inspect, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +27,8 @@ class Setting(Base):
 
 class StoredFile(Base):
     __tablename__ = "files"
+    work_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    work_retired_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255))
@@ -394,8 +396,6 @@ class TeachingWorkVersion(Base):
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 
-from sqlalchemy import ForeignKeyConstraint
-
 class TeachingWorkAsset(Base):
     __tablename__ = "teaching_work_assets"
     __table_args__ = (ForeignKeyConstraint(["work_id", "version"], ["teaching_work_versions.work_id", "teaching_work_versions.number"], ondelete="CASCADE"),)
@@ -405,3 +405,14 @@ class TeachingWorkAsset(Base):
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     pages: Mapped[int] = mapped_column(Integer)
+
+
+class TeachingWorkPendingCover(Base):
+    """A cover exported before the matching body; never replace an unrelated body."""
+    __tablename__ = "teaching_work_pending_covers"
+    work_id: Mapped[str] = mapped_column(ForeignKey("teaching_works.id", ondelete="CASCADE"), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[int] = mapped_column(BigInteger)
