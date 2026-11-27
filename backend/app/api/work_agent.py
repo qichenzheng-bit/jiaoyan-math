@@ -98,7 +98,11 @@ def workflow(db,s,r):
     if b.verified_text is not None:
         if out["goal"] in ("review","document"):return {**out,"stage":"organize","detail":"原文已核对，可以按计划继续AI整理"}
         return {**out,"stage":"recognized","detail":"本批识别及核对完成；等待新指令"}
-    if any(u.get("state")=="failed" for u in b.units):return {**out,"stage":"recognition_failed","detail":"部分页面识别失败，可继续本批"}
+    pending=next((u for u in b.units if u.get("state") in ("partial","failed") and "image_total" in u),None)
+    if pending:
+        out.update(image_unit=pending["unit"],image_total=pending["image_total"],image_completed=pending.get("image_completed",0),image_review=pending.get("image_review",0),image_current=pending.get("image_current"))
+    if any(u.get("state")=="failed" for u in b.units):return {**out,"stage":"recognition_failed","detail":"部分图片或原文识别失败，可继续本批"}
+    if pending:return {**out,"stage":"recognizing","detail":"正在逐张识别Word内嵌图片，已保存完成进度"}
     if count==out["total"]:return {**out,"stage":"verify","detail":"本批原文已提取，等待人工核对"}
     return {**out,"stage":"recognizing","detail":"本批尚未识别完成，可继续本批"}
 

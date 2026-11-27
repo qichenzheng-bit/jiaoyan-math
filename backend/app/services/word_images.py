@@ -8,7 +8,6 @@ from fastapi import HTTPException
 from app.services import material_import as imp
 
 MAX_IMAGE_BYTES=8*1024*1024
-MAX_IMAGES_PER_BLOCK=4
 R="{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 A="{http://schemas.openxmlformats.org/drawingml/2006/main}"
 V="{urn:schemas-microsoft-com:vml}"
@@ -45,14 +44,19 @@ def references(node):
     # Multiple representations of the same embedded image within one drawing.
     return list(dict.fromkeys(ids))
 
-def read_image(z,rels,rid):
+def image_info(z,rels,rid):
     name=rels.get(rid)
     if not name: raise HTTPException(422,"外部或缺失的Word图片引用")
     media=MEDIA.get(posixpath.splitext(name)[1].lower())
     if not media: raise HTTPException(415,"Word内嵌图片格式暂不支持（如EMF、WMF）")
+    try: info=z.getinfo(name)
+    except KeyError: raise HTTPException(422,"Word内嵌图片无法读取")
+    if not 0<info.file_size<=MAX_IMAGE_BYTES:raise HTTPException(422,"Word内嵌图片为空或超过8 MiB")
+    return media,info
+
+def read_image(z,rels,rid):
+    media,info=image_info(z,rels,rid)
     try:
-        info=z.getinfo(name)
-        if not 0<info.file_size<=MAX_IMAGE_BYTES:raise HTTPException(422,"Word内嵌图片为空或超过8 MiB")
         with z.open(info) as stream: raw=stream.read(MAX_IMAGE_BYTES+1)
     except (KeyError,OSError,zipfile.BadZipFile,RuntimeError):
         raise HTTPException(422,"Word内嵌图片无法读取")
@@ -60,8 +64,8 @@ def read_image(z,rels,rid):
     if not valid or len(raw)>MAX_IMAGE_BYTES:raise HTTPException(422,"Word内嵌图片内容与格式不符")
     return media,raw
 
-def block(path,unit,handler):
-    """Invoke handler for supported images of one stable logical block, in source order."""
+def scan(path,unit,handler):
+    """Enumerate all image references in order; read bytes only on explicit loader call."""
     messages=[]
     ordinal=0
     try:
@@ -76,20 +80,27 @@ def block(path,unit,handler):
                 parts=[]
                 for rid in refs:
                     ordinal+=1
-                    marker=f"[Word图片{ordinal}待核对]"
-                    if ordinal>MAX_IMAGES_PER_BLOCK:
-                        if ordinal==MAX_IMAGES_PER_BLOCK+1: messages.append("本段内嵌图片超过4张，剩余图片请核对原文件")
-                        parts.append(marker)
-                        continue
-                    try: media,raw=read_image(z,rels,rid)
+                    try: media,_=image_info(z,rels,rid)
                     except HTTPException as exc:
+                        media=None
                         messages.append(f"Word图片{ordinal}：{exc.detail}")
-                        parts.append(marker)
-                        continue
-                    parts.append(handler(ordinal,media,raw))
+                    parts.append(handler(ordinal,media,lambda rid=rid:read_image(z,rels,rid)))
                 return " ".join(parts)
             blocks,warnings=imp.docx_blocks(path,target_unit=unit,image_handler=drawing)
     except (OSError,zipfile.BadZipFile,RuntimeError):
         raise HTTPException(422,"Word文件或图片关系损坏")
     if not 1<=unit<=len(blocks):raise HTTPException(422,"Word段落超出文档范围")
-    return {"text":blocks[unit-1],"total_units":len(blocks),"warnings":[w for w in warnings if w!="图片或嵌入对象需查看原文件"]+messages}
+    return {"text":blocks[unit-1],"total_units":len(blocks),"image_total":ordinal,"warnings":[w for w in warnings if w!="图片或嵌入对象需查看原文件"]+messages}
+
+def block(path,unit,handler):
+    """Compatibility helper for callers explicitly reading every supported image."""
+    errors=[]
+    def load(index,media,loader):
+        try: media,raw=loader()
+        except HTTPException as exc:
+            errors.append(f"Word图片{index}：{exc.detail}")
+            return f"[Word图片{index}待核对]"
+        return handler(index,media,raw)
+    result=scan(path,unit,load)
+    result["warnings"]=list(dict.fromkeys(result["warnings"]+errors))
+    return result

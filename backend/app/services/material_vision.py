@@ -101,32 +101,63 @@ def recognize(file,page,model,effort=None):
         result["warnings"]=["AI视觉识别未成功，已使用本地OCR："+reason,*result.get("warnings",[])]
         return result
 
-def recognize_word(file,unit,model,effort=None):
-    """Preserve native Word text/OMML; transcribe only embedded images of the current block."""
-    warnings=[]
-    recognized=0
-    deadline=time.monotonic()+35
-    def handler(index,media,raw):
-        nonlocal recognized
+def local_word_image(media,raw):
+    suffix={"image/png":".png","image/jpeg":".jpg","image/webp":".webp","image/gif":".gif"}[media]
+    with tempfile.TemporaryDirectory(prefix="word-image-ocr-") as tmp:
+        path=Path(tmp)/("image"+suffix)
+        path.write_bytes(raw)
+        text=imp.ocr(path,False,1)
+    if not text.strip() or len(text)>imp.MAX_TEXT or "\x00" in text:
+        raise HTTPException(422,"本地OCR未返回有效原文")
+    return {"text":text,"method":"image_ocr","warnings":["本地OCR数学公式可能失真，必须对照原图"]}
+
+def word_step(file,unit,previous,model=None,effort=None,manual_review=False):
+    """At most one unresolved image per call; caller commits the checkpoint."""
+    records=dict(previous.get("image_results",{}))
+    attempted=False
+    current=None
+    error=None
+    def handler(index,media,loader):
+        nonlocal attempted,current,error
+        key=str(index)
         marker=f"[Word图片{index}待核对]"
-        remaining=deadline-time.monotonic()
-        if remaining<3:
-            warnings.append(f"Word图片{index}：本段视觉识别时间额度已用完，请核对原件")
+        saved=records.get(key,{})
+        if saved.get("state") in ("done","review"):
+            return saved["text"]
+        if current is None:current=index
+        if attempted:return marker
+        attempted=True
+        if manual_review:
+            if saved.get("state")!="failed":
+                raise HTTPException(409,"仅可将已失败图片明确标记为人工核对")
+            records[key]={"state":"review","text":marker,"method":"manual","warnings":[f"Word图片{index}已明确交由人工核对：{saved.get('error','识别失败')}"]}
+            current=None
             return marker
         try:
-            result=recognize_bytes(media,raw,model,effort,min(remaining-2,25))
+            media,raw=loader()
+            result=recognize_bytes(media,raw,model,effort,38) if model else local_word_image(media,raw)
+            if not result.get("text","").strip():raise HTTPException(422,"图片未返回有效正文")
+            records[key]={"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
+            current=None
+            return result["text"]
         except HTTPException as exc:
-            if exc.status_code==409 and not recognized: raise
-            warnings.append(f"Word图片{index}未成功识别：{str(exc.detail)[:120]}")
+            error=f"Word图片{index}：{str(exc.detail)[:300]}"
+            records[key]={"state":"failed","error":error}
             return marker
-        recognized+=1
-        return result["text"]
-    result=word_images.block(storage.file_path(file),unit,handler)
+    result=word_images.scan(storage.file_path(file),unit,handler)
+    total=result["image_total"]
+    completed=sum(r.get("state")=="done" for r in records.values())
+    review=sum(r.get("state")=="review" for r in records.values())
+    warnings=result["warnings"]
+    for key,r in records.items():
+        if r.get("state") in ("done","review"):
+            warnings.extend(r.get("warnings",[]))
+    state="failed" if error else "done" if completed+review==total else "partial"
     text=result["text"]
-    if not text.strip() or len(text)>imp.MAX_TEXT or "\x00" in text:
-        raise HTTPException(422,"Word单段正文为空或超过24000字")
-    result["method"]="docx_vision" if recognized else "docx"
-    result["warnings"]=result["warnings"]+warnings
-    if recognized:
-        result["warnings"].append(f"本段{recognized}张内嵌图片已由{model}视觉转录（平台可能自动路由），请逐项核对原图")
-    return result
+    if state=="done" and (not text.strip() or len(text)>imp.MAX_TEXT or "\x00" in text):
+        state="failed";error="Word单段正文为空或超过24000字，需拆分原始文档后重新识别"
+    method="docx_vision" if any(r.get("method")=="qoder_vision" for r in records.values()) else "docx_ocr" if any(r.get("method")=="image_ocr" for r in records.values()) else "docx"
+    return {"unit":unit,"state":state,"text":text if state=="done" else "",
+            "method":method,"warnings":list(dict.fromkeys(warnings)),"image_results":records,
+            "image_total":total,"image_completed":completed,"image_review":review,"image_current":current,
+            **({"error":error} if error else {})}
