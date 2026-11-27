@@ -630,6 +630,17 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert scored.json()["blocks"][0]["score"]==7.5
         bad_scores=client.put("/api/documents/"+paper["id"],headers=origin,json={**scored.json(),"blocks":[{**scored.json()["blocks"][0],"subquestion_scores":[1,2]},*scored.json()["blocks"][1:]]})
         assert bad_scores.status_code==422,bad_scores.text
+        base_paper=scored.json()
+        prior_answer=base_paper["blocks"][0]["snapshot"]["answer"]
+        edited_reference=client.put("/api/documents/"+paper["id"],headers=origin,json={**base_paper,"blocks":[{**base_paper["blocks"][0],"local_fields":["answer"],"answer":"仅本卷答案","hidden_fields":["solution"]},*base_paper["blocks"][1:]]})
+        assert edited_reference.status_code==200,edited_reference.text
+        changed=edited_reference.json()
+        assert changed["blocks"][0]["local_fields"]==["answer"] and changed["blocks"][0]["answer"]=="仅本卷答案"
+        assert changed["blocks"][0]["hidden_fields"]==["solution"]
+        assert changed["blocks"][0]["snapshot"]["answer"]==prior_answer
+        assert client.get("/api/resources/"+seed["id"]).json()["answer"]==prior_answer
+        assert client.put("/api/documents/"+paper["id"],headers=origin,json=base_paper).status_code==409
+        assert client.get("/api/documents/"+paper["id"]+"/export").json()["blocks"][0]["answer"]=="仅本卷答案"
         partial={**payload,"items":[payload["items"][1]],"request_id":"cart-partial-ci"}
         partial_result=client.post("/api/bank/cart/confirm",headers=origin,json=partial)
         assert partial_result.status_code==200,partial_result.text

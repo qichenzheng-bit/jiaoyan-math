@@ -387,6 +387,11 @@ def refresh_references(id:str,body:RefreshReferences,db:Session=Depends(get_db),
     references(db,doc);record_version(db,doc);finish_chapter_edit(db,parent);audit(db,"document.refresh_references",user.id);db.commit()
     return public(doc)
 
+COMPLETE_EXPORT_MAX_BYTES=200_000_000
+
+def check_complete_export_size(size:int):
+    if size>COMPLETE_EXPORT_MAX_BYTES:raise HTTPException(422,"完整资料预览超过 200 MB，请按章导出")
+
 @router.get("/{id}/export")
 def export_document(id:str,db:Session=Depends(get_db)):
     d=row(db,id)
@@ -401,7 +406,7 @@ def export_document(id:str,db:Session=Depends(get_db)):
             for b in public(c)["blocks"]:
                 blocks.append({**b,"uid":c.id+"-"+b["uid"]})
             size+=len(json.dumps(c.blocks,ensure_ascii=False).encode("utf-8"))
-            if size>200_000_000:raise HTTPException(422,"完整资料预览超过 200 MB，请按章导出")
+            check_complete_export_size(size)
         result["blocks"]=blocks
         return result
     return public(d)
