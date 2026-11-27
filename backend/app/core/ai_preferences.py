@@ -83,3 +83,13 @@ def work_context(db,user):
         if items or supplement:
             sections.append("【仅适用于"+scope+"工具】"+"\n".join([*items,supplement])[:4000])
     return base[:10000]+("\n"+"\n".join(sections))[:6000]
+
+
+def video_supplement(db,user):
+    specific=prompt(db,user,"video")
+    global_prompt=prompt(db,user,"global")
+    items=[i["text"] for i in memories(db,user)["items"] if i["enabled"] and i["scope"] in ("global","video")]
+    text="\n".join(v.strip() for v in [global_prompt["text"],specific["text"],*items] if v.strip())
+    if len(text)>16000 or len(text.encode())>32000 or "\x00" in text:
+        raise HTTPException(422,"视频教学补充要求过长，请精简配置")
+    return {"text":text,"revision":specific["revision"]}

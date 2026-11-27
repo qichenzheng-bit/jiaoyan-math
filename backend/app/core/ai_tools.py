@@ -225,11 +225,6 @@ class Tool:
             elif value.default is not inspect.Parameter.empty:
                 params[name] = value.default
         if self.name=="intake_text":params.update(model=model or "Auto",effort=effort or "default")
-        if self.name=="video_edit":
-            from app.core.ai_preferences import context
-            extra=context(db,user,"video")
-            if len(params["instruction"]+extra)>12000:raise HTTPException(422,"视频微调要求及补充提示词过长")
-            params["instruction"]+=extra
         # Model selection is controlled by the task, not by generated arguments.
         if self.name in ("video_generate", "video_edit"):
             if self.name == "video_generate":

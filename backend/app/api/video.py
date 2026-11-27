@@ -136,7 +136,7 @@ def detail(ident: str, db: Session = Depends(get_db)):
     return result
 
 @router.post("/projects/{ident}/{action}", dependencies=write)
-def produce(ident: str, action: Literal["generate","render"], body: InferenceOptions|None=None, db: Session = Depends(get_db)):
+def produce(ident: str, action: Literal["generate","render"], body: InferenceOptions|None=None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可修改")
@@ -144,18 +144,26 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
     if action=="generate":
         with production_model_lock:
             prepare_model(db,body.effort if body else None,body.model if body else None)
+            from app.core.ai_preferences import video_supplement
+            supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
+            if supplement["text"]:
+                return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",supplement)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})
     return engine.call("POST", f"/lessons/{rid}/{action}", {})
 
 @router.post("/projects/{ident}/edit/submit", dependencies=write)
-def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
+def edit(ident: str, body: Instruction, db: Session = Depends(get_db), user:User=Depends(current_user)):
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
+    from app.core.ai_preferences import video_supplement
+    extra=video_supplement(db,user)["text"] if isinstance(user,User) else ""
+    instruction=body.instruction+("\n\n【教学补充要求；当前微调指令优先】\n"+extra if extra else "")
+    if len(instruction)>12000:raise HTTPException(422,"微调要求及教学补充内容过长")
     with production_model_lock:
         prepare_model(db,body.effort,body.model)
-        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})
+        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})
 
 @router.get("/projects/{ident}/edits/history")
 def history(ident: str, db: Session = Depends(get_db)):

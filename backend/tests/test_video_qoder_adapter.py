@@ -37,3 +37,17 @@ def test_cancel_propagates(monkeypatch):
     monkeypatch.setattr(adapter,"request",request)
     assert adapter.chat_cli("qoder_cli","","Auto",prompt="test")["status"]=="cancelled"
     assert calls[-1][1].endswith("/cancel")
+
+
+def test_supplement_preserves_base_prompt(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(adapter,"job_supplement",lambda:"逐步书写")
+    monkeypatch.setattr(adapter,"cancelled",lambda _:False)
+    def request(method,path,data=None):
+        calls.append(data)
+        return 200,{"state":"done","answer":"code"}
+    monkeypatch.setattr(adapter,"request",request)
+    result=adapter.chat_cli("qoder_cli","socket","Auto",prompt="固定教学内容")
+    assert result["status"]=="ok"
+    assert calls[0]["prompt"].startswith("固定教学内容")
+    assert "逐步书写" in calls[0]["prompt"] and "固定教学规范" in calls[0]["prompt"]
