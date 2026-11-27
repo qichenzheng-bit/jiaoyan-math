@@ -4,14 +4,15 @@ export type Layout={
  top:number;bottom:number;left:number;right:number;columns:1|2|3;gap:number;
  font:'serif'|'sans';size:number;lineHeight:number;paragraphGap:number;
  keepQuestions:boolean;originalNumbers:boolean;answerSpace:number;header:string;footer:string;
+ toc:boolean;tocDepth:1|2|3|4|5|6;chapterNewPage:boolean;mirrorMargins:boolean;titleSize:number;headingSize:number;
 }
-export const defaults:Layout={paper:'A4',width:210,height:297,landscape:false,top:20,bottom:20,left:20,right:20,columns:1,gap:8,font:'serif',size:10.5,lineHeight:1.5,paragraphGap:6,keepQuestions:true,originalNumbers:false,answerSpace:0,header:'',footer:''}
+export const defaults:Layout={paper:'A4',width:210,height:297,landscape:false,top:20,bottom:20,left:20,right:20,columns:1,gap:8,font:'serif',size:10.5,lineHeight:1.5,paragraphGap:6,keepQuestions:true,originalNumbers:false,answerSpace:0,header:'',footer:'第 {{当前页码}} 页，共 {{总页数}} 页',toc:false,tocDepth:2,chapterNewPage:false,mirrorMargins:false,titleSize:18,headingSize:14}
 export type LayoutTemplate={id:string;name:string;kind:'paper'|'handout'|'textbook'|'all';layout:Layout}
 export const builtins:LayoutTemplate[]=[
  {id:'paper',name:'标准试卷',kind:'paper',layout:{...defaults}},
  {id:'paper-double',name:'双栏试卷',kind:'paper',layout:{...defaults,columns:2}},
  {id:'handout',name:'简约讲义',kind:'handout',layout:{...defaults}},
- {id:'textbook',name:'传统教材',kind:'textbook',layout:{...defaults,paper:'B5',left:23,right:18,header:'{{文档名称}}'}},
+ {id:'textbook',name:'传统教材',kind:'textbook',layout:{...defaults,paper:'B5',left:23,right:18,header:'{{文档名称}}',toc:true,chapterNewPage:true,mirrorMargins:true}},
  {id:'general',name:'通用黑白文档',kind:'all',layout:{...defaults}}
 ]
 const sizes={A4:[210,297],A3:[297,420],A5:[148,210],B5:[176,250],A6:[105,148]}
@@ -31,7 +32,7 @@ export function sanitizeLayout(value:unknown):Layout{
  const str=(key:keyof Layout)=>typeof v[key]==='string'?(v[key] as string).slice(0,200):''
  const paper=['A4','A3','A5','B5','A6','custom'].includes(String(v.paper))?v.paper as Layout['paper']:'A4'
  const columns=[1,2,3].includes(Number(v.columns))?Number(v.columns) as Layout['columns']:1
- return {paper,width:num('width',50,1000),height:num('height',50,1000),landscape:bool('landscape'),top:num('top',0,100),bottom:num('bottom',0,100),left:num('left',0,100),right:num('right',0,100),columns,gap:num('gap',3,30),font:v.font==='sans'?'sans':'serif',size:num('size',6,36),lineHeight:num('lineHeight',1,3),paragraphGap:num('paragraphGap',0,50),keepQuestions:bool('keepQuestions'),originalNumbers:bool('originalNumbers'),answerSpace:num('answerSpace',0,180),header:str('header'),footer:str('footer')}
+ return {paper,width:num('width',50,1000),height:num('height',50,1000),landscape:bool('landscape'),top:num('top',0,100),bottom:num('bottom',0,100),left:num('left',0,100),right:num('right',0,100),columns,gap:num('gap',3,30),font:v.font==='sans'?'sans':'serif',size:num('size',6,36),lineHeight:num('lineHeight',1,3),paragraphGap:num('paragraphGap',0,50),keepQuestions:bool('keepQuestions'),originalNumbers:bool('originalNumbers'),answerSpace:num('answerSpace',0,180),header:typeof v.header==='string'?str('header'):defaults.header,footer:typeof v.footer==='string'?str('footer'):defaults.footer,toc:bool('toc'),tocDepth:Math.round(num('tocDepth',1,6)) as Layout['tocDepth'],chapterNewPage:bool('chapterNewPage'),mirrorMargins:bool('mirrorMargins'),titleSize:num('titleSize',8,36),headingSize:num('headingSize',8,36)}
 }
 export function readLocal<T>(key:string,fallback:T):T{
  try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw) as T:fallback}catch{return fallback}
