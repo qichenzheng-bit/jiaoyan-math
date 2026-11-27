@@ -1,5 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointerEvent,type CSSProperties} from 'react'
 import {api} from '../auth'
+import {useSearchParams} from 'react-router-dom'
 import {Icon} from '../components/Icon'
 import {MathText} from '../components/MathText'
 import {WorkspaceLink as Link,useWorkspaceGuard} from '../components/WorkspaceNavigation'
@@ -43,6 +44,7 @@ function reposition(d:Design,w:number,h:number,format:string):Design{
  return {...d,width:w,height:h,format,layers:d.layers.map(l=>({...l,x:Math.round(l.x*sx),y:Math.round(l.y*sy),w:Math.max(1,Math.round(l.w*sx)),h:Math.max(1,Math.round(l.h*sy)),font:Math.max(8,Math.round(l.font*s))}))}
 }
 export default function Cover(){
+ const [params]=useSearchParams(),draftId=params.get('draft')
  const [design,setDesign]=useState<Design>(blank),[past,setPast]=useState<Design[]>([]),[future,setFuture]=useState<Design[]>([]),[selected,setSelected]=useState(''),[panel,setPanel]=useState<'add'|'layers'|'properties'|'questions'|'canvas'|'library'>('add'),[presets,setPresets]=useState<Presets>({}),[scale,setScale]=useState(.25),[zoom,setZoom]=useState(100),[guides,setGuides]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[saved,setSaved]=useState(''),[search,setSearch]=useState(''),[questions,setQuestions]=useState<Resource[]>([]),[page,setPage]=useState(0),[total,setTotal]=useState(0),[loading,setLoading]=useState(false)
  const [record,setRecord]=useState<StudioRow>(),[templates,setTemplates]=useState<StudioRow[]>([]),[works,setWorks]=useState<StudioRow[]>([]),[libraryTab,setLibraryTab]=useState<'templates'|'works'>('templates'),[libraryPage,setLibraryPage]=useState(0),[libraryTotal,setLibraryTotal]=useState(0),[libraryVersion,setLibraryVersion]=useState(0),[libraryQuery,setLibraryQuery]=useState(''),[libraryBusy,setLibraryBusy]=useState(false)
  const [multi,setMulti]=useState(false),[extra,setExtra]=useState<string[]>([]),[drawer,setDrawer]=useState<'add'|'layers'|'inspector'|null>(null),[snapLines,setSnapLines]=useState<{x?:number;y?:number}>({}),[snapEnabled,setSnapEnabled]=useState(true)
@@ -55,6 +57,7 @@ export default function Cover(){
  const selectedIds=new Set([selected,...extra].filter(Boolean)),selection=design.layers.filter(l=>selectedIds.has(l.id)),movable=selection.filter(l=>!l.locked&&!l.hidden),allEditable=selection.length>0&&movable.length===selection.length
  const active=design.layers.find(l=>l.id===selected),dirty=JSON.stringify(design)!==(saved||JSON.stringify(blank()))
  useWorkspaceGuard({busy,dirty,message:'封面尚未保存，确定离开吗？'})
+ useEffect(()=>{if(!draftId)return;const c=new AbortController();setBusy(true);api<StudioRow>('/ai-settings/cover-drafts/'+encodeURIComponent(draftId),{signal:c.signal}).then(row=>{if(c.signal.aborted)return;const next=readDesign(row);if(!next)throw Error('草稿格式无效');setDesign(next);setRecord(row);setSaved(row.data.file_id?JSON.stringify(next):'');setPast([]);setFuture([]);setSelected('');setExtra([]);setPanel('properties');setMessage('已打开 AI 封面草稿，检查排版后保存或导出')}).catch(e=>{if(!c.signal.aborted)setMessage(e.message)}).finally(()=>{if(!c.signal.aborted)setBusy(false)});return()=>c.abort()},[draftId])
  useEffect(()=>{const c=new AbortController();api<Presets>('/studio/presets',{signal:c.signal}).then(setPresets).catch(e=>{if(!c.signal.aborted)setMessage(e.message)});return()=>c.abort()},[])
  useEffect(()=>{if(panel!=='questions')return;const c=new AbortController();setLoading(true);const timer=window.setTimeout(()=>api<{items:Resource[];total:number}>('/resources?'+new URLSearchParams({kind:'question',archived:'false',q:search,limit:'12',offset:String(page*12)}),{signal:c.signal}).then(r=>{if(!c.signal.aborted){setQuestions(r.items);setTotal(r.total)}}).catch(e=>{if(!c.signal.aborted)setMessage(e.message)}).finally(()=>{if(!c.signal.aborted)setLoading(false)}),180);return()=>{window.clearTimeout(timer);c.abort()}},[panel,search,page])
  useEffect(()=>{if(panel!=='library')return;const controller=new AbortController();setLibraryBusy(true)

@@ -705,6 +705,8 @@ def ai_edit_start(id:str,body:AiEditStart,db:Session=Depends(get_db),user:User=D
         "只输出JSON数组，每项恰好为uid、field、value三个键，value是修改后完整字段字符串，正确转义反斜线。"
         "每字段最多一项，无需修改则输出空数组。不得返回未授权字段或块。"
         "\n学科："+d.subject+"\n允许字段："+json.dumps(body.fields)+"\n用户指令："+body.instruction+"\n【文档块数据】\n"+json.dumps(data,ensure_ascii=False)+"\n【数据结束】")
+    from app.core.ai_preferences import context as ai_context
+    prompt+=ai_context(db,user,"document")
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"所选内容过长，请缩小范围")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"Qoder执行服务未就绪")
     model=qoder.model_preference(db)["model"]

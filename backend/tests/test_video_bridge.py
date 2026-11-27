@@ -82,3 +82,16 @@ def test_video_snapshot_uses_only_recommended_method():
     from app.core.solution_methods import format_methods
     r=SimpleNamespace(title="极限",content="求极限",solution=format_methods([{"body":"方法甲","recommended":False},{"body":"方法乙","recommended":True}]),answer="0",subject="高等数学",chapter="",exam_type="",question_type="综合题",analysis="",tags=[],question_data=None)
     assert snapshot(r)["reference_solution"]=="方法乙"
+
+def test_generation_follows_actual_render(monkeypatch):
+    from app.api import video
+    row=SimpleNamespace(engine_id="a"*32)
+    monkeypatch.setattr(video,"row_for",lambda db,ident:row)
+    jobs=[
+        {"id":"b"*32,"lesson_id":row.engine_id,"kind":"render","expected_revision":3,"created_at":"2026-11-27T10:00:01","status":"running"},
+        {"id":"c"*32,"lesson_id":row.engine_id,"kind":"render","expected_revision":3,"created_at":"2026-11-27T09:00:00","status":"succeeded"},
+        {"id":"d"*32,"lesson_id":row.engine_id,"kind":"render","expected_revision":2,"created_at":"2026-11-27T10:00:02","status":"succeeded"},
+    ]
+    monkeypatch.setattr(video.engine,"call",lambda method,path:jobs if path.startswith("/jobs?") else next(j for j in jobs if path.endswith(j["id"])))
+    job=video.followup_render("local",{"created_at":"2026-11-27T10:00:00","expected_revision":3},None)
+    assert job["id"]=="b"*32 and job["status"]=="running"

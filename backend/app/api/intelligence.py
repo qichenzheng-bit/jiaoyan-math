@@ -148,6 +148,8 @@ def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     if provenance.get("kind")=="chat_assistant":prompt+="\n来源是AI生成回复，不是原始文献；只能整理为待核对草稿。"
     if provenance.get("kind")=="file_import" and provenance.get("warnings"):
         prompt+="\n文件提取可能失真。保留不确定标记，不自行还原缺失公式、图形或答案。所有结果待人工对照原件。"
+    from app.core.ai_preferences import context as ai_context
+    prompt+=ai_context(db,user,"intake")
     if len(prompt.encode("utf-8"))>100000:raise HTTPException(422,"原文过长")
     if not qoder.request("GET","/status").get("chat_available"):raise HTTPException(503,"独立Qoder执行服务需升级至V3")
     effort_args=qoder.assistant_effort(db,body.model,body.effort)

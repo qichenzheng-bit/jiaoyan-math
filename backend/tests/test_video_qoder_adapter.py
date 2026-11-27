@@ -37,3 +37,40 @@ def test_cancel_propagates(monkeypatch):
     monkeypatch.setattr(adapter,"request",request)
     assert adapter.chat_cli("qoder_cli","","Auto",prompt="test")["status"]=="cancelled"
     assert calls[-1][1].endswith("/cancel")
+
+
+def test_supplement_preserves_base_prompt(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(adapter,"job_supplement",lambda:"逐步书写")
+    monkeypatch.setattr(adapter,"cancelled",lambda _:False)
+    def request(method,path,data=None):
+        calls.append(data)
+        return 200,{"state":"done","answer":"code"}
+    monkeypatch.setattr(adapter,"request",request)
+    result=adapter.chat_cli("qoder_cli","socket","Auto",prompt="固定教学内容")
+    assert result["status"]=="ok"
+    assert calls[0]["prompt"].startswith("固定教学内容")
+    assert "逐步书写" in calls[0]["prompt"] and "固定教学规范" in calls[0]["prompt"]
+
+def test_prompt_route_requires_token_and_preserves_task_context(monkeypatch):
+    from fastapi import APIRouter,FastAPI
+    from fastapi.testclient import TestClient
+    router=APIRouter()
+    seen=[]
+    @router.post("/lessons/{id}/generate")
+    def generate(id:str):
+        seen.append((id,adapter._job_prompt.get()))
+        return {"id":id,"status":"queued"}
+    app=FastAPI()
+    app.include_router(adapter.add_prompt_routes(router),prefix="/api/v1")
+    monkeypatch.setenv("WEIGUANG_API_TOKEN","test-only")
+    with TestClient(app) as client:
+        url="/api/v1/jiaoyan/lessons/test/generate"
+        body={"text":"逐步推导","revision":2}
+        assert client.post(url,json=body).status_code==403
+        assert not seen
+        response=client.post(url,json=body,headers={"X-API-Key":"test-only"})
+        assert response.status_code==202,response.text
+        assert seen==[("test",body)]
+        assert adapter._job_prompt.get() is None
+        assert client.get("/api/v1/jiaoyan/prompt-capability",headers={"X-API-Key":"test-only"}).json()["snapshot"]=="job"

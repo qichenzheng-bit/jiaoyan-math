@@ -28,11 +28,14 @@ from app.api.teaching_works import router as teaching_works_router
 from app.api.video import router as video_router
 from app.api.qiandao import router as qiandao_router, scheduler as qiandao_scheduler
 
+from app.core.ai_work import work_loop
+from app.api.ai_settings import router as ai_settings_router
+
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop()), asyncio.create_task(pdf_maintenance_loop())]
+    tasks = [asyncio.create_task(model_refresh_loop()), asyncio.create_task(qiandao_scheduler()), asyncio.create_task(recommendation_loop()), asyncio.create_task(pdf_maintenance_loop()), asyncio.create_task(work_loop())]
     try:
         yield
     finally:
@@ -46,6 +49,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.version,
                   docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.include_router(system_router, prefix="/api")
+    app.include_router(ai_settings_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")

@@ -136,30 +136,67 @@ def detail(ident: str, db: Session = Depends(get_db)):
     return result
 
 @router.post("/projects/{ident}/{action}", dependencies=write)
-def produce(ident: str, action: Literal["generate","render"], body: InferenceOptions|None=None, db: Session = Depends(get_db)):
+def produce(ident: str, action: Literal["generate","render"], body: InferenceOptions|None=None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可修改")
     rid=remote(row)
     if action=="generate":
         with production_model_lock:
+            from app.core.ai_preferences import video_supplement
+            supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
+            if supplement["text"]:
+                try:
+                    supported=engine.call("GET","/jiaoyan/prompt-capability")
+                except HTTPException as e:
+                    if e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
+                    raise
+                if not supported.get("supported") or supported.get("snapshot")!="job":raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
             prepare_model(db,body.effort if body else None,body.model if body else None)
+            if supplement["text"]:
+                return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",supplement)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})
     return engine.call("POST", f"/lessons/{rid}/{action}", {})
 
 @router.post("/projects/{ident}/edit/submit", dependencies=write)
-def edit(ident: str, body: Instruction, db: Session = Depends(get_db)):
+def edit(ident: str, body: Instruction, db: Session = Depends(get_db), user:User=Depends(current_user)):
     row = row_for(db, ident)
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
+    from app.core.ai_preferences import video_supplement
+    extra=video_supplement(db,user)["text"] if isinstance(user,User) else ""
+    instruction=body.instruction+("\n\n【教学补充要求；当前微调指令优先】\n"+extra if extra else "")
+    if len(instruction)>12000:raise HTTPException(422,"微调要求及教学补充内容过长")
     with production_model_lock:
         prepare_model(db,body.effort,body.model)
-        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":body.instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})
+        return engine.call("POST", f"/videos/{rid}/edits", {"instruction":instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})
 
 @router.get("/projects/{ident}/edits/history")
 def history(ident: str, db: Session = Depends(get_db)):
     return engine.call("GET", f"/videos/{remote(row_for(db,ident))}/edits/history")
+
+def followup_render(ident:str,generation:dict,db):
+    """Generation succeeds before its automatically enqueued render completes."""
+    rid=remote(row_for(db,ident))
+    started=generation.get("created_at")
+    revision=generation.get("expected_revision")
+    if not isinstance(started,str) or revision is None:
+        raise HTTPException(502,"引擎未返回生成任务的版本或时间")
+    jobs=engine.call("GET",f"/jobs?lesson_id={rid}&limit=200")
+    if not isinstance(jobs,list):raise HTTPException(502,"引擎任务列表无效")
+    candidates=[j for j in jobs if isinstance(j,dict) and j.get("lesson_id")==rid and j.get("kind")=="render"
+        and j.get("expected_revision")==revision and isinstance(j.get("created_at"),str) and j["created_at"]>=started]
+    if not candidates:raise HTTPException(502,"生成已结束但未找到对应渲染任务")
+    first=min(candidates,key=lambda j:(j["created_at"],j.get("id","")))
+    return job_read(ident,first.get("id"),db)
+
+def job_read(ident:str,job_id:str,db:Session=Depends(get_db)):
+    row=row_for(db,ident)
+    job=engine.call("GET",f"/jobs/{engine.engine_id(job_id)}")
+    if not isinstance(job,dict) or job.get("lesson_id")!=remote(row):
+        raise HTTPException(404,"任务不属于当前视频项目")
+    return {k:job.get(k) for k in ("id","lesson_id","kind","status","phase","overall","error","expected_revision","created_at")}
 
 @router.get("/projects/{ident}/code")
 def code(ident: str, db: Session = Depends(get_db)):
