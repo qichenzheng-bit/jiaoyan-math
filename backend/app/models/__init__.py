@@ -375,7 +375,8 @@ class TeachingWork(Base):
         Index("ix_teaching_works_user_updated", "user_id", "updated_at", "id"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    # Single administrator id is recreated as 1 on credential-free backup restore.
+    user_id: Mapped[int] = mapped_column(Integer)
     origin_scope: Mapped[str] = mapped_column(String(16))
     origin_id: Mapped[str] = mapped_column(String(36))
     variant: Mapped[str] = mapped_column(String(64))

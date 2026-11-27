@@ -138,6 +138,8 @@ def link_file(db: Session, file_id: str, owner_type: str, owner_id: str):
     item = db.scalar(select(StoredFile).where(StoredFile.id == file_id).with_for_update())
     if item is None or item.archived or item.purged_at is not None:
         raise HTTPException(404, "文件不存在或已归档")
+    # A new reference cancels a pending retirement before its grace period expires.
+    item.work_retired_at = None
     key = (file_id, owner_type, owner_id)
     if db.get(FileReference, key) is None:
         db.add(FileReference(file_id=file_id, owner_type=owner_type, owner_id=owner_id))

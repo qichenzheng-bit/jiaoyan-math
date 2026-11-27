@@ -12,7 +12,7 @@ def upgrade():
     op.create_table(
         "teaching_works",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("origin_scope", sa.String(16), nullable=False),
         sa.Column("origin_id", sa.String(36), nullable=False),
         sa.Column("variant", sa.String(64), nullable=False),

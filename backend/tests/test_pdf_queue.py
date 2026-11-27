@@ -42,3 +42,27 @@ def test_pdf_queue_restarts_from_private_manifest(tmp_path,monkeypatch):
         finally:
             queue.queue_lock.close()
             queue.queue_lock=None
+
+
+def test_ready_pdf_registration_failure_preserves_download(tmp_path, monkeypatch):
+    import json
+    from contextlib import contextmanager
+    job = queue.Job("job", 1, "doc", "book", "test.pdf", tmp_path, {})
+    job.payload.write_text(json.dumps({"doc":{"title":"教材","blocks":[]},"layout":{}}))
+    def render(payload, images, output, stage, cancelled):
+        output.write_bytes(b"%PDF-1.7\n")
+        return {"pages":1,"bytes":output.stat().st_size}
+    class DB:
+        def commit(self): pass
+    @contextmanager
+    def session():
+        yield DB()
+    monkeypatch.setattr(queue, "render_pdf", render)
+    monkeypatch.setattr(queue, "session_factory", lambda:session)
+    def fail(*args, **kwargs):
+        raise RuntimeError("registration failed")
+    monkeypatch.setattr(queue.teaching_works,"register_pdf",fail)
+    queue.run(job)
+    assert job.state == "ready"
+    assert job.work_id is None and job.work_error
+    assert job.output.exists()
