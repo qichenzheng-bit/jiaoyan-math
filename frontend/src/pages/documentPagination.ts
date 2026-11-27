@@ -123,6 +123,31 @@ export async function paginateDocument(source:HTMLElement,target:HTMLElement,lay
   tocSheets.forEach(p=>{p.sheet.querySelectorAll<HTMLElement>('.layout-toc-number').forEach(n=>{n.textContent=String(Number(n.dataset.page)+count)});target.insertBefore(p.sheet,before[0].sheet);p.chapter='目录'})
   sheets.splice(0,sheets.length,...tocSheets,...before)
  }
+ if(layout.knowledgeIndex&&!error){
+  const index=new Map<string,{label:HTMLElement;locations:{page:number;id:string}[]}>()
+  for(const item of target.querySelectorAll<HTMLElement>('.layout-sheet [data-layout-knowledge]')){
+   const name=item.dataset.layoutKnowledge??'',label=item.querySelector<HTMLElement>('.layout-index-label'),sheet=item.closest('.layout-sheet')
+   if(!name||!label||!sheet||!item.id)continue
+   const page=sheets.findIndex(p=>p.sheet===sheet)+1
+   if(page<1)continue
+   let row=index.get(name)
+   if(!row){row={label,locations:[]};index.set(name,row)}
+   if(!row.locations.some(x=>x.page===page))row.locations.push({page,id:item.id})
+  }
+  if(index.size){
+   let idx=addPage(false,true),dest=sheets[idx].columns[0]
+   sheets[idx].chapter='知识点索引'
+   dest.append(el('h1','layout-toc-title','知识点索引'))
+   for(const [,entry] of Array.from(index.entries()).sort((a,b)=>a[0].localeCompare(b[0],'zh-CN'))){
+    const row=el('div','layout-toc-row'),name=copy(entry.label)
+    name.hidden=false;name.className='layout-toc-link'
+    const nums=el('span','layout-index-pages')
+    entry.locations.forEach((loc,i)=>{if(i)nums.append(document.createTextNode('、'));const link=el('a','layout-index-page',String(loc.page)) as HTMLAnchorElement;link.href='#'+loc.id;link.dataset.page=String(loc.page);nums.append(link)})
+    row.append(name,el('span','layout-toc-dots'),nums);dest.append(row)
+    if(overflow(dest)){row.remove();idx=addPage(false,true);dest=sheets[idx].columns[0];sheets[idx].chapter='知识点索引';dest.append(row);if(overflow(dest)){error='知识点索引条目超过页面宽度或高度，请调整排版。';break}}
+   }
+  }
+ }
  const total=sheets.length
  sheets.forEach((p,i)=>{
   p.sheet.dataset.page=String(i+1)
