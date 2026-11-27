@@ -322,7 +322,8 @@ class VideoProject(Base):
     engine_id: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True)
     work_id: Mapped[str | None] = mapped_column(ForeignKey("studio_items.id", ondelete="RESTRICT"), nullable=True, unique=True)
     created_at: Mapped[int] = mapped_column(BigInteger)
-    __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),)
+    __table_args__ = (UniqueConstraint("resource_id", "resource_revision", name="uq_video_resource_revision"),
+                      Index("ix_video_work_facets", "work_facets", postgresql_using="gin"))
 
 # Persistent AI work sessions; legacy intake jobs remain independent.
 class WorkSession(Base):
@@ -391,6 +392,7 @@ class TeachingWork(Base):
 
 class TeachingWorkVersion(Base):
     __tablename__ = "teaching_work_versions"
+    __table_args__ = (Index("ix_work_version_facets", "facets", postgresql_using="gin"),)
     facets: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), default=dict, server_default="{}")
     work_id: Mapped[str] = mapped_column(ForeignKey("teaching_works.id", ondelete="CASCADE"), primary_key=True)
     number: Mapped[int] = mapped_column(Integer, primary_key=True)

@@ -52,6 +52,7 @@ def answer(route):
         rows=[finished_demo] if (not q.get("kind") or q["kind"][0]=="handout") and (not q.get("q") or q["q"][0] in finished_demo["title"]) else []
         result={"items":rows,"total":len(rows)}
     if p=="/teaching-works/subjects":result=["高等数学"]
+    if p=="/teaching-works/handoffs/list":result=[]
     if p=="/teaching-works/work-preview":result={**finished_demo,"versions":[finished_version,{**finished_version,"number":1}],"pending_cover":None}
     if p=="/teaching-works/work-preview/versions/2/questions":
         result={"items":[{"uid":"q1","title":items[0]["title"],"content":items[0]["content"],"answer":items[0]["answer"],"solution":items[0]["solution"],"chapter":"极限"}],"total":1,"question_count":1,"knowledge_points":["重要极限"],"knowledge_tags":["微积分"],"source_count":1,"partial_pages":False}
@@ -1462,10 +1463,10 @@ with sync_playwright() as p:
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             visit(page,"/works",".finished-list")
             expect(page.locator(".finished-open")).to_have_count(1)
-            page.get_by_role("button",name="筛选",exact=False).click()
+            page.locator(".finished-search").get_by_role("button",name="筛选",exact=True).click()
             expect(page.get_by_label("知识点",exact=True)).to_be_visible()
             expect(page.get_by_label("知识标签",exact=True)).to_be_visible()
-            page.get_by_role("button",name="筛选",exact=False).click()
+            page.locator(".finished-search").get_by_role("button",name="筛选",exact=True).click()
             page.locator(".finished-open").first.click()
             expect(page.locator(".finished-files")).to_be_visible()
             page.get_by_role("button",name="预览",exact=True).click()
