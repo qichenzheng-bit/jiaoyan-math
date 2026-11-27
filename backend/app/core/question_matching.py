@@ -28,6 +28,19 @@ def classify(content,answer,solution,r):
     conflict=answer_conflict(answer,r.answer)
     new=bool(method_keys(solution)-method_keys(r.solution))
     if equal:
+        from app.core.question_structure import resolve
+        qt=getattr(r,"question_type","")
+        old=resolve(r.content,r.answer,r.solution,qt,getattr(r,"question_data",None))
+        incoming=resolve(content,answer,solution,qt)
+        if not old.warnings and not incoming.warnings:
+            if old.subquestions and len(old.subquestions)==len(incoming.subquestions):
+                conflict=any(answer_conflict(a.answer,b.answer) for a,b in zip(old.subquestions,incoming.subquestions))
+                new=new or any(b.answer and not a.answer for a,b in zip(old.subquestions,incoming.subquestions))
+            elif old.blanks and len(old.blanks)==len(incoming.blanks):
+                conflict=any(answer_conflict(a.answer,b.answer) for a,b in zip(old.blanks,incoming.blanks))
+                new=new or any(b.answer and not a.answer for a,b in zip(old.blanks,incoming.blanks))
+        new=new or bool(answer.strip() and not r.answer.strip())
+    if equal:
         category="answer_conflict" if conflict else "new_method" if new else "same_question"
         return category, ("题干一致，答案存在差异，请核对" if conflict else "题干一致，存在新增解法" if new else "题干一致，无新增解法"),not conflict and not r.archived,new
     if question_stem_key(content)==r.stem_key:

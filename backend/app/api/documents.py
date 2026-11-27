@@ -570,14 +570,17 @@ def append_methods(old,new):
 def validate_append(r,b,subject):
     if r.archived or r.kind!="question" or b["kind"]!="question" or not matching.same_question(r.content,b["content"]):
         raise HTTPException(422,"只有题干完全一致的有效题目才能追加解法")
-    if matching.answer_conflict(r.answer,b.get("answer","")):raise HTTPException(422,"答案存在冲突，请先核对")
     if r.subject!=normalize_subject(subject):raise HTTPException(422,"科目不同，请先核对")
     old=resolve(r.content,r.answer,r.solution,r.question_type,r.question_data)
     new=resolve(b["content"],b.get("answer",""),b.get("solution",""),b.get("question_type",""),b.get("question_data"))
     if old.warnings or new.warnings:raise HTTPException(422,"题目结构存在歧义，请先核对小问和答案")
     if old.subquestions or new.subquestions:
-        if len(old.subquestions)!=len(new.subquestions) or any(x.content!=y.content or matching.answer_conflict(x.answer,y.answer) for x,y in zip(old.subquestions,new.subquestions)):
+        if len(old.subquestions)!=len(new.subquestions) or any(x.number!=y.number or x.content!=y.content or matching.answer_conflict(x.answer,y.answer) for x,y in zip(old.subquestions,new.subquestions)):
             raise HTTPException(422,"小问内容或答案不一致，请核对")
+    elif old.blanks or new.blanks:
+        if len(old.blanks)!=len(new.blanks) or any(x.number!=y.number or matching.answer_conflict(x.answer,y.answer) for x,y in zip(old.blanks,new.blanks)):
+            raise HTTPException(422,"填空答案存在冲突，请核对")
+    elif matching.answer_conflict(r.answer,b.get("answer","")):raise HTTPException(422,"答案存在冲突，请先核对")
     return old,new
 
 def merge_question_methods(r,b,subject):
@@ -604,7 +607,7 @@ def merge_question_methods(r,b,subject):
             merged=merged.model_copy(update={"correct_options":new.correct_options})
     projected=project(merged)
     # Keep the existing exact question stem; source-specific layout is not overwritten.
-    answer=r.answer or projected["answer"]
+    answer=projected["answer"] if old.subquestions or old.blanks else r.answer or projected["answer"]
     solution=projected["solution"]
     if len(solution)>50000:raise HTTPException(422,"合并后解析过长")
     if solution==r.solution and answer==r.answer:return False
@@ -683,7 +686,7 @@ def registration_commit(id:str,body:CommitBatch,db:Session=Depends(get_db),user:
             if r.archived or r.kind!=b["kind"] or r.revision!=decision.resource_revision:raise HTTPException(409,"候选资源已变化，请重新审核")
             if r.kind=="question":
                 if not matching.same_question(r.content,b["content"]):raise HTTPException(422,"相似题不能合并")
-                if matching.answer_conflict(r.answer,b["answer"]):raise HTTPException(422,"答案冲突，请先核对")
+                if decision.action=="reuse" and r.answer!=b["answer"] and b["answer"].strip():raise HTTPException(422,"答案有新增或冲突，请先核对并选择补充")
                 if decision.action=="reuse" and matching.method_keys(b["solution"])-matching.method_keys(r.solution):
                     raise HTTPException(422,"存在新解法，请选择追加解法")
             elif match_kind(r,values)=="similar":raise HTTPException(422,"相似知识单元不能合并")
@@ -850,9 +853,9 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
         if peer is not None:
             r=peer;before=bank.view(r)
             if r.id in prior and original_revisions.setdefault(r.id,r.revision)!=prior[r.id]["revision"]:raise HTTPException(409,"前批次原题已修改，请重新审核")
-            if r.subject!=item_subject or matching.answer_conflict(r.answer,b["answer"]):raise HTTPException(422,"本批次同题的答案或科目冲突，请核对")
             changed=False
-            if matching.method_keys(b["solution"])-matching.method_keys(r.solution) or not r.answer.strip() and b["answer"].strip():
+            if r.subject!=item_subject:raise HTTPException(422,"本批次同题的科目冲突，请核对")
+            if r.answer!=b["answer"] or r.solution!=b["solution"]:
                 changed=merge_question_methods(r,b,item_subject)
                 if changed:evaluate[r.id]=r
             changed=attach_review_source(db,r,primary,source_occurrence(db,d,b,primary)) or changed
@@ -1011,9 +1014,14 @@ def manual_review_data(db,d,only_uid=None):
             r=db.get(Resource,b.get("resource_id"))
             if not r or r.archived or r.revision!=b.get("edit_reference_revision"):errors.append("原资源版本已变化，请重新审核")
         elif action=="create" and actual_kind=="question" and (peer:=next((x for x in d.blocks[:n-1] if x["kind"]=="question" and matching.same_question(x["content"],b["content"])),None)) is not None:
-            if matching.answer_conflict(peer.get("answer",""),b.get("answer","")) or normalize_subject(peer.get("subject") if peer.get("subject") is not None else d.subject)!=normalize_subject(b.get("subject") if b.get("subject") is not None else d.subject):
-                errors.append("本资料同题的答案或科目冲突，请核对")
-            else:
+            from types import SimpleNamespace
+            for earlier in d.blocks[:n-1]:
+                if earlier["kind"]!="question" or not matching.same_question(earlier["content"],b["content"]):continue
+                candidate=SimpleNamespace(**{**earlier,"archived":False,"subject":normalize_subject(earlier.get("subject") if earlier.get("subject") is not None else d.subject)})
+                try:validate_append(candidate,b,b.get("subject") if b.get("subject") is not None else d.subject)
+                except HTTPException as exc:
+                    errors.append("本资料同题："+str(exc.detail));break
+            if not errors:
                 action="batch_reuse"
                 warnings.append("本批次已有相同题干；确认后复用同一编号，保留本题来源并追加非重复解法")
         elif action=="create" and not errors:

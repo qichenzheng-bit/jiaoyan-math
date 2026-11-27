@@ -182,7 +182,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
         record=client.get(base+"/registration-history/"+history[0]["id"]).json()
         assert next(e for e in record["entries"] if e["uid"]=="same")["input"]["solution"]=="另一种解法"
         assert client.post(base+"/registration-commit",headers=origin,json={"revision":batch["revision"],"preview_token":review.json()["preview_token"],"items":choices,"accept_warnings":True}).status_code==409
-        # Phone entry saves the entire draft and registers it atomically, without review.
+        # Phone entry saves the draft, confirms each item, then registers it atomically.
         manual=reused.json()
         manual_path="/api/documents/"+manual["id"]
         draft_blocks=[
@@ -927,11 +927,11 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert client.get("/api/resources/"+saved_image_id).json()["content"]==image_text
         assert client.get("/api/files/"+file_id+"/preview").content==png
 
-        # A durable two-chunk plan, including same question across chunk boundary.
+        # F4.1.6: 86 entries, five chunks, a third-chunk mid-write failure and cross-chunk duplicate.
         many=client.post("/api/documents/setup",headers=origin,json={"title":"跨批次入库专项","source_type":"exam"}).json()
         many_path="/api/documents/"+many["id"]
         root={"kind":"question","subject":"高等数学","question_type":"综合题","content":"跨批次唯一检索题目甲","answer":"1","solution":"直接法","dedup_reason":"测试独立题目","uid":"root","original_question_number":"1"}
-        blocks=[root]+[{**root,"uid":"middle-"+str(i),"content":"跨批专项独立练习"+str(i),"original_question_number":str(i+1)} for i in range(1,20)]+[{**root,"uid":"last","solution":"另一种方法","original_question_number":"21"}]
+        blocks=[root]+[{**root,"uid":"middle-"+str(i),"content":"跨批专项独立练习"+str(i),"original_question_number":str(i+1)} for i in range(1,85)]+[{**root,"uid":"last","solution":"另一种方法","original_question_number":"86"}]
         draft=client.put(many_path+"/manual-draft",headers=origin,json={**many,"blocks":blocks})
         assert draft.status_code==200,draft.text
         revision=draft.json()["revision"]
@@ -941,7 +941,7 @@ def test_migration_and_login(tmp_path, monkeypatch):
             approve=client.post(many_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":b["uid"],"approved":True})
             assert approve.status_code==200,approve.text
         preview=client.post(many_path+"/intake-preview",headers=origin,json={"revision":revision}).json()
-        assert preview["total"]==21 and preview["batches"]==2 and all(r["approved"] for r in preview["rows"])
+        assert preview["total"]==86 and preview["batches"]==5 and all(r["approved"] for r in preview["rows"])
         run=client.post(many_path+"/intake-run",headers=origin,json={"revision":revision,"preview_token":preview["preview_token"],"accept_warnings":True}).json()
         assert run["state"]=="ready" and run["completed"]==0
         assert client.post(many_path+"/manual-review-progress",headers=origin,json={"revision":revision,"uid":"root","approved":False}).status_code==409
@@ -951,30 +951,49 @@ def test_migration_and_login(tmp_path, monkeypatch):
         assert first.json()["run"]["completed"]==20,first.text
         assert client.post(many_path+"/intake-run/step",headers=origin,json=payload).json()["run"]["completed"]==20
         assert client.get(many_path+"/intake-run").json()["next_batch"]==1
+        from time import perf_counter
+        durations=[]
+        started=perf_counter()
+        second=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1})
+        durations.append(perf_counter()-started)
+        assert second.status_code==200,second.text
+        assert second.json()["run"]["completed"]==40,second.text
         from app.api import documents as intake_docs
         from fastapi import HTTPException
         original_attach=intake_docs.attach_review_knowledge
-        def transient_error(*args,**kwargs):raise HTTPException(422,"模拟本批失败")
+        calls=[]
+        def transient_error(*args,**kwargs):
+            calls.append(1)
+            if len(calls)==18:raise HTTPException(422,"模拟本批第18条失败")
+            return original_attach(*args,**kwargs)
+        before_failure=client.get("/api/resources?kind=question").json()["total"]
         with monkeypatch.context() as patch:
             patch.setattr(intake_docs,"attach_review_knowledge",transient_error)
-            failed=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1})
+            failed=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":2})
             assert failed.status_code==200,failed.text
-            assert failed.json()["run"]["state"]=="failed" and failed.json()["run"]["completed"]==20
-            assert failed.json()["document"]["blocks"][-1]["kind"]=="question"
+            assert len(calls)==18
+            assert failed.json()["run"]["state"]=="failed" and failed.json()["run"]["completed"]==40
+            assert sum(b["kind"]=="reference" for b in failed.json()["document"]["blocks"])==40
+            assert client.get("/api/resources?kind=question").json()["total"]==before_failure
             rid_first=first.json()["document"]["blocks"][0]["resource_id"]
             assert "另一种方法" not in client.get("/api/resources/"+rid_first).json()["solution"]
-            assert len(client.get(many_path+"/registration-history").json())==1
-        final=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1})
-        assert final.status_code==200,final.text
+            assert len(client.get(many_path+"/registration-history").json())==2
+        for batch_index in (2,3,4):
+            started=perf_counter()
+            final=client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":batch_index})
+            durations.append(perf_counter()-started)
+            assert final.status_code==200,final.text
+            assert final.json()["run"]["state"] in ("ready","completed"),final.text
+        print("INTAKE_86 chunk_ms="+",".join(str(round(t*1000,1)) for t in durations)+" max_ms="+str(round(max(durations)*1000,1)))
         finished=final.json()
         assert finished["run"]["state"]=="completed",finished
-        assert finished["run"]["counts"]["question_create"]==20
+        assert finished["run"]["counts"]["question_create"]==85
         assert finished["run"]["counts"]["question_reuse"]==1
         assert finished["document"]["blocks"][0]["resource_id"]==finished["document"]["blocks"][-1]["resource_id"]
-        assert finished["run"]["counts"]["source_occurrences"]==21
+        assert finished["run"]["counts"]["source_occurrences"]==86
         assert finished["run"]["counts"]["methods_added"]==1
-        assert client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":1}).json()["run"]["completed"]==21
-        assert len(client.get(many_path+"/registration-history").json())==2
+        assert client.post(many_path+"/intake-run/step",headers=origin,json={**payload,"batch":4}).json()["run"]["completed"]==86
+        assert len(client.get(many_path+"/registration-history").json())==5
         assert finished["document"]["blocks"][0]["snapshot"]["solution"]==finished["document"]["blocks"][-1]["snapshot"]["solution"]
         unbound=client.post("/api/documents",headers=origin,json={"title":"未绑定资料测试","blocks":[]}).json()
         bound=client.post("/api/documents/"+unbound["id"]+"/intake-source",headers=origin,json={"revision":unbound["revision"],"source_id":created_doc["source_id"]})
