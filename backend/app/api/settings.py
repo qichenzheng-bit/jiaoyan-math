@@ -174,6 +174,7 @@ class DocumentLayout(BaseModel):
     answerSpace: float=Field(default=0,ge=0,le=180)
     header: str=Field(default="",max_length=200)
     footer: str=Field(default="第 {{当前页码}} 页，共 {{总页数}} 页",max_length=200)
+    knowledgeIndex: bool=False
     toc: bool=False
     tocDepth: Literal[1,2,3,4,5,6]=2
     chapterNewPage: bool=False
