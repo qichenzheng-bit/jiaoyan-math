@@ -164,7 +164,11 @@ def snapshot(db,row):
         db.add(SourceVersion(source_id=row.id,version=row.revision,snapshot=view(row),created_at=now()))
 
 @router.get("/subjects")
-def subjects(): return list(MATH_SUBJECTS)
+def subjects(db:Session=Depends(get_db)):
+    known=set(MATH_SUBJECTS)
+    known.update(db.scalars(select(KnowledgePointCatalog.subject).where(KnowledgePointCatalog.subject!="").distinct()))
+    known.update(db.scalars(select(TeachingResource.subject).where(TeachingResource.subject!="").distinct()))
+    return list(MATH_SUBJECTS)+sorted(known-set(MATH_SUBJECTS))
 
 def question_list_summaries(db,rows,data):
     ids=[r.id for r in rows if r.kind=="question"]

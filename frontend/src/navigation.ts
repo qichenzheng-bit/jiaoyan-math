@@ -50,7 +50,7 @@ export function workspaceParent(path:string,search:string):string{
  if(path.startsWith('/project/'))return '/'
  if(path==='/original-library')return '/intake'
  if(path==='/intake')return params.has('doc')||params.has('mode')||params.has('resource')?'/intake':'/'
- if(path.startsWith('/source-print/'))return '/sources'
+ if(path.startsWith('/source-print/')||path.startsWith('/source-catalog/'))return '/sources'
  if(path.startsWith('/print/'))return '/teaching-library'
  if(path.startsWith('/resource-edit/'))return params.has('return_source')?'/source-print/'+encodeURIComponent(params.get('return_source')!):'/resources'
  if(path==='/intake-single')return '/intake'
@@ -63,7 +63,7 @@ export function workspaceParent(path:string,search:string):string{
 
 // Parent matching ignores search params only when identifying the business group.
 export function activeWorkspaceGroup(path:string){
- if(path.startsWith('/resource-edit/')||path.startsWith('/source-print/'))return workspaceGroups.find(g=>g.id==='teaching')
+ if(path.startsWith('/resource-edit/')||path.startsWith('/source-print/')||path.startsWith('/source-catalog/'))return workspaceGroups.find(g=>g.id==='teaching')
  if(path==='/intake-single')return workspaceGroups.find(g=>g.id==='intake')
  if(path.startsWith('/print/'))return workspaceGroups.find(g=>g.id==='creation')
  return workspaceGroups.find(g=>path==='/project/'+g.id||g.sections.some(s=>s.entries.some(e=>e.path.split('?')[0]===path)))
