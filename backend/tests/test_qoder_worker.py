@@ -309,3 +309,23 @@ def test_native_interrupt_pipe_read_is_cancellable():
     ast.parse(worker.SDK_AGENT_SCRIPT)
     assert "await reader.readline()" in worker.SDK_AGENT_SCRIPT
     assert "asyncio.to_thread(sys.stdin.readline)" not in worker.SDK_AGENT_SCRIPT
+
+
+def test_model_admission_fairness_expiry_and_cancellation(monkeypatch):
+    monkeypatch.setattr(worker,"MODEL_WAITERS",{})
+    monkeypatch.setattr(worker,"chat_active","active")
+    monkeypatch.setattr(worker,"login_process",None)
+    assert not worker.model_admission("first",True,0)
+    assert not worker.model_admission("second",True,1)
+    monkeypatch.setattr(worker,"chat_active",None)
+    assert not worker.model_admission("second",True,2)
+    assert not worker.model_admission("unregistered",False,2)
+    assert worker.model_admission("first",True,3)
+    assert worker.model_admission("second",True,4)
+    monkeypatch.setattr(worker,"chat_active","active")
+    assert not worker.model_admission("abandoned",True,5)
+    worker.prune_model_waiters(36)
+    assert not worker.MODEL_WAITERS
+    assert not worker.model_admission("cancelled",True,37)
+    assert worker.chat_state("cancelled",True)[1]["state"]=="stopped"
+    assert not worker.MODEL_WAITERS

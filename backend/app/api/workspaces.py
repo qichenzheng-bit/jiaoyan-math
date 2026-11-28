@@ -386,6 +386,8 @@ def step(ident:str,bid:str,db:Session=Depends(get_db),user:User=Depends(current_
         else:result=imp.extract(f,"text",n,n)
         u={"unit":n,"state":"done","text":result["text"],"method":result["method"],"warnings":result.get("warnings",[])}
     except HTTPException as exc:
+        if vision.model_busy(exc):
+            return batch_view(db,b,True)
         u={**previous,"unit":n,"state":"failed","attempts":previous.get("attempts",0)+1,"error":str(exc.detail)[:400]}
     existing[n]=u;b.units=sorted(existing.values(),key=lambda x:x["unit"]);b.updated_at=now();s.updated_at=now();db.commit()
     return batch_view(db,b,True)

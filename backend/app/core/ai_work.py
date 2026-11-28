@@ -254,7 +254,7 @@ def run_model(db,s,r,user):
         if now()-r.get("phase_at",now())>MODEL_TIMEOUT:
             fail(db,s,r,"模型排队超时");return
         try:
-            qoder.request("POST","/chat/start",{"id":r["model_job"],"model":r["model"],"prompt":r["prompt"],
+            qoder.request("POST","/chat/start",{"id":r["model_job"],"model":r["model"],"prompt":r["prompt"],"queue_wait":True,
                           **({"effort":r["effort"]} if r["effort"]!="default" else {})})
         except HTTPException as e:
             if e.status_code==409 and "已有模型任务" in str(e.detail):
@@ -398,6 +398,8 @@ def intake_tick(db,s,r,user):
     stage=wa.workflow(db,s,r)
     if not stage:return
     if stage["stage"]=="recognizing":
+        status=qoder.request("GET","/status")
+        if status.get("busy") or status.get("waiting_count") or not status.get("chat_available"):return
         w.step(s.id,stage["batch_id"],db,user,model=r["model"],effort=r.get("effort"));return
     if stage["stage"]=="organize":
         status=qoder.request("GET","/status")

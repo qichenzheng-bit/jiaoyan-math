@@ -75,7 +75,7 @@ def pending(db,m,state):
     if now()-state["at"]>900:
         m.state="failed";m.detail="模型排队超时";finish(db,m,state);return
     try:
-        qoder.request("POST","/chat/start",{"id":state["job"],"model":m.model,"prompt":state["next_prompt"],**state["effort"]})
+        qoder.request("POST","/chat/start",{"id":state["job"],"model":m.model,"prompt":state["next_prompt"],"queue_wait":True,**state["effort"]})
     except HTTPException as e:
         if e.status_code==409 and "已有模型任务" in str(e.detail):return
         if e.status_code in (503,504):

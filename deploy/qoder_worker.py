@@ -313,6 +313,7 @@ def disconnect():
             retained_auth,user_disconnected,verified_at,catalog,catalog_at,catalog_efforts,catalog_capability_source=old
             return 503,{"detail":"无法保存退出状态，未断开"}
         usage_cache=None
+        MODEL_WAITERS.clear()
         login.update(state="disconnected",url="",detail="已退出本系统 AI；官方 CLI 凭据未删除")
         return 200,dict(login)
 
@@ -479,11 +480,35 @@ def check_native_sdk():
     except (OSError,ValueError,subprocess.TimeoutExpired):
         return {"ready":False,"memory":False,"reason":"sdk_probe_failed"}
 
+# FIFO admission for callers that already retry with a stable job ID.
+# No queued prompts or images are held in the Worker; callers own their durable jobs.
+MODEL_WAITERS={}
+MODEL_WAIT_TTL=30.0
+MODEL_WAIT_MAX=128
+
+def prune_model_waiters(at=None):
+    at=time.monotonic() if at is None else at
+    for ident,seen in list(MODEL_WAITERS.items()):
+        if at-seen>MODEL_WAIT_TTL:MODEL_WAITERS.pop(ident,None)
+
+def model_admission(ident,waiting=False,at=None):
+    """Call under the Worker lock. A free slot is reserved in arrival order."""
+    at=time.monotonic() if at is None else at
+    prune_model_waiters(at)
+    if waiting:
+        if ident not in MODEL_WAITERS and len(MODEL_WAITERS)>=MODEL_WAIT_MAX:return False
+        MODEL_WAITERS[ident]=at
+    if chat_active or login_process is not None:return False
+    if MODEL_WAITERS and next(iter(MODEL_WAITERS))!=ident:return False
+    MODEL_WAITERS.pop(ident,None)
+    return True
+
 def status():
     with lock:
+        prune_model_waiters()
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 20, "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 21, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -736,7 +761,7 @@ def chat_start(data, video=False, vision=False):
         cached=load_snapshot(ident)
         if cached: return 200,cached
         if user_disconnected:return 409,{"detail":"已退出本系统 AI，请主动登录"}
-        if chat_active or login_process is not None: return 409,{"detail":"当前已有模型任务或授权，请先完成"}
+        if not model_admission(ident,waiting=bool(video or data.get("queue_wait") is True)): return 409,{"detail":"当前已有模型任务或授权，按队列等待"}
         # Keep a bounded number of completed jobs for reconnecting clients.
         for old in list(chat_jobs)[:-31]:
             if chat_jobs[old]["state"]!="running": del chat_jobs[old]
@@ -989,7 +1014,7 @@ def agent_start(data):
         cached=load_snapshot(ident)
         if cached:return 200,cached
         if user_disconnected:return 409,{"detail":"已退出AI，请先登录"}
-        if chat_active or login_process is not None:return 409,{"detail":"当前已有模型任务或授权，请先完成"}
+        if not model_admission(ident,waiting=True):return 409,{"detail":"当前已有模型任务或授权，按队列等待"}
         for old in list(chat_jobs)[:-31]:
             if chat_jobs[old]["state"]!="running":del chat_jobs[old]
         job={"id":ident,"state":"running","answer":"","detail":"原生Agent正在执行","proc":None,"cancel":False,"native":True}
@@ -1125,6 +1150,9 @@ def chat_state(ident, cancel=False):
     with lock:
         job=chat_jobs.get(ident)
         if not job:
+            if cancel and ident in MODEL_WAITERS:
+                MODEL_WAITERS.pop(ident,None)
+                return 200,{"id":ident,"state":"stopped","answer":"","detail":"已取消排队"}
             cached=load_snapshot(ident)
             return (200,cached) if cached else (404,{"detail":"执行任务不存在或结果已过期"})
         if cancel and job["state"]=="running":

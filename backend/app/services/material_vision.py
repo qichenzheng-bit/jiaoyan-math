@@ -52,10 +52,13 @@ def decode_reply(raw):
         raise HTTPException(422,"AI视觉转录存在无法辨认的内容，需重新识别原图")
     return text.strip()
 
+def model_busy(exc):
+    return exc.status_code==409 and any(s in str(exc.detail) for s in ("已有模型任务","正在执行其他任务"))
+
 def recognize_bytes(media,raw,model,effort=None,timeout=38):
     status=qoder.request("GET","/status")
     if not status.get("vision_attachment"): raise HTTPException(503,"Qoder执行服务尚未升级图片附件接口")
-    if status.get("busy"): raise HTTPException(409,"Qoder正在执行其他任务，请稍后重试")
+    if status.get("busy") or status.get("waiting_count"): raise HTTPException(409,"Qoder正在执行其他任务，请稍后重试")
     if not status.get("chat_available"): raise HTTPException(503,"Qoder执行服务未就绪")
     ident=str(uuid4())
     data={"id":ident,"model":model,"prompt":PROMPT,"effort":effort or "default","attachment":{"media_type":media,"base64":base64.b64encode(raw).decode("ascii")}}
@@ -125,6 +128,7 @@ def word_step(file,unit,previous,model=None,effort=None,manual_review=False):
             current=None
             return result["text"]
         except HTTPException as exc:
+            if model_busy(exc):raise
             error=f"Word图片{index}：{str(exc.detail)[:300]}"
             records[key]={"state":"failed","error":error}
             return marker

@@ -131,3 +131,25 @@ def test_amended_turn_retains_original_if_no_session(monkeypatch):
     assert n.next_amended_turn(None,None,r)
     assert "原题" in r["native_prompt"] and "改成第二页" in r["native_prompt"]
     assert not n.pending_amendments(r)
+
+
+def test_native_reference_preserves_literal_excerpt_and_unverified_status(monkeypatch):
+    f=SimpleNamespace(id="ref",name="答案.pdf",media_type="application/pdf")
+    monkeypatch.setattr(n,"attached",lambda *a:(SimpleNamespace(id="material",total_units=3),f))
+    body=n.Draft(file_id="main",title="题目",pages=[n.Transcript(page=1,text="题干")],items=[{}],
+        reference_pages=[n.ReferencePage(file_id="ref",page=2,text="答案：0\n解析：由连续性得0")],
+        reference_fields=[n.ReferenceField(item_index=0,field="answer",file_id="ref",page=2)])
+    r={"steps":[{"tool":"native_page","state":"done","result":{"file_id":"ref","page":2}}]}
+    items=[{"uid":"q","kind":"question","answer":"0"}]
+    result,ids=n.reference_provenance(None,SimpleNamespace(id="work"),r,body,items,"main")
+    assert ids=={"ref"} and result["q"]["answer"]["page"]==2 and not result["q"]["answer"]["verified"]
+    with pytest.raises(n.HTTPException):n.reference_provenance(None,SimpleNamespace(id="work"),r,body,[{**items[0],"answer":"1"}],"main")
+    with pytest.raises(n.HTTPException):n.reference_provenance(None,SimpleNamespace(id="work"),{"steps":[]},body,items,"main")
+    with pytest.raises(n.HTTPException):n.reference_provenance(None,SimpleNamespace(id="work"),r,body,[{**items[0],"generated_fields":["answer"]}],"main")
+
+def test_native_boundary_missing_requires_actual_pages(monkeypatch):
+    monkeypatch.setattr(n,"attached",lambda *a:(SimpleNamespace(total_units=2),SimpleNamespace(id="f")))
+    class DB:
+        def get(self,*a):return None
+    with pytest.raises(n.HTTPException,match="边界"):
+        n.draft_create(DB(),None,{"steps":[]},None,{"file_id":"f","title":"题","pages":[{"page":1,"text":"题干"}],"items":[{}],"incomplete_boundary":"第2题解析在下一页"},"j")
