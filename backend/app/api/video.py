@@ -146,7 +146,7 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
         with production_model_lock:
             from app.core.ai_preferences import video_supplement
             supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
-            context=(row.source_snapshot or {}).get("source_context") or {}
+            context=(getattr(row,"source_snapshot",None) or {}).get("source_context") or {}
             if supplement["text"] or context:
                 try:
                     supported=engine.call("GET","/jiaoyan/prompt-capability")

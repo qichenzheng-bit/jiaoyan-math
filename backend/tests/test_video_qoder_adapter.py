@@ -98,3 +98,10 @@ def test_video_queued_cancel_releases_same_id(monkeypatch):
     monkeypatch.setattr(adapter,"request",request)
     assert adapter.chat_cli("qoder_cli","","Auto",prompt="test")["status"]=="cancelled"
     assert calls[-1][0]=="/chat/"+calls[0][1]["id"]+"/cancel"
+
+
+def test_structured_source_context_is_separate_from_user_supplement(monkeypatch):
+    context={"opening_source":{"source_name":"郑州大学数学分析","year":"2025"},"knowledge_tags":[]}
+    monkeypatch.setattr(adapter,"job_prompt_data",lambda:{"text":"逐步讲解","revision":1,"source_context":context})
+    assert adapter.job_source_context()==context
+    assert adapter.job_supplement()=="逐步讲解"

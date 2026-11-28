@@ -1,0 +1,70 @@
+# A05 linear_proof
+
+完整课堂参考草稿；数学内容仅为示例，具体字号、位置、动画、教学结构必须按当前题目与实际安全区重设计。尚未通过实际 Manim 成片验收。
+
+```python title=scene_01
+from manim import *
+from animation_engine.code.authored_scene import AuthoredScene
+from animation_engine.code.board_kit import board_bounds, fit_stem, mixed_text, highlight_clause
+
+class A05Lesson(AuthoredScene):
+    def construct(self):
+        self.camera.background_color = WHITE
+        bounds = board_bounds()
+        stem = mixed_text(("t", "设方阵 "), ("m", r"A"), ("t", " 可逆，证明 "), ("m", r"Ax=0"), ("t", " 只有零解。"), font_size=28)
+        self.add(stem)
+        self.start_cue("A05_open", "今天来看一个矩阵可逆与齐次方程组之间的证明。", "", tts_text="今天来看一个矩阵可逆与齐次方程组之间的证明。")
+        self.end_cue("A05_open")
+        self.start_cue("A05_read", "设方阵 A 可逆，证明 A x 等于零只有零解。", "", tts_text="设方阵 A 可逆，证明 A x 等于零只有零解。")
+        highlight_clause(self, stem)
+        self.end_cue("A05_read")
+        self.start_cue("A05_guide", "我们要从 A x 等于零得到 x 等于零。已知 A 可逆，可以利用逆矩阵消去 A。", "", tts_text="我们要从 A x 等于零得到 x 等于零。已知 A 可逆，可以利用逆矩阵消去 A。")
+        guide = mixed_text(("t", "突破口：消去左侧的矩阵 "), ("m", r"A"), font_size=26)
+        fit_stem(stem, bounds)
+        guide.next_to(stem, DOWN, buff=0.42)
+        self.play(Write(guide), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.end_cue("A05_guide")
+        self.start_cue("A05_knowledge", "可逆方阵的逆矩阵与原矩阵相乘等于单位矩阵，注意矩阵乘法的次序。", "", tts_text="可逆方阵的逆矩阵与原矩阵相乘等于单位矩阵，注意矩阵乘法的次序。")
+        knowledge = mixed_text(("m", r"A^{-1}A=AA^{-1}=E"), font_size=26)
+        knowledge.next_to(guide, DOWN, buff=0.34)
+        self.play(Write(knowledge), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.check_layout('引导与知识', question=stem, guide=guide, knowledge=knowledge)
+        self.end_cue("A05_knowledge")
+        self.start_cue("A05_step1", "从题设的齐次方程出发。", "", tts_text="从题设的齐次方程出发。")
+        self.play(FadeOut(guide), FadeOut(knowledge), run_time=min(0.45, self.cue_time_left()*0.2))
+        step1 = mixed_text(("m", r"Ax=0"), font_size=26)
+        step1.next_to(stem, DOWN, buff=0.48, aligned_edge=LEFT)
+        step1.set_x(0)
+        self.play(Write(step1), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A05_step1")
+        self.start_cue("A05_step2", "在等式两边同时左乘 A 的逆矩阵。", "", tts_text="在等式两边同时左乘 A 的逆矩阵。")
+        step2 = mixed_text(("m", r"A^{-1}Ax=A^{-1}0"), font_size=26)
+        step2.next_to(step1, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step2), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A05_step2")
+        self.start_cue("A05_step3", "这里 x 是列向量，必须在左边乘逆矩阵，不能随意交换次序。", "", tts_text="这里 x 是列向量，必须在左边乘逆矩阵，不能随意交换次序。")
+        step3 = mixed_text(("t", "注意：不能把左乘随意换成右乘。"), font_size=24)
+        step3.set_color("#B91C1C")
+        step3.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step3), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A05_step3")
+        self.start_cue("A05_step4", "左边变成单位矩阵乘 x，右边还是零向量，所以 x 等于零。零向量本身也满足方程，因此只有零解。", "", tts_text="左边变成单位矩阵乘 x，右边还是零向量，所以 x 等于零。零向量本身也满足方程，因此只有零解。")
+        self.play(FadeOut(step3), run_time=min(0.35, self.cue_time_left()*0.16))
+        step4 = mixed_text(("m", r"Ex=0\quad\Longrightarrow\quad x=0"), font_size=26)
+        step4.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step4), run_time=min(0.9, self.cue_time_left()*0.4))
+        answer_box = SurroundingRectangle(step4, color="#1D4ED8", buff=0.10)
+        self.play(Create(answer_box), run_time=min(0.4, self.cue_time_left()*0.25))
+        self.end_cue("A05_step4")
+        self.start_cue("A05_summary", "这类证明要关注可逆条件能否消去矩阵，并严格保持乘法方向和维数。", "", tts_text="这类证明要关注可逆条件能否消去矩阵，并严格保持乘法方向和维数。")
+        self.play(FadeOut(step1), FadeOut(step2), FadeOut(step4), FadeOut(answer_box), run_time=min(0.45, self.cue_time_left()*0.14))
+        summary_title = Text('方法与注意点总结', color='#0F766E', font_size=28)
+        summary_lines = VGroup(mixed_text(("t", "目标：证明齐次方程只有零解"), font_size=25), mixed_text(("t", "条件：矩阵可逆"), font_size=25), mixed_text(("t", "方法：两边左乘逆矩阵"), font_size=25), mixed_text(("t", "注意：矩阵乘法次序与维数"), font_size=25)).arrange(DOWN, aligned_edge=LEFT, buff=0.26)
+        summary = VGroup(summary_title, summary_lines).arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+        summary.next_to(stem, DOWN, buff=0.45)
+        summary.set_x(0)
+        self.play(Write(summary_title), run_time=min(0.5, self.cue_time_left()*0.12))
+        self.play(LaggedStart(*[Write(item) for item in summary_lines], lag_ratio=0.18), run_time=min(2.4, self.cue_time_left()*0.55))
+        self.check_layout('总结', question=stem, pedagogy=summary)
+        self.end_cue("A05_summary")
+```

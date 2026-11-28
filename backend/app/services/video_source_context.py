@@ -33,12 +33,14 @@ def select_opening_source(sources):
 
 def capture(db, resource):
     rows = db.execute(select(ResourceSourceLink, TeachingResource, SourceCatalogDetail)
+        .select_from(ResourceSourceLink)
         .join(TeachingResource, TeachingResource.id == ResourceSourceLink.source_id)
         .outerjoin(SourceCatalogDetail, SourceCatalogDetail.source_id == TeachingResource.id)
         .where(ResourceSourceLink.resource_id == resource.id, TeachingResource.kind == "source")
         .order_by(ResourceSourceLink.source_id, ResourceSourceLink.provenance_role)).all()
     sources = [source_entry(link, source, detail) for link, source, detail in rows]
     tags = db.execute(select(KnowledgePointCatalog.name, ResourceKnowledgeLink.role)
+        .select_from(KnowledgePointCatalog)
         .join(ResourceKnowledgeLink, ResourceKnowledgeLink.knowledge_id == KnowledgePointCatalog.id)
         .where(ResourceKnowledgeLink.resource_id == resource.id)
         .order_by(ResourceKnowledgeLink.role, KnowledgePointCatalog.name)).all()

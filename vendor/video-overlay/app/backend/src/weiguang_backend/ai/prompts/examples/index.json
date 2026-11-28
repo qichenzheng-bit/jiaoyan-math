@@ -11,6 +11,17 @@
     "status": "inherited_unverified"
   },
   {
+    "id": "A02",
+    "path": "complete/A02_integral.md",
+    "kind": "complete",
+    "keywords": [
+      "不定积分",
+      "分部积分",
+      "积分计算"
+    ],
+    "status": "new_complete_draft_unverified"
+  },
+  {
     "id": "A03",
     "path": "complete/A03_graph.md",
     "kind": "complete",
@@ -36,6 +47,18 @@
     "status": "inherited_unverified"
   },
   {
+    "id": "A05",
+    "path": "complete/A05_linear_proof.md",
+    "kind": "complete",
+    "keywords": [
+      "线性代数证明",
+      "可逆",
+      "齐次方程",
+      "零空间"
+    ],
+    "status": "new_complete_draft_unverified"
+  },
+  {
     "id": "A06",
     "path": "complete/A06_probability.md",
     "kind": "complete",
@@ -45,6 +68,44 @@
       "随机变量"
     ],
     "status": "inherited_unverified"
+  },
+  {
+    "id": "A07",
+    "path": "complete/A07_statistics.md",
+    "kind": "complete",
+    "keywords": [
+      "数理统计",
+      "无偏估计",
+      "样本均值",
+      "统计量"
+    ],
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "A08",
+    "path": "complete/A08_analysis_proof.md",
+    "kind": "complete",
+    "keywords": [
+      "数学分析",
+      "数列极限",
+      "定义证明",
+      "量词",
+      "收敛"
+    ],
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "A09",
+    "path": "complete/A09_algebra_proof.md",
+    "kind": "complete",
+    "keywords": [
+      "高等代数",
+      "线性空间",
+      "子空间",
+      "直和",
+      "证明"
+    ],
+    "status": "new_complete_draft_unverified"
   },
   {
     "id": "A10",

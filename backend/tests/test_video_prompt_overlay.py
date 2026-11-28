@@ -44,3 +44,15 @@ def test_no_match_and_budget():
     assert bundle.choose_examples({}, "", "", fixed, "题源") == (fixed, [])
     with pytest.raises(RuntimeError, match="VIDEO_PROMPT_BUDGET_EXCEEDED"):
         bundle.ensure_budget(fixed, "题"*50000)
+
+
+def test_new_complete_example_drafts_are_python_syntax():
+    entries = json.loads((bundle.PROMPTS_DIR / "examples/index.json").read_text())
+    assert len(entries) == 42
+    assert len([r for r in entries if r["kind"] == "complete"]) == 10
+    for item in entries:
+        if item["status"] != "new_complete_draft_unverified":
+            continue
+        body = (bundle.PROMPTS_DIR / "examples" / item["path"]).read_text()
+        code = body.split("```python title=scene_01\n", 1)[1].split("```", 1)[0]
+        ast.parse(code)
