@@ -23,7 +23,7 @@ fi
 status() {
   curl --silent --show-error --fail --max-time 5 --unix-socket /run/jiaoyan-qoder/worker.sock http://localhost/status
 }
-status | python3 -c 'import json,sys; s=json.load(sys.stdin); assert not s.get("busy") and s.get("login",{}).get("state") not in ("starting","waiting"), "QODER_BUSY"'
+status | python3 -c 'import json,sys; s=json.load(sys.stdin); assert not s.get("busy") and not s.get("waiting_count") and s.get("login",{}).get("state") not in ("starting","waiting"), "QODER_BUSY"'
 backup=$(mktemp /opt/jiaoyan-qoder/.worker-backup.XXXXXX)
 cp -p -- "$dest" "$backup"
 cleanup() { rm -f -- "$backup"; }
@@ -37,7 +37,7 @@ rollback() {
 install -m 644 -o root -g root "$src" "$dest" || rollback
 systemctl restart jiaoyan-qoder.service || rollback
 for _ in $(seq 1 20); do
-  if status 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("native_agent") and s.get("worker_version",0)>=22' 2>/dev/null; then
+  if status 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("native_agent") and s.get("worker_version",0)>=23' 2>/dev/null; then
     echo "QODER_NATIVE_AGENT_READY (live SDK/MCP/vision smoke tests still required)"
     exit 0
   fi

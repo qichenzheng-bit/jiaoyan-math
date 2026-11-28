@@ -341,3 +341,18 @@ def test_native_restart_snapshot_keeps_session_identity(tmp_path,monkeypatch):
     assert result["state"]=="failed" and result["failure_reason"]=="worker_restart"
     assert result["native_session"]==sid and "pending" not in result and "pending_tool" not in result
     assert "never stored" not in (tmp_path/(ident+".json")).read_text()
+
+
+def test_native_resume_cannot_cross_workspace_or_owner(tmp_path,monkeypatch):
+    from uuid import uuid4
+    import pytest
+    monkeypatch.setattr(worker.Path,"home",lambda:tmp_path)
+    a,b,sid=map(str,[uuid4(),uuid4(),uuid4()])
+    worker.check_native_resume(a,1,None)
+    cwd=worker.native_workspace_dir(a);cwd.mkdir(parents=True)
+    (cwd/"owner").write_text("1")
+    worker.remember_native_run(cwd,sid)
+    worker.check_native_resume(a,1,sid)
+    with pytest.raises(ValueError):worker.check_native_resume(a,2,sid)
+    with pytest.raises(ValueError):worker.check_native_resume(b,1,sid)
+    with pytest.raises(ValueError):worker.check_native_resume(a,1,str(uuid4()))

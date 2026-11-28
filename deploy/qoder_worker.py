@@ -508,7 +508,7 @@ def status():
         prune_model_waiters()
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 22, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 23, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -989,6 +989,20 @@ def remove_native_workspace(data):
         except (OSError,ValueError,TypeError):
             return 503,{"detail":"原生会话清理未完成，保留应用历史以便重试"}
 
+def check_native_resume(workspace,owner,resume):
+    """A session ID is only usable within its registered app workspace."""
+    cwd=native_workspace_dir(workspace)
+    if cwd.is_symlink():raise ValueError("unsafe native workspace")
+    if not cwd.exists():
+        if resume:raise ValueError("native resume workspace missing")
+        return
+    if not cwd.is_dir():raise ValueError("invalid native workspace")
+    path=cwd/"owner"
+    if path.is_symlink() or not path.is_file() or path.read_text(encoding="ascii")!=str(owner):
+        raise ValueError("native workspace owner mismatch")
+    if resume and resume not in read_native_manifest(cwd)["sessions"]:
+        raise ValueError("native session not registered in this workspace")
+
 def agent_start(data):
     global chat_active
     if not isinstance(data,dict):return 422,{"detail":"原生Agent请求无效"}
@@ -1014,6 +1028,8 @@ def agent_start(data):
         cached=load_snapshot(ident)
         if cached:return 200,cached
         if user_disconnected:return 409,{"detail":"已退出AI，请先登录"}
+        try:check_native_resume(workspace,owner,resume)
+        except (OSError,ValueError,TypeError):return 422,{"detail":"原生会话身份或所属工作不匹配；请核对历史会话"}
         if not model_admission(ident,waiting=True):return 409,{"detail":"当前已有模型任务或授权，按队列等待"}
         for old in list(chat_jobs)[:-31]:
             if chat_jobs[old]["state"]!="running":del chat_jobs[old]
