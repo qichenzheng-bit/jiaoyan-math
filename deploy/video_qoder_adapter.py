@@ -60,7 +60,7 @@ def job_supplement():
 
 def append_supplement(prompt,text):
     if not text:return prompt
-    return prompt+'\n\n【用户教学补充要求；固定教学规范、题源数学条件、渲染校验及安全限制优先】\n'+text+'\n【补充结束】'
+    return prompt+'\n\n【用户教学补充要求；仅覆盖适用作用域内的可调默认教学规范；可信数学内容、固定技术参数、渲染校验与安全限制不可覆盖】\n'+text+'\n【补充结束】'
 
 
 def _job_record(db, ident):
@@ -304,6 +304,18 @@ def add_prompt_routes(router):
         expected=os.environ.get('WEIGUANG_API_TOKEN','')
         if not expected or not hmac.compare_digest(request.headers.get('X-API-Key','').encode(),expected.encode()):
             raise HTTPException(403,'VIDEO_ENGINE_TOKEN_REQUIRED')
+
+    @router.get('/jiaoyan/maintenance-state')
+    def maintenance_state(request:Request):
+        authorize(request)
+        from sqlalchemy import select, func, or_
+        from weiguang_backend.core.models import Job
+        if _session_factory is None:
+            raise HTTPException(503, "VIDEO_QUEUE_UNAVAILABLE")
+        terminal=("succeeded","success","completed","done","failed","cancelled","canceled","interrupted")
+        with _session_factory() as db:
+            count=db.scalar(select(func.count()).select_from(Job).where(or_(Job.status.is_(None),Job.status.notin_(terminal))))
+        return {"active_jobs":count}
 
     @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):

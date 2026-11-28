@@ -7,8 +7,8 @@ from sqlalchemy import select
 from app.models import Setting
 from app.core.security import now
 
-Scope=Literal["global","chat","work","intake","document","video","cover"]
-SCOPES=("global","chat","work","intake","document","video","cover")
+Scope=Literal["global","chat","work","intake","document","video","cover","video_question","video_knowledge","video_knowledge_with_proof","video_knowledge_without_proof"]
+SCOPES=("global","chat","work","intake","document","video","cover","video_question","video_knowledge","video_knowledge_with_proof","video_knowledge_without_proof")
 class Memory(BaseModel):
     model_config=ConfigDict(extra="forbid")
     id: str=Field(min_length=1,max_length=36)
@@ -85,11 +85,32 @@ def work_context(db,user):
     return base[:10000]+("\n"+"\n".join(sections))[:6000]
 
 
-def video_supplement(db,user):
-    specific=prompt(db,user,"video")
-    global_prompt=prompt(db,user,"global")
-    items=[i["text"] for i in memories(db,user)["items"] if i["enabled"] and i["scope"] in ("global","video")]
-    text="\n".join(v.strip() for v in [global_prompt["text"],specific["text"],*items] if v.strip())
+def video_supplement(db,user,*,business="question",teaching_type="auto"):
+    """Explicit scope layers; unrelated teaching types never inherit each other's rules."""
+    if business not in ("question","knowledge"):
+        raise HTTPException(422,"未知视频类型")
+    if teaching_type not in ("auto","with_proof","without_proof"):
+        raise HTTPException(422,"未知知识单元讲解类型")
+    all_memories=[i for i in memories(db,user)["items"] if i["enabled"]]
+    common=["global","video","video_question" if business=="question" else "video_knowledge"]
+    scope_rules={}
+    def collect(scope):
+        specific=prompt(db,user,scope)
+        scope_rules[scope]=specific["revision"]
+        items=[i["text"] for i in all_memories if i["scope"]==scope]
+        text="\n".join(v.strip() for v in [specific["text"],*items] if v.strip())
+        return text
+    pieces=[]
+    for scope in common:
+        text=collect(scope)
+        if text:pieces.append("【适用范围："+scope+"】\n"+text)
+    if business=="knowledge":
+        types=("with_proof","without_proof") if teaching_type=="auto" else (teaching_type,)
+        for typ in types:
+            scope="video_knowledge_"+typ
+            text=collect(scope)
+            if text:pieces.append("【仅当实际教学类型为 "+typ+" 时适用，其他类型不得采用】\n"+text)
+    text="\n".join(pieces)
     if len(text)>16000 or len(text.encode())>32000 or "\x00" in text:
         raise HTTPException(422,"视频教学补充要求过长，请精简配置")
-    return {"text":text,"revision":specific["revision"]}
+    return {"text":text,"revision":scope_rules["video"]}

@@ -32,6 +32,7 @@ class Start(BaseModel):
 class InferenceOptions(BaseModel):
     model: str|None = Field(default=None,max_length=80)
     effort: str|None = Field(default=None,max_length=16)
+    teaching_supplement: str = Field(default="",max_length=12000)
 class Instruction(InferenceOptions):
     instruction: str = Field(min_length=1, max_length=12000)
 
@@ -120,19 +121,19 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
     r = db.get(TeachingResource, body.resource_id)
     if not r or r.archived or r.kind not in ("question", "knowledge"):
         raise HTTPException(404, "请选择有效题库题目或知识单元")
+    old = db.scalar(select(VideoProject).where(VideoProject.resource_id == r.id, VideoProject.resource_revision == r.revision))
+    if old and r.kind == "question":
+        return view(old)
     if r.kind == "knowledge":
         require_knowledge_capability()
         data = knowledge_video_source.capture(db, r)
-    else:
-        data = snapshot(r)
-    old = db.scalar(select(VideoProject).where(VideoProject.resource_id == r.id, VideoProject.resource_revision == r.revision))
-    if old:
-        if r.kind == "knowledge" and old.source_snapshot.get("source_sha256") != data["source_sha256"]:
-            raise HTTPException(409, "已有项目的关联题或资料已变化，请先更新知识单元版本")
-        return view(old)
-    if r.kind == "knowledge":
+        if old:
+            if old.source_snapshot.get("source_sha256") != data["source_sha256"]:
+                raise HTTPException(409, "已有项目的关联题或资料已变化，请先更新知识单元版本")
+            return view(old)
         engine_data,figure_ids=knowledge_video_source.transport(data)
     else:
+        data = snapshot(r)
         engine_data,figure_ids=video_figures.prepare(data)
     if figure_ids:
         supported=engine.call('GET','/jiaoyan/prompt-capability')
@@ -177,8 +178,16 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
     if action=="generate":
         with production_model_lock:
             from app.core.ai_preferences import video_supplement
-            supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
-            saved_context=(getattr(row,"source_snapshot",None) or {}).get("source_context") or {}
+            source_data=getattr(row,"source_snapshot",None) or {}
+            business=source_data.get("business_type","question")
+            supplement=(video_supplement(db,user,business=business,teaching_type=source_data.get("teaching_type","auto"))
+                        if isinstance(user,User) else {"text":"","revision":0})
+            specific=body.teaching_supplement.strip() if body else ""
+            if specific:
+                supplement["text"]=(supplement["text"]+"\n【仅本次视频的明确教学要求】\n"+specific).strip()
+            if len(supplement["text"])>16000 or len(supplement["text"].encode())>32000 or "\x00" in supplement["text"]:
+                raise HTTPException(422,"本次视频教学补充要求过长")
+            saved_context=source_data.get("source_context") or {}
             # Source provenance remains in the bank/project snapshot, not in lesson opening.
             context={"knowledge_tags":saved_context["knowledge_tags"]} if saved_context.get("knowledge_tags") else {}
             knowledge = (getattr(row,"source_snapshot",None) or {}).get("business_type") == "knowledge"

@@ -70,7 +70,10 @@ def listing(q: str = Query("", max_length=200), kind: str = Query("", max_length
             offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
             db: Session = Depends(get_db), user: User = Depends(current_user),
             source_type: str = "", institution: str = "", year: str = "",
-            knowledge_point: str = "", knowledge_tag: str = "", subjects_all: str = ""):
+            knowledge_point: str = "", knowledge_tag: str = "", subjects_all: str = "",
+            video_business: Literal["","question","knowledge"] = "",
+            video_teaching: Literal["","with_proof","without_proof","auto"] = "",
+            video_unit_type: str = Query("",max_length=24), video_chapter: str = Query("",max_length=120)):
     filters = {"source_types":source_type,"institutions":institution,"years":year,
                "knowledge_points":knowledge_point,"knowledge_tags":knowledge_tag,"subjects":subjects_all}
     if any(len(value)>500 for value in filters.values()):
@@ -79,6 +82,16 @@ def listing(q: str = Query("", max_length=200), kind: str = Query("", max_length
     docs = select(*(getattr(TeachingWork, key).label(key) for key in FIELDS)).where(
         TeachingWork.user_id == user.id)
     videos = video_records(user)
+    if video_business or video_teaching or video_unit_type or video_chapter:
+        docs = docs.where(literal(False))
+        if video_business:
+            videos = videos.where(func.coalesce(VideoProject.source_snapshot["business_type"].as_string(),"question")==video_business)
+        if video_teaching:
+            videos = videos.where(func.coalesce(StudioItem.data["video_teaching_type"].as_string(),VideoProject.source_snapshot["teaching_type"].as_string(),"")==video_teaching)
+        if video_unit_type:
+            videos = videos.where(VideoProject.source_snapshot["unit_type"].as_string()==video_unit_type)
+        if video_chapter:
+            videos = videos.where(VideoProject.source_snapshot["chapter"].as_string()==video_chapter)
     if terms:
         docs = docs.join(TeachingWorkVersion, (TeachingWorkVersion.work_id == TeachingWork.id) &
                          (TeachingWorkVersion.number == TeachingWork.current_version))
@@ -111,6 +124,16 @@ def listing(q: str = Query("", max_length=200), kind: str = Query("", max_length
     order = {"recent": combined.c.updated_at.desc(), "old": combined.c.created_at.asc(),
              "name": combined.c.title.asc()}[sort]
     rows = [dict(r) for r in db.execute(stmt.order_by(order, combined.c.id).offset(offset).limit(limit)).mappings()]
+    ids=[r["id"] for r in rows if r["kind"]=="video"]
+    if ids:
+        values={item.id: (item.data, project.source_snapshot) for item, project in db.execute(
+            select(StudioItem, VideoProject).join(VideoProject,VideoProject.work_id==StudioItem.id).where(StudioItem.id.in_(ids)))}
+        for row in rows:
+            if row["id"] in values:
+                data, source = values[row["id"]]
+                row.update(video_business_type=source.get("business_type","question"),
+                           video_teaching_type=data.get("video_teaching_type") or source.get("teaching_type",""),
+                           video_unit_type=source.get("unit_type",""),video_chapter=source.get("chapter",""))
     return {"items": rows, "total": total}
 
 
@@ -135,7 +158,11 @@ def detail(ident: str, db: Session = Depends(get_db), user: User = Depends(curre
         cover = item.data.get("cover_file_id")
         return {**dict(found), "versions": [], "pending_cover": None, "facets": project.work_facets,
                 "video": {"project_id": project.id, "resource_id": project.resource_id,
-                          "cover_file_id": cover, "revision_managed_by_engine": True}}
+                          "cover_file_id": cover, "revision_managed_by_engine": True,
+                          "business_type": project.source_snapshot.get("business_type","question"),
+                          "teaching_type": item.data.get("video_teaching_type") or project.source_snapshot.get("teaching_type",""),
+                          "unit_type": project.source_snapshot.get("unit_type",""),
+                          "chapter": project.source_snapshot.get("chapter","")}}
     # Do not load complete document snapshots in the file/detail request.
     versions = db.execute(select(TeachingWorkVersion.number, TeachingWorkVersion.created_at, TeachingWorkVersion.facets).where(
         TeachingWorkVersion.work_id == work.id).order_by(TeachingWorkVersion.number.desc())).all()
