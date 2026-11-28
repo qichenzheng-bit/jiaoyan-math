@@ -308,3 +308,11 @@
  @keyframes phone-work-spin{to{transform:rotate(360deg)}}
  @media(prefers-reduced-motion:reduce){.persistent-work .phone-work-spinner{animation:none}}
 }
+
+.compact-keyboard-dismiss{display:none}
+@media(max-width:760px){
+ .compact-review-v2.compact-review-editing:has(.inline-math-editor:focus-within) .compact-keyboard-dismiss{display:block;justify-self:end;min-height:30px;padding:3px 10px;font-size:13px}
+ .persistent-work .phone-agent-groups>details{animation:phone-work-appear .2s ease-out both}
+ @keyframes phone-work-appear{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+ @media(prefers-reduced-motion:reduce){.persistent-work .phone-agent-groups>details{animation:none}}
+}
