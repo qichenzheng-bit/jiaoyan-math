@@ -56,3 +56,11 @@ def test_new_complete_example_drafts_are_python_syntax():
         body = (bundle.PROMPTS_DIR / "examples" / item["path"]).read_text()
         code = body.split("```python title=scene_01\n", 1)[1].split("```", 1)[0]
         ast.parse(code)
+
+
+def test_opening_does_not_depend_on_exam_provenance():
+    text = (bundle.PROMPTS_DIR / "shared/02_opening_reading.md").read_text()
+    assert "不得依赖或主动播报试卷来源" in text
+    assert "不强制开场白" in text
+    example = (bundle.PROMPTS_DIR / "examples/teaching/B01_opening.md").read_text()
+    assert "郑州大学" not in example

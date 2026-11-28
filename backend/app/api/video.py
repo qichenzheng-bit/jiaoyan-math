@@ -146,15 +146,17 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
         with production_model_lock:
             from app.core.ai_preferences import video_supplement
             supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
-            context=(getattr(row,"source_snapshot",None) or {}).get("source_context") or {}
+            saved_context=(getattr(row,"source_snapshot",None) or {}).get("source_context") or {}
+            # Source provenance remains in the bank/project snapshot, not in lesson opening.
+            context={"knowledge_tags":saved_context["knowledge_tags"]} if saved_context.get("knowledge_tags") else {}
             if supplement["text"] or context:
                 try:
                     supported=engine.call("GET","/jiaoyan/prompt-capability")
                 except HTTPException as e:
                     if e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
                     raise
-                if not supported.get("supported") or supported.get("snapshot")!="job":raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
-                if context and not supported.get("source_context"):raise HTTPException(503,"视频引擎尚不支持题源元数据，请升级适配器")
+                if supplement["text"] and (not supported.get("supported") or supported.get("snapshot")!="job"):raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
+                if not supported.get("source_context"):context={}
             prepare_model(db,body.effort if body else None,body.model if body else None)
             if supplement["text"] or context:
                 payload={**supplement, **({"source_context":context} if context else {})}

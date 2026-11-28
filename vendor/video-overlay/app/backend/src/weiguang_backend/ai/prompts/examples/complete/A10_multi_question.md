@@ -1,4 +1,4 @@
-### 示例五：真题级两小问跨幕衔接（`fit_stem` 居中避让 + 小问切换保留结论）
+### 示例五：两小问跨幕衔接（`fit_stem` 居中避让 + 小问切换保留结论）
 
 ```python title=scene_05
 from manim import *
@@ -21,9 +21,9 @@ class MeanValueScene01(AuthoredScene):
 
         self.start_cue(
             "mv_01",
-            "同学们，证明大题往往第一问就是第二问的铺垫，我们先来看清这道积分与中值定理结合的真题。",
+            "同学们，证明大题往往第一问就是第二问的铺垫，今天来看一道积分与中值定理结合的证明题。",
             "",
-            tts_text="同学们，证明大题往往第一问就是第二问的铺垫，我们先来看清这道积分与中值定理结合的真题。",
+            tts_text="同学们，证明大题往往第一问就是第二问的铺垫，今天来看一道积分与中值定理结合的证明题。",
         )
         self.play(FadeIn(full_stem), run_time=min(0.65, max(0.1, self.cue_time_left() * 0.45)))
         self.end_cue("mv_01")
