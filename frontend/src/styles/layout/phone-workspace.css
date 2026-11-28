@@ -242,3 +242,35 @@
  .shell.clean-workspace .nav .nav-history-main>a>.nav-text .math-text-inline{display:inline;white-space:nowrap}
  .shell.clean-workspace .nav .nav-history-main>a>.nav-text .math-text-inline span{white-space:nowrap}
 }
+
+/* Phone work conversation: a wide, document-like reading flow. */
+@media screen and (max-width:760px){
+ .shell.legacy-shell.clean-workspace .content-inner:has(>.agent-conversation){padding:4px 16px calc(6px + env(safe-area-inset-bottom))}
+ .persistent-work.agent-conversation .agent-conversation-head{padding:0 0 4px;gap:6px}
+ .persistent-work.agent-conversation .agent-conversation-head>button{min-height:34px;padding:4px 8px}
+ .persistent-work .agent-chat-column .agent-conversation-scroll{padding:10px 0 12px;overflow-x:hidden}
+ .persistent-work .agent-conversation-thread,.persistent-work .agent-turn{width:100%;max-width:100%;min-width:0;gap:16px}
+ .persistent-work .agent-user-message{max-width:85%}
+ .persistent-work .agent-assistant-message{padding:0;min-width:0;max-width:100%;font-size:16px;line-height:1.75;gap:9px;overflow-wrap:anywhere}
+ .persistent-work .agent-assistant-message>small{font-size:12px;color:var(--muted)}
+ .persistent-work .rich-reply{min-width:0;max-width:100%;overflow-wrap:anywhere;line-height:1.75}
+ .persistent-work .rich-reply p{margin:0 0 1em}
+ .persistent-work .rich-reply h1{font-size:22px}.persistent-work .rich-reply h2{font-size:19px}.persistent-work .rich-reply h3{font-size:17px}
+ .persistent-work .rich-reply .rich-table,.persistent-work .rich-reply pre,.persistent-work .rich-reply .katex-display{max-width:100%;overflow-x:auto}
+ .persistent-work .rich-reply code{overflow-wrap:anywhere;white-space:pre-wrap}
+ .persistent-work .agent-plan-actions{min-width:0;gap:8px}
+ .persistent-work .agent-workflow{padding:0;border:0;background:transparent;min-width:0}
+ .persistent-work .phone-agent-results,.persistent-work .phone-agent-groups{display:grid;gap:8px;min-width:0}
+ .persistent-work .phone-agent-trace{border:0;padding:4px 0;color:var(--muted);font-size:13px;min-width:0}
+ .persistent-work .phone-agent-trace summary,.persistent-work .phone-agent-groups summary{display:flex;align-items:center;gap:7px;cursor:pointer;min-height:34px;list-style:none;min-width:0}
+ .persistent-work .phone-agent-trace summary::-webkit-details-marker{display:none}
+ .persistent-work .phone-agent-trace summary>span{flex:1;min-width:0}
+ .persistent-work .phone-agent-groups{padding:4px 0 4px 12px;border-left:1px solid var(--line)}
+ .persistent-work .phone-agent-entry{padding:3px 0 3px 22px;overflow-wrap:anywhere;min-width:0}
+ .persistent-work .phone-agent-entry p{margin:0;overflow-wrap:anywhere}
+ .persistent-work .phone-agent-artifact{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--selected);color:var(--text);text-decoration:none;min-width:0}
+ .persistent-work .phone-agent-artifact>span{flex:1;min-width:0}.persistent-work .phone-agent-artifact small{display:block;color:var(--muted);font-size:12px}
+ .shell.legacy-shell.clean-workspace .persistent-work .agent-composer{padding:6px 10px;gap:4px;border-radius:22px}
+ .shell.legacy-shell.clean-workspace .persistent-work .agent-composer>textarea{min-height:30px;padding:3px 4px;line-height:1.4}
+ .persistent-work .agent-jump{font-size:0;width:34px;height:34px;padding:0;border-radius:50%}.persistent-work .agent-jump::after{content:'↓';font-size:20px}
+}

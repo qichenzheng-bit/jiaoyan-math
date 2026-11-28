@@ -197,3 +197,15 @@ def test_release_intake_skill_is_pinned_in_native_system(monkeypatch):
     assert "仅在数学资料识别、录入或审核任务中适用" in system
     assert system.endswith("用户工作偏好")
     assert len(system.encode("utf-8"))<80000
+
+
+def test_corrected_draft_recovers_only_same_rejected_source_batch():
+    rejected={"id":"old","tool":"native_intake_review","state":"failed","draft_recovery_scope":"scope","rejected_before_write":True,"fingerprint":"old"}
+    different={**rejected,"id":"other","draft_recovery_scope":"different"}
+    uncertain={**rejected,"id":"uncertain","rejected_before_write":False}
+    success={"id":"new","tool":"native_intake_review","state":"done","draft_recovery_scope":"scope","fingerprint":"new","result":{"state":"review","id":"new"}}
+    steps=[rejected,different,uncertain,success]
+    n.recover_tool_failures(steps,success)
+    assert rejected["state"]=="recovered" and rejected["resolved_by"]=="new"
+    assert different["state"]==uncertain["state"]=="failed"
+    n.complete_turn({"steps":[rejected,success]},"完成")

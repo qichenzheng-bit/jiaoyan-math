@@ -152,6 +152,10 @@ SYSTEM=("你是微光数学教研智能体。以自然语言理解和回应用�
         "若用户提供分离的题目与答案解析资料，先核对题干、条件及题号，匹配可靠的参考原文并保存文件和页码；不因同题号强行匹配。只在找不到真实答案解析时AI补充并标明。未人工核对的参考转录同样由最终审核核对。"
         "创建审核草稿后由用户审核，禁止自行正式入库。必要时根据实际数据澄清，不要求固定措辞。"
         "视频制作沿用原引擎和原教学提示词；提交异步任务后结束本轮释放模型，系统追踪实际生成及渲染结果，不虚报成片。"
+        "录入时每题每小问先区分已有答案、已有解析及真正缺失字段；已有内容只转录整理，不重新求解。跨页先续接原文；仅补缺失部分。"
+        "不要为适应编号解析器改写原文中的公式编号引用；多小问优先用明确的question_data结构。"
+        "复用已经读取的原页与标签检索结果，只针对缺失或错误条目修正草稿；已成功的工具无需再次调用。"
+        "最终用简洁中文汇报实际成果、数量与待核对事项，不输出任务ID、批次ID、工具名、内部字段或提示词。Markdown表格必须有合法表头和分隔行。"
         "如某项能力未提供，明确说明，不能假装完成。")
 
 def current_intake_skill():
@@ -457,6 +461,29 @@ def attach_originals(db,s,user,args):
 def text_result(value,error=False):
     return {"is_error":error,"content":[{"type":"text","text":json.dumps(value,ensure_ascii=False,default=str)}]}
 
+def draft_recovery_scope(name,args):
+    """Only a validated replacement submission for the identical source batch can recover a rejected draft."""
+    if name!="native_intake_review":return None
+    try:
+        body=Draft.model_validate(args)
+    except (ValueError,TypeError):return None
+    pages=sorted(p.page for p in body.pages)
+    return hashlib.sha256(json.dumps([body.file_id,pages,body.replace_job_id,body.replace_revision],ensure_ascii=False,separators=(",",":")).encode()).hexdigest()
+
+
+def recover_tool_failures(steps,entry):
+    if entry.get("state")!="done":return
+    for earlier in steps:
+        if earlier.get("state")!="failed":continue
+        exact=bool(entry.get("fingerprint")) and earlier.get("fingerprint")==entry["fingerprint"]
+        scope=entry.get("draft_recovery_scope")
+        corrected=(bool(scope) and earlier.get("draft_recovery_scope")==scope and earlier.get("rejected_before_write") is True
+                   and entry.get("tool")==earlier.get("tool")=="native_intake_review"
+                   and isinstance(entry.get("result"),dict) and entry["result"].get("state")=="review" and bool(entry["result"].get("id")))
+        if exact or corrected:
+            earlier["state"]="recovered";earlier["resolved_by"]=entry["id"]
+
+
 def invoke_tool(db,s,r,user,call):
     from app.api import work_agent as wa
     name,args,ident=call["name"],call["args"],call["id"]
@@ -469,6 +496,10 @@ def invoke_tool(db,s,r,user,call):
         return text_result(old.get("result") or {"error":old["detail"]},old["state"]=="failed")
     fingerprint=hashlib.sha256(json.dumps([name,args],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
     entry={"id":ident,"tool":name,"state":"running","detail":spec["description"],"at":now(),"fingerprint":fingerprint}
+    scope=draft_recovery_scope(name,args)
+    if scope:entry["draft_recovery_scope"]=scope
+    from time import monotonic
+    started=monotonic()
     # Journal business mutations before executing; do not store full generated
     # drafts or image data in work history.
     r["steps"]=[x for x in r["steps"] if x["id"]!=ident]+[entry]
@@ -506,6 +537,8 @@ def invoke_tool(db,s,r,user,call):
         if spec["write"] and isinstance(exc,HTTPException) and exc.status_code>=500:
             raise HTTPException(409,"业务写入结果不明确，已停止以防重复")
         entry.update(state="failed",result={"error":detail},detail=detail)
+        # A 422 from this draft path means the request was rejected before its commit.
+        if scope and isinstance(exc,HTTPException) and exc.status_code==422:entry["rejected_before_write"]=True
         response=text_result({**entry["result"],"failed_call_id":ident},True)
     except Exception as exc:
         db.rollback()
@@ -516,6 +549,7 @@ def invoke_tool(db,s,r,user,call):
         detail="只读工具执行异常："+type(exc).__name__
         entry.update(state="failed",result={"error":detail},detail=detail)
         response=text_result({**entry["result"],"failed_call_id":ident},True)
+    entry["duration_ms"]=round((monotonic()-started)*1000)
     # The underlying business handlers may commit and release the session lock.
     db.expire_all();fresh=w.workspace(db,s.id,True);latest=wa.current(fresh)
     if not latest or latest["id"]!=r["id"] or latest["state"]!="running":
@@ -525,10 +559,7 @@ def invoke_tool(db,s,r,user,call):
     if name in ("native_read_detail","native_batch_context") and entry.get("state")=="done":
         entry["result"]={k:v for k,v in entry["result"].items() if k!="text"}
     r["steps"]=[x if x["id"]!=ident else entry for x in r["steps"]]
-    if entry["state"]=="done":
-        for earlier in r["steps"]:
-            if earlier.get("state")=="failed" and earlier.get("fingerprint")==fingerprint:
-                earlier["state"]="recovered";earlier["resolved_by"]=ident
+    recover_tool_failures(r["steps"],entry)
     wa.save(db,fresh,r);db.commit()
     return response
 
