@@ -1442,6 +1442,27 @@ def manual_commit(id:str,body:ManualRevision,db:Session=Depends(get_db),user:Use
     return {"document":saved,"counts":counts}
 
 
+
+@router.post("/{id}/manual-direct",dependencies=[Depends(require_origin)])
+def manual_direct(id:str,body:Draft,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    """The user's explicit final confirmation is the review for manual intake."""
+    bank.admin_lock(db,user);d=row(db,id)
+    if d.archived or d.kind!="intake" or body.kind!="intake" or d.revision!=body.revision or d.source_id!=body.source_id:
+        raise HTTPException(409,"录入草稿版本或来源冲突，请重新加载")
+    ensure_no_active_run(db,d)
+    if not d.source_id:raise HTTPException(422,"请先绑定实际来源")
+    # Keep all data and duplicate checks, not the separate approval workflow.
+    d.blocks=validate(db,body,d.blocks,allow_reference_edits=True)
+    d.title=body.title.strip();d.subject=normalize_subject(body.subject)
+    checked=manual_review_data(db,d)["rows"]
+    if not checked:raise HTTPException(422,"没有待入库条目")
+    errors=["第 "+str(r["number"])+" 条："+ "；".join(r["errors"]) for r in checked if r["errors"]]
+    if errors:raise HTTPException(422,"；".join(errors)[:800])
+    saved,record=write_registration(id,Draft.model_validate({**public(d),"merge_same_batch":True}),db,user,commit=False,return_record=True)
+    counts,_=actual_counts(db,record.entries)
+    audit(db,"document.manual.direct",user.id);db.commit()
+    return {"document":saved,"counts":counts}
+
 REGISTRATION_CHUNK=20
 
 class IntakeRunStart(BaseModel):
