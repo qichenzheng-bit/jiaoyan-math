@@ -44,3 +44,14 @@ def test_auto_review_policy_preserves_explicit_raw_review(monkeypatch):
     assert wa.workflow(db,s,r)["stage"]=="verify"
     assert w.reviewed_batch(SimpleNamespace(state="review",provenance={"single_review":True})) is False
     assert w.reviewed_batch(SimpleNamespace(state="converted",provenance={"single_review":True})) is True
+
+
+def test_direct_registration_refuses_unapproved_before_source_write(monkeypatch):
+    from app.api import intelligence as ai
+    from fastapi import HTTPException
+    import pytest
+    from types import SimpleNamespace
+    monkeypatch.setattr(ai.bank,"admin_lock",lambda *a:None)
+    monkeypatch.setattr(ai,"get_job",lambda *a:SimpleNamespace(state="review",document_id=None,revision=1,items=[{"uid":"x"}],provenance={"reviewed_uids":[]}))
+    with pytest.raises(HTTPException,match="逐题核对"):
+        ai.direct_register("job",ai.DirectIntake(revision=1,title="试卷"),None,None)

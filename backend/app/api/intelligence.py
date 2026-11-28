@@ -475,6 +475,9 @@ def append_targets(id:str,db:Session=Depends(get_db)):
     return [{"id":d.id,"title":d.title,"revision":d.revision,"block_count":len(d.blocks),"available":len(d.blocks)+len(j.items)<=200} for d in append_candidates(db,j)]
 @router.post("/jobs/{id}/document",dependencies=[Depends(require_origin)])
 def convert(id:str,body:Convert,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return convert_reviewed_job(id,body,db,user)
+
+def convert_reviewed_job(id,body,db,user,*,commit=True):
     bank.admin_lock(db,user);j=get_job(db,id)
     if j.document_id:return {"document_id":j.document_id}
     if j.state!="review" or j.revision!=body.revision or not j.items:raise HTTPException(409,"请先审核草稿")
@@ -509,7 +512,50 @@ def convert(id:str,body:Convert,db:Session=Depends(get_db),user:User=Depends(cur
                 rows=docs.manual_review_data(db,d,b["uid"])["rows"]
                 if rows and not rows[0]["errors"]:state[b["uid"]]=docs.manual_item_digest(d,b)
         db.merge(docs.Setting(key=docs.manual_review_key(d),value=json.dumps(state)))
-    docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.append" if body.append_document_id else "intelligence.convert",user.id);db.commit();return {"document_id":d.id}
+    docs.references(db,d);j.document_id=d.id;j.state="converted";j.revision+=1;j.updated_at=now();audit(db,"intelligence.append" if body.append_document_id else "intelligence.convert",user.id)
+    if commit:db.commit()
+    else:db.flush()
+    return {"document_id":d.id}
+
+
+class DirectIntake(docs.IntakeSourceBind):
+    """One final, user-approved registration; no second review or model call."""
+    pass
+
+@router.post("/jobs/{id}/direct-register",dependencies=[Depends(require_origin)])
+def direct_register(id:str,body:DirectIntake,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    from app.models import TeachingResource as Resource
+    bank.admin_lock(db,user);j=get_job(db,id)
+    receipt=(j.provenance or {}).get("direct_registration")
+    if receipt and j.document_id:return receipt
+    if j.state!="review" or j.document_id or j.revision!=body.revision or not j.items:
+        raise HTTPException(409,"草稿已变化，请重新打开审核")
+    if set((j.provenance or {}).get("reviewed_uids",[]))!={b["uid"] for b in j.items}:
+        raise HTTPException(409,"请先逐题核对全部保留条目")
+    if body.source_id:
+        source=bank.active_source(db,body.source_id,True)
+    elif j.source_id and not body.title.strip():
+        source=bank.active_source(db,j.source_id,True)
+    else:
+        if not body.title.strip():raise HTTPException(422,"请填写实际资料来源")
+        data=bank.clean(bank.Draft(kind="source",title=body.title,content=body.title,subject="" if body.source_type=="exam" else j.subject,source_type=body.source_type,cohort_year=body.year,edition=body.edition,exam_type=body.exam_type),db)
+        bank.guard_source_identity(db,data)
+        source=Resource(id=str(uuid4()),code=bank.new_code(db,"source"),**data,revision=1,sources_revision=1,archived=False,created_at=now(),updated_at=now())
+        db.add(source);db.flush();bank.snapshot(db,source)
+    j.source_id=source.id
+    converted=convert_reviewed_job(id,Convert(revision=body.revision),db,user,commit=False)
+    d=docs.row(db,converted["document_id"])
+    preview=docs.intake_preview(db,d)
+    if not preview["rows"] or any(r["errors"] or not r["approved"] for r in preview["rows"]):
+        errors=["第 "+str(r["number"])+" 条："+("；".join(r["errors"]) or "审核内容已变化") for r in preview["rows"] if r["errors"] or not r["approved"]]
+        raise HTTPException(422,"；".join(errors)[:800] or "没有可入库条目")
+    saved,record=docs.write_registration(d.id,docs.Draft.model_validate({**docs.public(d),"merge_same_batch":True}),db,user,commit=False,return_record=True)
+    counts,_=docs.actual_counts(db,record.entries)
+    receipt={"document_id":d.id,"source_id":source.id,"source_title":source.title,"total":len(record.entries),"counts":counts}
+    j.provenance={**(j.provenance or {}),"direct_registration":receipt}
+    j.detail="已核对并正式入库"
+    audit(db,"intelligence.direct_register",user.id);db.commit()
+    return receipt
 
 class PDFRequest(BaseModel):
     file_id:str=Field(min_length=1,max_length=36)
