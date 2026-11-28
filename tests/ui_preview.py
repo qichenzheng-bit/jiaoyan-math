@@ -802,7 +802,7 @@ with sync_playwright() as p:
                     expect(page.locator(".manual-word-editor")).to_have_count(0)
                     outline.first.click()
                     expect(page.locator(".manual-word-editor")).to_have_count(1)
-                    page.get_by_role("button",name="微调原题 / 知识点",exact=True).click()
+                    page.get_by_role("button",name="微调原题 / 知识单元",exact=True).click()
                     page.get_by_role("dialog").get_by_role("button",name="确认",exact=True).click()
                     page.get_by_label("题目",exact=True).locator(".inline-math-token").first.wait_for()
                     page.get_by_role("button",name="取消微调",exact=True).click()
@@ -942,11 +942,11 @@ with sync_playwright() as p:
             expect(page.get_by_role("heading",name="重要极限 · 关联题目")).to_be_visible()
             expect(page.get_by_text(items[0]["code"],exact=False).last).to_be_visible()
             page.get_by_role("button",name="关闭",exact=True).click()
-            for dimension,button_name,expected in (("question_type","题型分布","综合题"),("method","解析中的方法名称","泰勒展开"),("cooccurrence","知识点共现","极限运算")):
+            for dimension,button_name,expected in (("question_type","题型分布","综合题"),("method","解析中的方法名称","泰勒展开"),("cooccurrence","知识标签共现","极限运算")):
                 page.get_by_role("button",name=button_name,exact=True).click()
                 if dimension=="cooccurrence":
                     expect(page.get_by_role("button",name="生成分布",exact=True)).to_be_disabled()
-                    page.get_by_label("选择指定知识点").select_option(label="高等数学 · 重要极限")
+                    page.get_by_label("选择指定知识标签").select_option(label="高等数学 · 重要极限")
                 page.get_by_role("button",name="生成分布",exact=True).click()
                 expect(page.get_by_role("cell",name=expected,exact=True)).to_be_visible()
             assert [x[0] for x in stats_requests]==["","/questions","/distribution","/distribution","/distribution"]
@@ -1704,8 +1704,8 @@ with sync_playwright() as p:
             visit(page,"/works",".finished-list")
             expect(page.locator(".finished-open")).to_have_count(1)
             page.locator(".finished-search").get_by_role("button",name="筛选",exact=True).click()
-            expect(page.get_by_label("知识点",exact=True)).to_be_visible()
-            expect(page.get_by_label("知识标签",exact=True)).to_be_visible()
+            expect(page.get_by_label("录入知识标签",exact=True)).to_be_visible()
+            expect(page.get_by_label("图谱知识标签",exact=True)).to_be_visible()
             page.locator(".finished-search").get_by_role("button",name="筛选",exact=True).click()
             page.locator(".finished-open").first.click()
             expect(page.locator(".finished-files")).to_be_visible()
