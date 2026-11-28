@@ -44,3 +44,6 @@
 ### 实机升级前检查（2026-11-28）
 - 官方当前中文版/英文版 Memory 专页仍明确标注自动记忆配置仅 TypeScript 支持；Python 原生会话恢复、外置存储是另一项能力。Python Worker 对可选 memory 字段和 flush_memory 只做能力探测，未发现时不启用；此前阶段四关于 Python 原生自动记忆已普遍支持的说法以此更正。原有明确教学偏好保留。参考 https://docs.qoder.cn/cli/sdk/memory 和 https://docs.qoder.cn/cli/sdk/references-python 。
 - 桌面审核测试用 Playwright 自动重试断言等待按钮启用，不取消业务断言。真实 SDK 升级必须在应用新版本发布之后执行；未联调前不启用 WG_NATIVE_AGENT、WG_NATIVE_CHAT、WG_NATIVE_VIDEO。
+
+### 实机兼容性修复（Worker 19）
+服务器 CLI 1.1.97 与 Python SDK 1.0.17 的外置 CLI 调用出现 sdk_worker_removed / exit 42。独立最小测试改用 SDK 自行选择的内置 CLI（不传 cli_path，移除子进程 QODERCN_PATH）；保留原外置 CLI、账号与旧视频引擎。聊天/工作、视频 SDK 通道、额度/模型 SDK 查询统一采用内置 CLI 解析机制。仅展示异常类型与数字退出码，不泄露原始错误/凭据。完整原生 MCP、图片和恢复测试仍需实机执行。

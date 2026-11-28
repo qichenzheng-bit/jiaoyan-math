@@ -277,3 +277,13 @@ def test_native_workspace_delete_refuses_ambiguous_cli_path(tmp_path,monkeypatch
     local=project/(session+".jsonl");local.write_text("keep")
     assert worker.remove_native_workspace({"workspace":workspace,"owner":1})[0]==409
     assert local.exists() and cwd.exists()
+
+
+def test_native_sdk_uses_bundled_cli(monkeypatch):
+    monkeypatch.setenv("QODERCN_PATH","/legacy/incompatible/qoderclicn")
+    monkeypatch.setenv("HOME","/test/worker")
+    env=worker.sdk_environment()
+    assert "QODERCN_PATH" not in env and env["HOME"]=="/test/worker"
+    assert "cli_path=" not in worker.SDK_AGENT_SCRIPT
+    assert '"cli_path":' not in worker.SDK_VIDEO_SCRIPT
+    assert 'code==42' in worker.SDK_AGENT_SCRIPT

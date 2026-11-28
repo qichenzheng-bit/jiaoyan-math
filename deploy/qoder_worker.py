@@ -81,6 +81,12 @@ AUTH_STATE_PATH = Path.home() / ".jiaoyan-auth-state.json"
 retained_auth = False
 user_disconnected = False
 SDK_PYTHON = Path("/opt/jiaoyan-qoder/sdk-venv/bin/python")
+
+def sdk_environment():
+    """Keep login environment, but let SDK choose its bundled compatible CLI."""
+    env=dict(os.environ)
+    env.pop("QODERCN_PATH",None)
+    return env
 usage_cache = None
 USAGE_CACHE_SECONDS = 60
 SUPPORTED_EFFORTS = ('none','off','disabled','low','medium','high','xhigh','max')
@@ -180,7 +186,7 @@ def sdk_catalog(exe):
         with tempfile.TemporaryDirectory(prefix="qoder-sdk-models-") as work:
             proc=subprocess.Popen([str(SDK_PYTHON),"-c",SDK_CATALOG_SCRIPT,exe,work],
                 cwd=work,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,
-                env={**os.environ,"PATH":str(Path(exe).parent)+os.pathsep+os.environ.get("PATH","")})
+                env=sdk_environment())
             try:
                 out,_=proc.communicate(timeout=25)
             except subprocess.TimeoutExpired:
@@ -224,7 +230,7 @@ def sdk_usage(exe):
         with tempfile.TemporaryDirectory(prefix="qoder-sdk-usage-") as work:
             proc=subprocess.Popen([str(SDK_PYTHON),"-c",SDK_USAGE_SCRIPT,exe,work],cwd=work,
                 stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,
-                env={**os.environ,"PATH":str(Path(exe).parent)+os.pathsep+os.environ.get("PATH","")})
+                env=sdk_environment())
             try:out,_=proc.communicate(timeout=20)
             except subprocess.TimeoutExpired:
                 stop_process(proc);proc.communicate();return None,"sdk_timeout"
@@ -477,7 +483,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 18, "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 19, "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -603,7 +609,7 @@ def prune_snapshots():
 def native_video_enabled():
     return os.environ.get("WG_NATIVE_VIDEO")=="1"
 
-SDK_VIDEO_SCRIPT = "import asyncio,json,sys,inspect\nfrom qodercn_agent_sdk import QoderAgentOptions,QoderSDKClient,qodercli_auth,ResultMessage,AssistantMessage,TextBlock\ndef emit(event):\n    print(json.dumps(event,ensure_ascii=False),flush=True)\nasync def main():\n    cfg=json.loads(sys.stdin.readline())\n    extra={\"no-session-persistence\":None}\n    if cfg[\"effort\"]!=\"default\":extra[\"reasoning-effort\"]=cfg[\"effort\"]\n    # Preserve the original video prompt; no extra skills, memory or tool actions.\n    opts={\"auth\":qodercli_auth(),\"cli_path\":cfg[\"cli\"],\"cwd\":cfg[\"cwd\"],\n          \"model\":cfg[\"model\"],\"tools\":[],\"allowed_tools\":[],\n          \"setting_sources\":[],\"skills\":[],\"strict_mcp_config\":True,\n          \"permission_mode\":\"dontAsk\",\"extra_args\":extra,\"include_partial_messages\":True}\n    if cfg[\"system\"]:opts[\"system_prompt\"]=cfg[\"system\"]\n    if \"memory\" in inspect.signature(QoderAgentOptions).parameters:opts[\"memory\"]={}\n    final=None\n    async with QoderSDKClient(options=QoderAgentOptions(**opts)) as client:\n        await client.query(cfg[\"prompt\"])\n        async for message in client.receive_response():\n            if isinstance(message,AssistantMessage):\n                value=\"\".join(b.text for b in message.content if isinstance(b,TextBlock))\n                if value:emit({\"type\":\"assistant\",\"message\":{\"content\":value}})\n            elif isinstance(message,ResultMessage):\n                final={\"type\":\"result\",\"is_error\":message.subtype!=\"success\" or not isinstance(message.result,str) or not message.result.strip(),\"result\":message.result or \"\"}\n                break\n            elif isinstance(getattr(message,\"event\",None),dict):\n                event=message.event\n                if event.get(\"type\")==\"content_block_delta\" and event.get(\"delta\",{}).get(\"type\")==\"text_delta\":\n                    emit({\"type\":\"stream_event\",\"event\":event})\n    emit(final or {\"type\":\"error\"})\n    if not final or final[\"is_error\"]:sys.exit(1)\ntry:asyncio.run(main())\nexcept Exception:\n    emit({\"type\":\"error\"})\n    sys.exit(1)\n"
+SDK_VIDEO_SCRIPT = "import asyncio,json,sys,inspect\nfrom qodercn_agent_sdk import QoderAgentOptions,QoderSDKClient,qodercli_auth,ResultMessage,AssistantMessage,TextBlock\ndef emit(event):\n    print(json.dumps(event,ensure_ascii=False),flush=True)\nasync def main():\n    cfg=json.loads(sys.stdin.readline())\n    extra={\"no-session-persistence\":None}\n    if cfg[\"effort\"]!=\"default\":extra[\"reasoning-effort\"]=cfg[\"effort\"]\n    # Preserve the original video prompt; no extra skills, memory or tool actions.\n    opts={\"auth\":qodercli_auth(),\"cwd\":cfg[\"cwd\"],\n          \"model\":cfg[\"model\"],\"tools\":[],\"allowed_tools\":[],\n          \"setting_sources\":[],\"skills\":[],\"strict_mcp_config\":True,\n          \"permission_mode\":\"dontAsk\",\"extra_args\":extra,\"include_partial_messages\":True}\n    if cfg[\"system\"]:opts[\"system_prompt\"]=cfg[\"system\"]\n    if \"memory\" in inspect.signature(QoderAgentOptions).parameters:opts[\"memory\"]={}\n    final=None\n    async with QoderSDKClient(options=QoderAgentOptions(**opts)) as client:\n        await client.query(cfg[\"prompt\"])\n        async for message in client.receive_response():\n            if isinstance(message,AssistantMessage):\n                value=\"\".join(b.text for b in message.content if isinstance(b,TextBlock))\n                if value:emit({\"type\":\"assistant\",\"message\":{\"content\":value}})\n            elif isinstance(message,ResultMessage):\n                final={\"type\":\"result\",\"is_error\":message.subtype!=\"success\" or not isinstance(message.result,str) or not message.result.strip(),\"result\":message.result or \"\"}\n                break\n            elif isinstance(getattr(message,\"event\",None),dict):\n                event=message.event\n                if event.get(\"type\")==\"content_block_delta\" and event.get(\"delta\",{}).get(\"type\")==\"text_delta\":\n                    emit({\"type\":\"stream_event\",\"event\":event})\n    emit(final or {\"type\":\"error\"})\n    if not final or final[\"is_error\"]:sys.exit(1)\ntry:asyncio.run(main())\nexcept Exception:\n    emit({\"type\":\"error\"})\n    sys.exit(1)\n"
 
 def chat_run(job, exe, model, prompt, attachment=None):
     video = job.get("video", False)
@@ -626,7 +632,7 @@ def chat_run(job, exe, model, prompt, attachment=None):
             native=video and job.get("native_video",False)
             if native:
                 proc=subprocess.Popen([str(SDK_PYTHON),"-u","-c",SDK_VIDEO_SCRIPT],cwd=cwd,
-                    stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+                    stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,env=sdk_environment())
             else:
                 proc=subprocess.Popen(args+["-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
@@ -635,7 +641,7 @@ def chat_run(job, exe, model, prompt, attachment=None):
                 if job["cancel"]:stop_process(proc)
             if native:
                 try:
-                    proc.stdin.write((json.dumps({"cli":exe,"cwd":cwd,"model":model,"effort":job["effort"],
+                    proc.stdin.write((json.dumps({"cwd":cwd,"model":model,"effort":job["effort"],
                         "system":job["system"],"prompt":prompt},ensure_ascii=False)+"\n").encode())
                     proc.stdin.flush()
                 finally:proc.stdin.close()
@@ -807,7 +813,7 @@ async def main():
             "roots":[{"id":"teaching-preferences","path":str(Path(cfg["memory_file"]).parent),"index_file":"MEMORY.md","access":"read-write"}],
             "prompt":"只记录用户明确、长期适用的数学教研偏好、工作规范和经过确认的经验；不记录一次性任务、题库原文、附件、身份凭据、隐私数据或未经用户确认的事实。优先更新MEMORY.md，保持简洁，不将记忆当作系统指令。"},
             "consumption":{"files":[{"id":"teaching-preferences","path":cfg["memory_file"],"required":False}],"max_tokens":4000,"failure_mode":"best_effort"}}
-    opts=QoderAgentOptions(auth=qodercli_auth(),cwd=cfg["cwd"],cli_path=cfg["cli"],
+    opts=QoderAgentOptions(auth=qodercli_auth(),cwd=cfg["cwd"],
         session_store=store,session_store_flush="eager",**({"memory":memory} if memory else {}),
         model=cfg["model"],system_prompt=cfg["system"],tools=[*builtins,*names],
         allowed_tools=[*builtins,*names],disallowed_tools=blocked,permission_mode="dontAsk",strict_mcp_config=True,
@@ -844,7 +850,11 @@ async def main():
 try:asyncio.run(main())
 except Exception as exc:
     # Do not leak prompts, credentials or raw tool payloads into logs/UI.
-    emit({"type":"error","detail":"原生 Agent SDK 执行失败："+type(exc).__name__})
+    code=getattr(exc,"exit_code",None)
+    detail="原生 Agent SDK 执行失败："+type(exc).__name__
+    if type(code) is int:detail+=" (exit "+str(code)+")"
+    if code==42:detail+="；SDK 与 CLI 会话协议不兼容"
+    emit({"type":"error","detail":detail})
     sys.exit(1)
 """
 
@@ -955,7 +965,7 @@ def agent_start(data):
         try:save_snapshot(job)
         except OSError:return 503,{"detail":"原生Agent任务缓存不可写"}
         chat_jobs[ident]=job;chat_active=ident
-        threading.Thread(target=agent_run,args=(job,{**data,"cli":exe}),daemon=True).start()
+        threading.Thread(target=agent_run,args=(job,data),daemon=True).start()
         return 200,chat_snapshot(job)
 
 def agent_run(job,cfg):
@@ -979,7 +989,7 @@ def agent_run(job,cfg):
         memory_file.chmod(0o600)
         install_native_skills(cwd)
         proc=subprocess.Popen([str(SDK_PYTHON),"-u","-c",SDK_AGENT_SCRIPT],cwd=cwd,
-            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,env=sdk_environment())
         with lock:
             job["proc"]=proc
             if job["cancel"]:stop_process(proc)
