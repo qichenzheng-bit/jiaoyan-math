@@ -170,3 +170,18 @@ def test_work_entry_uses_native_even_when_old_flags_are_unset(monkeypatch):
     begin=Mock(return_value={"native":True});monkeypatch.setattr(n,"begin",begin)
     assert wa.start("w",wa.Start(instruction="新的任务",auto=False),db,user)=={"native":True}
     begin.assert_called_once()
+
+
+def test_video_success_never_masks_failed_agent_or_other_tools(monkeypatch):
+    from app.api import work_agent as wa
+    monkeypatch.setattr(wa,"save",lambda *args:None)
+    db=SimpleNamespace(commit=lambda:None)
+    monkeypatch.setattr(n.video,"job_read",lambda *args:{"id":"r","kind":"render","status":"succeeded"})
+    for extra,steps in [
+        ({"native_video_agent_failure":"SDK异常"},[]),
+        ({},[{"tool":"document_patch","state":"failed"}]),
+    ]:
+        record={"phase_at":n.now(),"steps":[*steps,{"state":"queued","video_child":{"kind":"video","project":"p","id":"r"}}],**extra}
+        n.poll_video_jobs(db,None,record,None)
+        assert record["state"]=="failed"
+        assert record["steps"][-1]["state"]=="done"

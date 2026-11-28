@@ -489,6 +489,15 @@ def invoke_tool(db,s,r,user,call):
             raise HTTPException(409,"业务写入结果不明确，已停止以防重复")
         entry.update(state="failed",result={"error":detail},detail=detail)
         response=text_result({**entry["result"],"failed_call_id":ident},True)
+    except Exception as exc:
+        db.rollback()
+        # Unknown write errors are never replayed. Read-only errors can be
+        # reported to the SDK as an actual failure instead of a stranded call.
+        if spec["write"]:
+            raise HTTPException(409,"业务写入结果不明确，已停止以防重复") from exc
+        detail="只读工具执行异常："+type(exc).__name__
+        entry.update(state="failed",result={"error":detail},detail=detail)
+        response=text_result({**entry["result"],"failed_call_id":ident},True)
     # The underlying business handlers may commit and release the session lock.
     db.expire_all();fresh=w.workspace(db,s.id,True);latest=wa.current(fresh)
     if not latest or latest["id"]!=r["id"] or latest["state"]!="running":
@@ -560,6 +569,8 @@ def poll_video_jobs(db,s,r,user):
         r["detail"]="正在等待原视频引擎实际生成或渲染"
     else:
         failed=[x for x in r.get("steps",[]) if x.get("video_child") and x.get("state")=="failed"]
+        failures=unresolved_errors(r)
+        agent_failure=r.get("native_video_agent_failure")
         amendments=r.get("amendments",[]);count=r.get("native_amendment_count",0)
         if len(amendments)>count and r.get("native_session"):
             additional=amendments[count:]
@@ -568,8 +579,15 @@ def poll_video_jobs(db,s,r,user):
                 native_resume=r["native_session"],native_amendment_count=len(amendments),
                 native_prompt=user_prompt(db,s,"原视频任务实际结果："+json.dumps(facts,ensure_ascii=False)+"\n用户追加要求：\n"+"\n".join(a["text"] for a in additional),additional[-1].get("selected_id")),
                 detail="原生Agent继续处理视频追加要求")
+            r["stage_start"]=len(r.get("steps",[]))
+            # An explicit new instruction starts a new turn; prior receipts and
+            # failed operations remain visible in the journal.
+            r.pop("native_video_agent_failure",None)
         else:
-            r.update(state="failed" if failed else "done",detail="存在失败的视频任务，请查看真实引擎记录" if failed else "原视频引擎已确认本轮视频任务完成；等待人工验收")
+            if failed:detail="存在失败的视频任务，请查看真实引擎记录"
+            elif failures or agent_failure:detail="视频任务已结束，但原生Agent或其他工具未完整完成；保留实际成果，请核对"
+            else:detail="原视频引擎已确认本轮视频任务完成；等待人工验收"
+            r.update(state="failed" if failed or failures or agent_failure else "done",detail=detail)
     wa.save(db,s,r);db.commit()
 
 def uncertain_write(r):
@@ -608,6 +626,7 @@ def retry(db,s,r,user):
     # "continue" if the SDK did not persist the last failed turn.
     instruction=r["instruction"]+"\n"+"\n".join(x["text"] for x in r.get("amendments",[]))
     if resume:instruction="继续未完成的工作，核对实际成果，不重复创建。\n用户原始及追加要求：\n"+instruction
+    r.pop("native_video_agent_failure",None)
     r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,native_interrupt_requested=False,detail="恢复原生Agent会话",
         native_resume=resume,native_amendment_count=len(r.get("amendments",[])),native_answer="",
         native_prompt=user_prompt(db,s,instruction,r.get("amendments",[{}])[-1].get("selected_id") if r.get("amendments") else None))
@@ -685,6 +704,9 @@ def tick(db,s,r,user):
             wa.save(db,s,r);db.commit()
         return
     if video_waiting(r) and reply.get("state") in ("done","failed","stopped"):
+        if reply.get("state")!="done":
+            r["native_video_agent_failure"]=str(reply.get("detail") or "原生Agent未正常结束")[:400]
+        else:r.pop("native_video_agent_failure",None)
         r.update(phase="native_video_wait",phase_at=now(),detail="Agent已释放模型；等待原视频引擎实际结果")
         wa.save(db,s,r);db.commit();return
     if reply.get("state")!="done":
