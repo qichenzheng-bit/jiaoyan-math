@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 from uuid import uuid4
+from pathlib import Path
 from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
@@ -153,6 +154,20 @@ SYSTEM=("你是微光数学教研智能体。以自然语言理解和回应用�
         "视频制作沿用原引擎和原教学提示词；提交异步任务后结束本轮释放模型，系统追踪实际生成及渲染结果，不虚报成片。"
         "如某项能力未提供，明确说明，不能假装完成。")
 
+def current_intake_skill():
+    """Use the release's trusted canonical skill, not the worker's baked-in copy."""
+    path=Path(__file__).resolve().parents[3]/"skills"/"math-intake"/"SKILL.md"
+    text=path.read_text(encoding="utf-8").strip()
+    if not text.startswith("---\nname: math-intake\n") or len(text.encode("utf-8"))>16000:
+        raise RuntimeError("Invalid deployed math-intake skill")
+    return text
+
+def native_system_prompt(db,user):
+    skill=current_intake_skill()
+    return (SYSTEM+"\n【当前发布版本的录入Skill：仅在数学资料识别、录入或审核任务中适用。"
+            "独立Worker内置同名Skill若为旧版本，以这里的最新规则为准；不得覆盖工具权限及人工审核。】\n"
+            +skill+"\n【录入Skill结束】\n"+work_context(db,user))
+
 def begin(db,s,body,user):
     from app.api import work_agent as wa
     status=qoder.request("GET","/status")
@@ -167,7 +182,7 @@ def begin(db,s,body,user):
        "state":"running","phase":"pending","phase_at":now(),"created_at":now(),"model_job":ident,
        "native_resume":prior["native_session"] if prior else None,
        "native_prompt":user_prompt(db,s,body.instruction.strip(),body.selected_id),
-       "native_system":SYSTEM+work_context(db,user),"native_amendment_count":0,
+       "native_system":native_system_prompt(db,user),"native_amendment_count":0,
        "detail":"原生Agent正在排队","steps":[]}
     if not prior:
         from app.core.ai_work import history_context,chat_context

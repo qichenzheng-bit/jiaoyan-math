@@ -185,3 +185,15 @@ def test_video_success_never_masks_failed_agent_or_other_tools(monkeypatch):
         n.poll_video_jobs(db,None,record,None)
         assert record["state"]=="failed"
         assert record["steps"][-1]["state"]=="done"
+
+
+def test_release_intake_skill_is_pinned_in_native_system(monkeypatch):
+    monkeypatch.setattr(n,"work_context",lambda db,user:"用户工作偏好")
+    skill=n.current_intake_skill()
+    system=n.native_system_prompt(None,None)
+    assert skill in system
+    assert "teaching_detail" in system
+    assert "独立Worker内置同名Skill若为旧版本" in system
+    assert "仅在数学资料识别、录入或审核任务中适用" in system
+    assert system.endswith("用户工作偏好")
+    assert len(system.encode("utf-8"))<80000
