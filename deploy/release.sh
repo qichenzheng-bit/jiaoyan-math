@@ -114,6 +114,18 @@ if (cd "$release/backend" && "$release/venv/bin/python" -m alembic upgrade head)
     # Update latest encrypted snapshot; the pre-reset commit remains available in Git history.
     "$release/venv/bin/python" "$release/deploy/backup.py" backup || echo "WARNING: clean-state repository backup not yet published"
   fi
+  # One-time historical work cleanup authorized by the owner. A failed backup
+  # or active inference defers the cleanup, not the application deployment.
+  history_state=$(cd "$release/backend" && "$release/venv/bin/python" -m app.services.history_cleanup status) || history_state=unavailable
+  if [[ "$history_state" == pending ]]; then
+    if "$release/venv/bin/python" "$release/deploy/backup.py" backup; then
+      (cd "$release/backend" && "$release/venv/bin/python" -m app.services.history_cleanup cleanup) || echo "WARNING: history cleanup incomplete; retained records can be reviewed."
+    else
+      echo "WARNING: history cleanup deferred; encrypted backup failed."
+    fi
+  elif [[ "$history_state" == empty ]]; then
+    (cd "$release/backend" && "$release/venv/bin/python" -m app.services.history_cleanup cleanup) || echo "WARNING: unable to record empty history cleanup."
+  fi
   if switch_to "$release" && systemctl --user start jiaoyan.service; then
     for _ in $(seq 1 20); do
       if curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null && curl -fsS --max-time 2 http://127.0.0.1:8765/ >/dev/null; then

@@ -43,3 +43,27 @@ def test_running_task_must_stop_before_removal(monkeypatch):
     monkeypatch.setattr(removal.qoder,"request",request)
     with pytest.raises(HTTPException) as exc:removal.stop_model("active",0)
     assert exc.value.status_code==409 and calls==["GET","POST","GET"]
+
+
+def test_history_cleanup_boundary_and_active_work_guard():
+    from types import SimpleNamespace
+    from app.services import history_cleanup as cleanup
+    t=cleanup.CUTOFF
+    def work(**kw):
+        return SimpleNamespace(**{**{"created_at":t,"updated_at":t,"agent_history":[{"state":"done"}]},**kw})
+    assert cleanup.eligible(work())
+    assert not cleanup.eligible(work(created_at=t+1))
+    assert not cleanup.eligible(work(updated_at=t+1))
+    assert not cleanup.eligible(work(agent_history=[{"state":"running"}]))
+    assert not cleanup.eligible(work(agent_history=[{"state":"cancelled","phase":"executing"}]))
+
+def test_history_cleanup_is_one_time(monkeypatch):
+    from unittest.mock import Mock
+    from app.services import history_cleanup as cleanup
+    db=Mock()
+    db.get.return_value=object()
+    delete=Mock()
+    monkeypatch.setattr(cleanup.work_removal,"remove_workspace",delete)
+    assert cleanup.cleanup(db)=={"state":"done","already_completed":True}
+    delete.assert_not_called()
+    db.commit.assert_not_called()
