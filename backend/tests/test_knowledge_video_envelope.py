@@ -38,3 +38,20 @@ def test_empty_proof_remains_empty():
 def test_malformed_envelope_is_rejected():
     with pytest.raises(assets.SourceInputError):
         assets.prepare_lesson_source("定义", assets.KNOWLEDGE_PREFIX + "{}")
+
+
+def test_storage_cleaner_preserves_envelope_bytes():
+    data = local.build_snapshot(unit(content="含  两个空格"), {"example_ids": []}, [])
+    legacy, _ = local.transport(data)
+    raw = legacy["reference_solution"]
+    assert assets.strip_page_furniture(raw) == raw
+    assert assets.knowledge_envelope(raw)["content"] == "含  两个空格"
+
+
+def test_actual_type_metadata_is_optional(tmp_path):
+    data = local.build_snapshot(unit(), {"example_ids": []}, [])
+    legacy, _ = local.transport(data)
+    source = assets.prepare_lesson_source(legacy["problem"],legacy["reference_solution"])
+    assert assets.actual_knowledge_type(source,tmp_path)=="auto"
+    (tmp_path/"scene_01.py").write_text("# KNOWLEDGE_TEACHING_TYPE: without_proof\n",encoding="utf-8")
+    assert assets.actual_knowledge_type(source,tmp_path)=="without_proof"

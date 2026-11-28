@@ -89,13 +89,31 @@ def capture_rules(meta, problem, solution, user):
         system, selected = choose_examples(meta, problem, solution, fixed, user, business="knowledge", teaching_type=teaching_type)
         repair = SEP.join([entry("manim_repair.md"), shared, scoped, "题源字段指可信知识单元、证明及已关联例题；不改变其数学内容或教学类型。"])
         editor = SEP.join([entry("manim_editor.md"), shared, scoped, "当前课程主体为知识单元；仅按明确指令修改对应知识解释、证明、例题及必要衔接。"])
-        return {"version":"v1", "business_type":business, "teaching_type":teaching_type, "shared_sha256":hashlib.sha256(shared.encode()).hexdigest(), "scope_sha256":hashlib.sha256(scoped.encode()).hexdigest(), "examples":selected, "system":system, "repair_system":repair, "editor_system":editor}
+        result = {"version":"v1", "business_type":business, "teaching_type":teaching_type, "shared_sha256":hashlib.sha256(shared.encode()).hexdigest(), "scope_sha256":hashlib.sha256(scoped.encode()).hexdigest(), "examples":selected, "system":system, "repair_system":repair, "editor_system":editor}
+        if teaching_type == "auto":
+            # Capture both possible edit/repair scopes at submission. Once the
+            # generation declares its type, select the pinned alternative.
+            result["resolved_scopes"] = {}
+            for typ in ("with_proof","without_proof"):
+                rules=knowledge_rules(typ)
+                result["resolved_scopes"][typ] = {
+                    "repair_system":SEP.join([entry("manim_repair.md"),shared,rules,"仅修复技术错误，保留知识单元及关联例题。"]),
+                    "editor_system":SEP.join([entry("manim_editor.md"),shared,rules,"仅修改用户明确要求的知识单元教学内容及必要衔接。"]),
+                    "scope_sha256":hashlib.sha256(rules.encode()).hexdigest()}
+        return result
     fixed = entry("manim_teacher.md") + SEP + shared
     system, selected = choose_examples(meta, problem, solution, fixed, user)
     return {"version":"v1", "business_type":"question", "shared_sha256":hashlib.sha256(shared.encode()).hexdigest(),
             "examples":selected, "system":system,
             "repair_system":entry("manim_repair.md") + SEP + shared,
             "editor_system":entry("manim_editor.md") + SEP + shared}
+
+def resolve_pinned_scope(rules, actual_type):
+    scoped = (rules.get("resolved_scopes") or {}).get(actual_type)
+    if not scoped:
+        return dict(rules)
+    return {**rules, **scoped, "teaching_type":actual_type}
+
 
 def snapshot(source, user, output_dir):
     pinned = JOB_RULES_PROVIDER() or capture_rules(

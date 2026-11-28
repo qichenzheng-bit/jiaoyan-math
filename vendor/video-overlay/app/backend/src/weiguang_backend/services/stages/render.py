@@ -14,7 +14,7 @@ from ...api.source_guard import verified_contract, active_scene_folder
 
 from animation_engine.render.code_scene_render import render_code_lesson
 from animation_engine.errors import EngineError
-from ...ai.model_hub import task_client
+from ...ai.model_hub import task_client, pinned_client
 from ...pipeline.runtime_render_repair import (
     repair_rendered_lesson, repairable_render_error,
 )
@@ -137,8 +137,12 @@ def run(ctx, state) -> None:
             # 静态 AST/契约通过不意味着 Manim 在沙箱里能够执行；
             # 只对真实场景代码报错自动修复，绝不拿 TTS/网络故障让 AI 改数学。
             with SessionLocal() as repair_db:
-                repair_client = task_client(repair_db, "generate")
                 fresh = lesson_get(repair_db, lesson_id)
+                if source_contract.meta.get("business_type") == "knowledge":
+                    generation_job=source_contract.meta.get("prompt_job_id")
+                    repair_client=pinned_client(repair_db,generation_job) if generation_job else None
+                else:
+                    repair_client=task_client(repair_db, "generate")
                 repair_source = prepare_lesson_source(
                     fresh.problem, fresh.reference_solution, fresh.answer or "",
                     meta=lesson_question_meta(fresh))

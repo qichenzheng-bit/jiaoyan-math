@@ -18,7 +18,7 @@ from ...pipeline.scene_figures import load_reference_figures
 from ...pipeline.scene_publish import ScenePublication
 from ...pipeline.scene_repair import SceneRepairFailed, generate_with_repair
 from ...pipeline.source_assets import (
-    SourceInputError, lesson_question_meta, prepare_lesson_source, knowledge_envelope,
+    SourceInputError, lesson_question_meta, prepare_lesson_source, knowledge_envelope, actual_knowledge_type,
     replace_markdown_images_for_prompt, validate_solution_ready_for_video,
 )
 from ..jobs import job_add, job_log, log_token_usage, usage_totals
@@ -124,11 +124,13 @@ def run(ctx, state) -> None:
             log("失败", f"代码修复已停止（共 {rounds} 轮），诊断已保存在 generation.json")
             raise RuntimeError(str(exc)) from exc
 
+        teaching_type=actual_knowledge_type(source, candidate/"scenes")
         contract = build_contract(
             generated, question=source.problem, fps=fps,
             extra_meta={
                 "question_sha256": source.question_sha256,
                 "prompt_job_id": job_id,
+                **({"business_type":"knowledge","knowledge_teaching_type":teaching_type} if teaching_type is not None else {}),
                 "source_sha256": contract_source_sha256,
                 "generation": generated.tokens,
                 "attempts": [item.to_dict() for item in generated.attempts],

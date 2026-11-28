@@ -121,6 +121,20 @@ class LessonSource:
         }, ensure_ascii=False, indent=2)
 
 
+def actual_knowledge_type(source, scene_dir):
+    """Optional model-declared metadata; never perform a mathematical audit."""
+    unit = knowledge_envelope(source.reference_solution)
+    if unit is None:
+        return None
+    if unit["teaching_type"] in ("with_proof","without_proof"):
+        return unit["teaching_type"]
+    files = sorted(Path(scene_dir).glob("*.py"))
+    if not files:
+        return "auto"
+    labels = set(re.findall(r"(?m)^# KNOWLEDGE_TEACHING_TYPE: (with_proof|without_proof)[ \t]*$", files[0].read_text(encoding="utf-8")))
+    return next(iter(labels)) if len(labels)==1 else "auto"
+
+
 # 仅做输入数据标签清洗，不在Python预设任何教学开场与场景。
 _SPLIT_RE = re.compile(r"[、,，;；/|\s]+")
 _PUNCT = "。．.!！?？:：~～ "
@@ -175,6 +189,11 @@ def strip_page_furniture(text) -> str:
     """
     if not text:
         return ""
+    if isinstance(text, str) and text.startswith(KNOWLEDGE_PREFIX):
+        # Upstream lesson creation also calls this helper before storage.
+        # Do not normalize JSON string contents or alter the envelope hash.
+        knowledge_envelope(text)
+        return text
     cleaned = _PAGE_NOTES.sub("", str(text))
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()

@@ -92,6 +92,15 @@ def edit_payload(tasks: tuple[str, ...], contract: SceneContract,
             "允许在 AuthoredScene 场景源码中按要求修改对象位置、字号、动画与切幕，保持其余逻辑不变",
         ],
     }
+    from .source_assets import knowledge_envelope
+    unit=knowledge_envelope(reference_solution)
+    if unit is not None:
+        payload["business_type"]="knowledge"
+        payload["knowledge_unit"]=unit
+        payload["teaching_type"]=contract.meta.get("knowledge_teaching_type",unit["teaching_type"])
+        for field in ("question","reference_solution","answer"):
+            payload.pop(field,None)
+        payload["requirements"].append("知识单元及题库关联关系是可信原始资料；存在关联题时只允许从原有关联题选择1～2道，不得改写其题干、答案或解析；无关联题才允许新设计例题。不得改动原始证明或将无证明课变成正式证明课。")
     if voice_only:
         payload["voice_only"] = True
         payload["requirements"] = [

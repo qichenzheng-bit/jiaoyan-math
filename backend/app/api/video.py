@@ -159,6 +159,20 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
         raise
     return view(row)
 
+def knowledge_teaching_info(row):
+    if row.source_snapshot.get("business_type")!="knowledge":
+        return {}
+    result={"teaching_type":row.source_snapshot.get("teaching_type","auto")}
+    if row.engine_id:
+        try:
+            actual=engine.call("GET",f"/jiaoyan/lessons/{remote(row)}/teaching-info")
+            if actual.get("teaching_type") in ("with_proof","without_proof","auto"):
+                result["teaching_type"]=actual["teaching_type"]
+        except HTTPException:
+            pass
+    return result
+
+
 @router.get("/projects/{ident}")
 def detail(ident: str, db: Session = Depends(get_db)):
     row = row_for(db, ident)
@@ -167,6 +181,7 @@ def detail(ident: str, db: Session = Depends(get_db)):
         rid = remote(row)
         result["lesson"] = engine.call("GET", f"/lessons/{rid}")
         result["jobs"] = engine.call("GET", f"/jobs?lesson_id={rid}&limit=30")
+        result.update(knowledge_teaching_info(row))
     return result
 
 @router.post("/projects/{ident}/{action}", dependencies=write)
@@ -295,7 +310,7 @@ def approve(ident: str, body: CoverSelection|None=None, db: Session = Depends(ge
     data = {"category":"video","file_id":None,"document_id":None,"resource_id":row.resource_id,
             "content":"", "note":"视频引擎审核归档", "video_project_id":row.id,
             "video_business_type":row.source_snapshot.get("business_type","question"),
-            "video_teaching_type":row.source_snapshot.get("teaching_type",""),
+            "video_teaching_type":knowledge_teaching_info(row).get("teaching_type",""),
             "video_unit_type":row.source_snapshot.get("unit_type","")}
     item = StudioItem(id=str(uuid4()), kind="work", title=row.source_snapshot["title"], data=data,
                       revision=1, archived=False, created_at=now(), updated_at=now())

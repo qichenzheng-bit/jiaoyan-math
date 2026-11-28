@@ -87,7 +87,10 @@ def transport(data):
     # Preserve exact source hash across generation, edit and old contract verification.
     result = {"title": data["title"], "problem": normalized["content"], "reference_solution": envelope,
               "answer": "", "analysis": "", "subject": data["subject"], "chapter": data["chapter"],
-              "exam_type": "", "question_type": "", "tags": data["knowledge_tags"], "fps": 60}
+              "exam_type": "", "question_type": "", "tags": data["knowledge_tags"], "fps": 60,
+              # The host bank is authoritative for unit/version identity; the
+              # pinned legacy engine's question-stem dedup must not merge them.
+              "confirm_duplicate": True, "dedup_reason": "知识单元独立来源版本"}
     for key, size in {"title":180,"problem":20000,"reference_solution":120000,"subject":20,"chapter":120}.items():
         if len(result[key]) > size:
             raise HTTPException(422, "知识单元字段超过引擎限制：" + key)

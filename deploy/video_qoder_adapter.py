@@ -86,7 +86,7 @@ def capture_job_add(original, root=None):
             return original(db,lesson,kind,*args,**kwargs)
         from weiguang_backend.core.models import ClientSetting
         from weiguang_backend.pipeline import prompt_bundle
-        from weiguang_backend.pipeline.source_assets import lesson_question_meta, prepare_lesson_source
+        from weiguang_backend.pipeline.source_assets import lesson_question_meta, prepare_lesson_source, knowledge_envelope
         snapshot=dict(_job_prompt.get() or {})
         snapshot['kind']=kind
         figures=snapshot.pop('figures',None)
@@ -98,19 +98,25 @@ def capture_job_add(original, root=None):
             snapshot['rules']=prompt_bundle.capture_rules(source.question_meta,source.problem,source.reference_solution,user)
         else:
             prior={}
+            actual_type=None
             if root is not None:
                 from weiguang_backend.api.storage import resolve_lesson_root
                 from weiguang_backend.api.source_guard import active_scene_folder
                 from animation_engine.code.scene_contract import SceneContract
                 path=active_scene_folder(lesson,resolve_lesson_root(root,lesson.id))/'scene_contract.json'
                 if path.is_file():
-                    ident=SceneContract.read(path).meta.get('prompt_job_id')
+                    contract=SceneContract.read(path)
+                    ident=contract.meta.get('prompt_job_id')
+                    actual_type=contract.meta.get('knowledge_teaching_type')
                     if ident:prior=_job_record(db,ident)
             if prior.get('rules'):
-                snapshot['rules']={**prior['rules'],'inherited_supplement':prior.get('text','') or prior['rules'].get('inherited_supplement','')}
+                scoped=prompt_bundle.resolve_pinned_scope(prior['rules'],actual_type)
+                snapshot['rules']={**scoped,'inherited_supplement':prior.get('text','') or prior['rules'].get('inherited_supplement','')}
                 snapshot['text']=prior.get('text','') or prior['rules'].get('inherited_supplement','')
                 if prior.get('source_context'):snapshot['source_context']=prior['source_context']
             else:
+                if knowledge_envelope(lesson.reference_solution) is not None:
+                    raise RuntimeError("KNOWLEDGE_PROMPT_SNAPSHOT_MISSING")
                 shared=prompt_bundle.shared_specs()
                 snapshot['rules']={'editor_system':prompt_bundle.entry('manim_editor.md')+prompt_bundle.SEP+shared,
                     'repair_system':prompt_bundle.entry('manim_repair.md')+prompt_bundle.SEP+shared,
@@ -287,7 +293,7 @@ def _knowledge_schema():
     return None
 
 
-def add_prompt_routes(router):
+def add_prompt_routes(router, root=None):
     from fastapi import HTTPException, Request
     from pydantic import BaseModel, ConfigDict, Field
     original=next((r.endpoint for r in router.routes if getattr(r,'path',None)=='/lessons/{id}/generate' and 'POST' in getattr(r,'methods',set())),None)
@@ -304,6 +310,27 @@ def add_prompt_routes(router):
         expected=os.environ.get('WEIGUANG_API_TOKEN','')
         if not expected or not hmac.compare_digest(request.headers.get('X-API-Key','').encode(),expected.encode()):
             raise HTTPException(403,'VIDEO_ENGINE_TOKEN_REQUIRED')
+
+    @router.get('/jiaoyan/lessons/{id}/teaching-info')
+    def teaching_info(id:str,request:Request):
+        authorize(request)
+        from weiguang_backend.api.storage import lesson_get,resolve_lesson_root
+        from weiguang_backend.api.source_guard import active_scene_folder
+        from weiguang_backend.pipeline.source_assets import knowledge_envelope
+        from animation_engine.code.scene_contract import SceneContract
+        if root is None or _session_factory is None:
+            raise HTTPException(503,"VIDEO_SOURCE_UNAVAILABLE")
+        with _session_factory() as db:
+            lesson=lesson_get(db,id)
+            unit=knowledge_envelope(lesson.reference_solution)
+            if unit is None:
+                return {"business_type":"question"}
+            typ=unit["teaching_type"]
+            path=active_scene_folder(lesson,resolve_lesson_root(root,id))/"scene_contract.json"
+            if path.is_file():
+                meta=SceneContract.read(path).meta
+                typ=meta.get("knowledge_teaching_type",typ)
+            return {"business_type":"knowledge","teaching_type":typ if typ in ("with_proof","without_proof") else "auto"}
 
     @router.get('/jiaoyan/overlay-selfcheck')
     def overlay_selfcheck(request:Request):
@@ -366,7 +393,7 @@ def create_app():
         production.job_add=capture_job_add(production.job_add,ctx.root)
         from weiguang_backend.services.stages import generate
         generate.job_add=capture_job_add(generate.job_add,ctx.root)
-        return add_prompt_routes(original_builder(ctx,exports))
+        return add_prompt_routes(original_builder(ctx,exports),ctx.root)
     routers.build_production_router=build_with_prompt_routes
     from weiguang_backend.ai import cli_login, cli_probe, model_selection, model_runtime
     cli_login.chat_target = target
