@@ -1,6 +1,4 @@
-"""Opt-in Qoder native Agent pilot. SDK reasons; this host only executes validated MCP tools.
-
-Legacy workflows remain available until real server SDK and visual MCP smoke tests pass.
+"""Qoder native Agent. SDK reasons; this host only executes validated MCP tools.
 No nested inference calls while the native Agent occupies the single Qoder worker.
 """
 import base64

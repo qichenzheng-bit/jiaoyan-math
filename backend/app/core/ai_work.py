@@ -97,10 +97,10 @@ def tick():
             from sqlalchemy import cast
             from sqlalchemy.dialects.postgresql import JSONB
             latest=cast(WorkSession.agent_history,JSONB)[-1]
-            stmt=stmt.where(latest["auto"].astext=="true",latest["state"].astext.in_(("running","ready","confirmed","dispatched")))
+            stmt=stmt.where(latest["auto"].astext=="true",latest["state"].astext.in_(("running","ready","confirmed")))
         for session in db.scalars(stmt.execution_options(yield_per=20)):
             r=wa.current(session)
-            if r and r.get("auto") and r["state"] in ("running","ready","confirmed","dispatched"):
+            if r and r.get("auto") and r["state"] in ("running","ready","confirmed"):
                 # Poll active calls first; FIFO within each priority with aging to prevent starvation.
                 active=r.get("phase") in ("model","business","native_video_wait") or r["state"]=="dispatched"
                 high=r.get("priority")=="high" or now()-r.get("created_at",now())>120
@@ -112,7 +112,7 @@ def tick():
                 s=wa_session(db,ident)
                 if not s:continue
                 r=wa.current(s)
-                if not r or not r.get("auto") or r["state"] not in ("running","ready","confirmed","dispatched"):continue
+                if not r or not r.get("auto") or r["state"] not in ("running","ready","confirmed"):continue
                 r=dict(r);user=db.get(User,r["actor_id"])
                 if not user:
                     fail(db,s,r,"工作所属用户已不存在");continue

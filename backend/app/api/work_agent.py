@@ -1,8 +1,5 @@
 """Native work entry and compatibility views for historical business records."""
-import json
-import re
 from typing import Literal
-from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from sqlalchemy import select
@@ -11,7 +8,7 @@ from app.core.db import get_db
 from app.core.security import current_user, require_origin, now, audit
 from app.models import WorkMaterial, StoredFile, User
 from app.api import qoder
-from app.services.recognition_plan import matching_names, propose_range
+from app.services.recognition_plan import propose_range
 
 router=APIRouter()
 class Start(BaseModel):
@@ -110,19 +107,6 @@ def present(db,s,r):
     data=public(r)
     if data and data["state"]=="dispatched":data["workflow"]=workflow(db,s,r)
     return data
-def catalog(db,s,body):
-    from app.api import workspaces as w
-    attached={m.file_id for m in db.scalars(select(WorkMaterial).where(WorkMaterial.session_id==s.id))}
-    selected=w.material(db,s,body.selected_id).file_id if body.selected_id else None
-    files=list(db.scalars(w.original_query().where(StoredFile.archived==False).order_by(StoredFile.created_at.desc(),StoredFile.id)))
-    named={f.id for f in matching_names(files,body.instruction,"")}
-    files.sort(key=lambda f:(f.id not in named,f.id!=selected,f.id not in attached))
-    rows=[]
-    page=files[:60];details,grouped,states=w.library_details(db,page)
-    for f,p in zip(page,details):
-        bs=grouped[f.id]
-        rows.append({"id":f.id,"name":f.name,"type":f.media_type,"attached":f.id in attached,"selected":f.id==selected,"total":p["total_units"],"next_unit":p["next_unit"],"verified":p["verified_units"],"registered":p["registered_units"],"batches":[{"id":b.id,"start":b.start,"end":b.end,"verified":b.verified_text is not None,"job_state":j.state if (j:=states[0].get(b.id)) else None} for b in bs[-6:]]})
-    return rows,len(files)>len(rows)
 def resolve(db,i):
     from app.api import workspaces as w
     if i.action=="clarify":return {"action":"clarify","explanation":i.explanation}
@@ -181,8 +165,8 @@ def start(ident:str,body:Start,db:Session=Depends(get_db),user:User=Depends(curr
         raise HTTPException(409,"已有工作正在执行，请先停止或等待当前步骤结束")
     if previous and previous.get("auto") and previous["state"]=="dispatched":
         progress=workflow(db,s,previous)
-        if progress and progress["stage"] in ("recognizing","organize","organizing"):
-            raise HTTPException(409,"当前资料工作仍在执行，请先停止")
+        if progress and progress["stage"]=="organizing":
+            raise HTTPException(409,"此前提交的实际资料整理任务仍在运行，请先核对或停止该任务")
     from app.core.native_work import begin
     return begin(db,s,body,user)
 @router.post("/{ident}/agent/cancel",dependencies=[Depends(require_origin)])

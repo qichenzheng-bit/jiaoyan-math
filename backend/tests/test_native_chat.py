@@ -51,3 +51,16 @@ def test_native_chat_restores_once_after_worker_restart(monkeypatch):
     assert state["resume"]=="old-session" and state["prompt"]=="当前请求"
     assert state["job"]!="old-job" and not m.content
     assert not n.recover(db,m,state)
+
+
+def test_legacy_marker_is_not_interpreted_or_reexecuted(monkeypatch):
+    from app.core import ai_chat
+    db=Mock();m=SimpleNamespace(id="message",state="running",content="历史部分回复",detail="")
+    cancel=Mock(return_value={"state":"stopped"});monkeypatch.setattr(ai_chat.qoder,"request",cancel)
+    monkeypatch.setattr(ai_chat,"store",Mock())
+    state={"job":"legacy","phase":"model","prompt":"old","steps":[{"tool":"question_search","state":"done","result":{"id":"saved"}}]}
+    ai_chat.sync(db,m,state)
+    assert m.state=="failed" and m.content=="历史部分回复"
+    cancel.assert_called_once_with("POST","/chat/legacy/cancel",{})
+    terminal=ai_chat.store.call_args.args[2]
+    assert terminal["phase"]=="terminal" and "prompt" not in terminal

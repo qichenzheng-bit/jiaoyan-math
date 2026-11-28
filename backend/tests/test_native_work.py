@@ -159,3 +159,14 @@ def test_native_restart_recovers_only_read_only_turn(monkeypatch):
     assert not n.resume_read_only(None,None,record)
     assert not n.resume_read_only(None,None,{"steps":[{"tool":"native_intake_review","state":"done"}]})
     assert n.uncertain_write({"steps":[{"tool":"native_intake_review","state":"running"}]})
+
+
+def test_work_entry_uses_native_even_when_old_flags_are_unset(monkeypatch):
+    from unittest.mock import Mock
+    from app.api import work_agent as wa
+    monkeypatch.delenv("WG_NATIVE_AGENT",raising=False)
+    db=Mock();user=SimpleNamespace(id=1);s=SimpleNamespace(agent_history=[])
+    monkeypatch.setattr(n.w,"workspace",lambda *a:s)
+    begin=Mock(return_value={"native":True});monkeypatch.setattr(n,"begin",begin)
+    assert wa.start("w",wa.Start(instruction="新的任务",auto=False),db,user)=={"native":True}
+    begin.assert_called_once()
