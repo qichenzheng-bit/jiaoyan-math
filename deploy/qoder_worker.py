@@ -457,11 +457,27 @@ def cancel_login():
             stop_process(login_process)
         return dict(login)
 
+# Static SDK compatibility probe (no model calls or account data).
+NATIVE_SDK_CHECK = "import inspect,json\nfrom qodercn_agent_sdk import QoderAgentOptions,QoderSDKClient,qodercli_auth,tool,create_sdk_mcp_server,ResultMessage,SystemMessage,AgentDefinition,AssistantMessage,TextBlock,SDKMirrorErrorMessage\nfrom mcp.types import ToolAnnotations\nparams=inspect.signature(QoderAgentOptions).parameters\nrequired={\"auth\",\"cli_path\",\"cwd\",\"model\",\"system_prompt\",\"session_id\",\"resume\",\"session_store\",\"session_store_flush\",\"tools\",\"allowed_tools\",\"disallowed_tools\",\"permission_mode\",\"setting_sources\",\"skills\",\"agents\",\"mcp_servers\",\"strict_mcp_config\",\"extra_args\",\"include_partial_messages\"}\nmissing=sorted(required-set(params))\nasync def ping(args):\n    return {\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}\nannotations=ToolAnnotations(readOnlyHint=True,maxResultSizeChars=12000000)\nmcp=create_sdk_mcp_server(\"probe\",tools=[tool(\"ping\",\"probe\",{\"type\":\"object\",\"properties\":{}},annotations=annotations)(ping)])\nagent=AgentDefinition(description=\"probe\",prompt=\"probe\",tools=[],disallowedTools=[\"Bash\"],model=\"inherit\",mcpServers=[\"probe\"],permissionMode=\"dontAsk\")\nQoderAgentOptions(tools=[\"Agent\",\"Skill\",\"mcp__probe__ping\"],allowed_tools=[\"Agent\",\"Skill\",\"mcp__probe__ping\"],setting_sources=[],skills=[],agents={\"probe\":agent},mcp_servers={\"probe\":mcp},permission_mode=\"dontAsk\",session_store_flush=\"eager\")\nmethods=all(callable(getattr(QoderSDKClient,k,None)) for k in (\"query\",\"receive_response\",\"get_server_info\"))\nprint(json.dumps({\"ready\":not missing and methods,\"memory\":\"memory\" in params and callable(getattr(QoderSDKClient,\"flush_memory\",None)),\"missing\":missing}))\n"
+native_sdk_info={"ready":False,"memory":False,"reason":"not_checked"}
+
+def check_native_sdk():
+    if not SDK_PYTHON.is_file():return {"ready":False,"memory":False,"reason":"sdk_missing"}
+    try:
+        result=subprocess.run([str(SDK_PYTHON),"-c",NATIVE_SDK_CHECK],capture_output=True,timeout=15,check=False)
+        if result.returncode or len(result.stdout)>16000:return {"ready":False,"memory":False,"reason":"sdk_incompatible"}
+        value=json.loads(result.stdout)
+        if not isinstance(value,dict):raise ValueError()
+        return {"ready":value.get("ready") is True,"memory":value.get("memory") is True,
+            "reason":"ready" if value.get("ready") is True else "sdk_incompatible"}
+    except (OSError,ValueError,subprocess.TimeoutExpired):
+        return {"ready":False,"memory":False,"reason":"sdk_probe_failed"}
+
 def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 17, "native_video":native_video_enabled() and SDK_PYTHON.is_file(), "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 18, "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -708,7 +724,7 @@ def chat_start(data, video=False, vision=False):
     exe=executable()
     if not exe: return 503,{"detail":"未安装 Qoder CN CLI"}
     native_video=bool(video and native_video_enabled())
-    if native_video and not SDK_PYTHON.is_file():return 503,{"detail":"视频原生SDK尚未安装"}
+    if native_video and not native_sdk_info["ready"]:return 503,{"detail":"视频原生SDK接口未通过检查"}
     with lock:
         if ident in chat_jobs: return 200,chat_snapshot(chat_jobs[ident])
         cached=load_snapshot(ident)
@@ -785,7 +801,7 @@ async def main():
     if "session_store" not in params:raise RuntimeError("SDK session_store unavailable")
     store=NativeSessionStore(Path(cfg["cwd"])/"session-mirror.sqlite3")
     memory={}
-    if "memory" in params and cfg.get("memory_file"):
+    if "memory" in params and callable(getattr(QoderSDKClient,"flush_memory",None)) and cfg.get("memory_file") and cfg["owner"]!=2147483647:
         # Use explicit app-user roots rather than the shared CLI login's user memory.
         memory={"mode":"custom","user_scope":False,"generation":{
             "roots":[{"id":"teaching-preferences","path":str(Path(cfg["memory_file"]).parent),"index_file":"MEMORY.md","access":"read-write"}],
@@ -832,6 +848,81 @@ except Exception as exc:
     sys.exit(1)
 """
 
+def native_workspace_dir(workspace):
+    return Path.home()/".jiaoyan-native-workspaces"/workspace
+
+def valid_native_id(value):
+    return isinstance(value,str) and bool(re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",value))
+
+def read_native_manifest(cwd):
+    path=cwd/"sessions.json"
+    if path.is_symlink():raise ValueError("unsafe manifest")
+    if not path.exists():return {"sessions":[],"jobs":[]}
+    if path.stat().st_size>500000:raise ValueError("manifest too large")
+    value=json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value,dict) or any(not isinstance(value.get(k),list) or any(not valid_native_id(v) for v in value[k]) for k in ("sessions","jobs")):
+        raise ValueError("invalid manifest")
+    return value
+
+def remember_native_run(cwd,session=None,job_id=None):
+    value=read_native_manifest(cwd)
+    for key,ident in (("sessions",session),("jobs",job_id)):
+        if ident:
+            if not valid_native_id(ident):raise ValueError("invalid session identity")
+            if ident not in value[key]:value[key].append(ident)
+    fd,name=tempfile.mkstemp(dir=cwd,prefix=".sessions-")
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as out:
+            json.dump(value,out);out.flush();os.fsync(out.fileno())
+        os.replace(name,cwd/"sessions.json")
+    finally:Path(name).unlink(missing_ok=True)
+
+def remove_native_workspace(data):
+    """Remove only registered native transcripts, never shared memory/auth.
+    The CLI local directory convention is documented, but refuse ambiguous paths.
+    """
+    if not isinstance(data,dict) or not valid_native_id(data.get("workspace")) or type(data.get("owner")) is not int or data["owner"]<=0:
+        return 422,{"detail":"会话删除参数无效"}
+    workspace=data["workspace"];cwd=native_workspace_dir(workspace)
+    with lock:
+        if chat_active or login_process is not None:return 409,{"detail":"AI执行中，不能安全删除原生会话"}
+        try:
+            if cwd.is_symlink():raise ValueError("unsafe workspace")
+            if not cwd.exists():return 200,{"deleted":True,"local":True,"mirror":True}
+            owner=cwd/"owner"
+            if owner.is_symlink() or not owner.is_file() or owner.read_text(encoding="ascii")!=str(data["owner"]):
+                return 403,{"detail":"无权删除该原生会话"}
+            if not (cwd/"sessions.json").is_file():return 409,{"detail":"原生会话缺少可信登记，需管理员核对后清理"}
+            manifest=read_native_manifest(cwd)
+            config=Path(os.environ.get("QODERCN_CONFIG_DIR") or (Path.home()/".qoder-cn"))
+            projects=config/"projects"
+            targets=[]
+            if projects.is_symlink():raise ValueError("unsafe project root")
+            if projects.is_dir():
+                for project in projects.iterdir():
+                    if project.is_symlink() or not project.is_dir():continue
+                    for sid in manifest["sessions"]:
+                        candidates=[project/(sid+".jsonl"),project/sid]
+                        for candidate in candidates:
+                            if not candidate.exists() and not candidate.is_symlink():continue
+                            # Never remove a transcript from another project.
+                            if not project.name.endswith(workspace) or candidate.is_symlink():
+                                return 409,{"detail":"原生会话本机路径无法安全确认"}
+                            if candidate.is_dir() and candidate.name==sid:targets.append(candidate)
+                            elif candidate.is_file() and candidate.name==sid+".jsonl":targets.append(candidate)
+                            else:raise ValueError("unexpected transcript type")
+            for path in targets:
+                if path.is_dir():shutil.rmtree(path)
+                else:path.unlink()
+            for ident in manifest["jobs"]:
+                snapshot=SNAPSHOT_DIR/(ident+".json")
+                snapshot.unlink(missing_ok=True)
+                chat_jobs.pop(ident,None)
+            shutil.rmtree(cwd)
+            return 200,{"deleted":True,"local":True,"mirror":True}
+        except (OSError,ValueError,TypeError):
+            return 503,{"detail":"原生会话清理未完成，保留应用历史以便重试"}
+
 def agent_start(data):
     global chat_active
     if not isinstance(data,dict):return 422,{"detail":"原生Agent请求无效"}
@@ -841,8 +932,7 @@ def agent_start(data):
     if type(owner) is not int or not 0<owner<=2147483647:return 422,{"detail":"原生Agent用户标识无效"}
     model,effort,prompt,system=data.get("model"),data.get("effort","default"),data.get("prompt"),data.get("system")
     specs=data.get("tools")
-    def uid(value):return isinstance(value,str) and bool(JOB_ID.fullmatch(value))
-    if not all(uid(x) for x in (ident,workspace,session)) or (resume is not None and not uid(resume)):
+    if not all(valid_native_id(x) for x in (ident,workspace,session)) or (resume is not None and not valid_native_id(resume)):
         return 422,{"detail":"原生会话编号无效"}
     if not allowed_model(model) or effort!="default" and effort not in catalog_efforts.get(model,[]):
         return 422,{"detail":"模型或推理强度无效"}
@@ -852,7 +942,7 @@ def agent_start(data):
         return 422,{"detail":"业务工具目录无效"}
     if len({t["name"] for t in specs})!=len(specs):return 422,{"detail":"业务工具重复"}
     exe=executable()
-    if not exe or not SDK_PYTHON.is_file():return 503,{"detail":"原生Agent SDK尚未安装"}
+    if not exe or not native_sdk_info["ready"]:return 503,{"detail":"原生Agent SDK接口未通过检查"}
     with lock:
         if ident in chat_jobs:return 200,chat_snapshot(chat_jobs[ident])
         cached=load_snapshot(ident)
@@ -872,7 +962,8 @@ def agent_run(job,cfg):
     global chat_active,verified_at,retained_auth
     proc=None;success=False;detail=""
     try:
-        cwd=Path.home()/".jiaoyan-native-workspaces"/cfg["workspace"]
+        cwd=native_workspace_dir(cfg["workspace"])
+        if cwd.is_symlink():raise ValueError("unsafe native workspace")
         cwd.mkdir(mode=0o700,parents=True,exist_ok=True)
         owner_file=cwd/"owner"
         if owner_file.exists() and owner_file.read_text(encoding="ascii")!=str(cfg["owner"]):
@@ -880,6 +971,7 @@ def agent_run(job,cfg):
         if not owner_file.exists():
             with owner_file.open("x",encoding="ascii") as handle:handle.write(str(cfg["owner"]))
             owner_file.chmod(0o600)
+        remember_native_run(cwd,cfg.get("resume") or cfg["session_id"],job["id"])
         memory_root=Path.home()/".jiaoyan-native-memory"/str(cfg["owner"])
         memory_root.mkdir(mode=0o700,parents=True,exist_ok=True)
         memory_file=memory_root/"MEMORY.md"
@@ -917,7 +1009,8 @@ def agent_run(job,cfg):
                             job["detail"]="等待微光数学业务工具"
                         elif kind in ("session","result"):
                             sid=event.get("session_id")
-                            if isinstance(sid,str) and JOB_ID.fullmatch(sid):
+                            if valid_native_id(sid):
+                                remember_native_run(cwd,sid)
                                 job["native_session"]=sid
                             if kind=="result":
                                 success=event.get("success") is True
@@ -1008,13 +1101,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
             return self.reply(*chat_state(self.path.split("/")[2], True))
-        if self.path=="/agent/start" or self.path.startswith("/agent/") and self.path.endswith("/tool-result"):
+        if self.path in ("/agent/start","/agent/delete-workspace") or self.path.startswith("/agent/") and self.path.endswith("/tool-result"):
             try:
                 n=int(self.headers.get("Content-Length","0"))
                 if not 0<n<=12*1024*1024:raise ValueError()
                 data=json.loads(self.rfile.read(n))
             except (ValueError,UnicodeError):return self.reply(422,{"detail":"原生Agent请求无效"})
             if self.path=="/agent/start":return self.reply(*agent_start(data))
+            if self.path=="/agent/delete-workspace":return self.reply(*remove_native_workspace(data))
             return self.reply(*agent_reply(self.path.split("/")[2],data))
         if self.path in ("/chat/start", "/video/start", "/vision/start"):
             try:
@@ -1057,6 +1151,7 @@ if __name__ == "__main__":
     if os.geteuid() == 0:
         raise SystemExit("Do not run as root")
     restore_auth_state()
+    native_sdk_info=check_native_sdk()
     if os.path.exists(SOCKET):
         os.unlink(SOCKET)
     with Server(SOCKET, Handler) as server:

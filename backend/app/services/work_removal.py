@@ -78,8 +78,9 @@ def stop_workspace(db,s):
             raise HTTPException(409,"当前业务步骤仍在执行，请在步骤结束后删除")
         if state=="running" and (phase=="model" or not r.get("auto")):
             stop_model(r.get("model_job") or r["id"],r.get("phase_at",r.get("created_at",0)))
-        child=r.get("child") or {}
-        if child.get("kind")=="video" and child.get("id"):
+        children=[r.get("child") or {},*[x.get("video_child") or {} for x in r.get("steps",[])]]
+        for child in children:
+            if child.get("kind")!="video" or not child.get("id"):continue
             try:v=video.job_read(child["project"],child["id"],db)
             except HTTPException as e:
                 if e.status_code==404:continue
@@ -89,8 +90,13 @@ def stop_workspace(db,s):
                 v=video.job_read(child["project"],child["id"],db)
                 if v.get("status") in ("running","queued","cancelling"):raise HTTPException(409,"视频任务正在停止，请稍后重新删除")
 
-def remove_workspace(db,s):
+def remove_workspace(db,s,user=None):
     stop_workspace(db,s)
+    native=[r for r in s.agent_history or [] if r.get("native")]
+    if native:
+        if not user or any(r.get("actor_id")!=user.id for r in native):raise HTTPException(403,"无权清理该原生工作会话")
+        result=qoder.request("POST","/agent/delete-workspace",{"workspace":s.id,"owner":user.id})
+        if not result.get("deleted"):raise HTTPException(503,"原生会话尚未清理，保留应用历史")
     materials=list(db.scalars(select(WorkMaterial).where(WorkMaterial.session_id==s.id).order_by(WorkMaterial.file_id).with_for_update()))
     deleted_batches=[];shared_batch_ids=set();imports=set();roots=set()
     for m in materials:
@@ -112,7 +118,7 @@ def remove_workspace(db,s):
         child=r.get("child") or {}
         if child.get("kind")=="intake" and child.get("id"):roots.add(child["id"])
         for step in r.get("steps") or []:
-            if step.get("tool")=="intake_text" or step.get("name")=="intake_text":
+            if step.get("tool") in ("intake_text","native_text_review") or step.get("name")=="intake_text":
                 result=step.get("result") or {}
                 if isinstance(result,dict) and result.get("id"):roots.add(result["id"])
     db.flush()

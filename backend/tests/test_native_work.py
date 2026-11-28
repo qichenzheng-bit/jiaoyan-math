@@ -11,7 +11,8 @@ def test_native_pilot_opt_in(monkeypatch):
 def test_native_tools_no_nested_model_or_unbounded_permissions():
     tools={t["name"]:t for t in n.tools()}
     assert {"native_page","native_intake_review","question_search","selection_create"}<=tools.keys()
-    assert not {"original_read","intake_text","model_usage","Bash"}&tools.keys()
+    assert not {"original_read","intake_text","Bash"}&tools.keys()
+    assert {"native_text_review","model_usage","model_catalog","checkin_state","intake_status"}<=tools.keys()
     assert {"video_generate","video_render","video_edit","video_retry","video_job_read"}<=tools.keys()
     assert tools["native_intake_review"]["write"] and not tools["native_page"]["write"]
 
@@ -89,3 +90,12 @@ def test_native_video_tool_is_async():
     specs={x["name"]:x for x in n.tools()}
     for name in n.VIDEO_JOBS:
         assert "结束本轮" in specs[name]["description"]
+
+
+def test_native_text_review_cannot_bypass_attachment_reading(monkeypatch):
+    from fastapi import HTTPException
+    from app.core import native_work as n
+    monkeypatch.setattr(n,"current_files",lambda *a:[{"file":{"id":"original"}}])
+    with pytest.raises(HTTPException) as exc:
+        n.create_text_draft(None,None,{},None,{"title":"文字","text":"题","items":[{"kind":"question"}]},"draft")
+    assert exc.value.status_code==422

@@ -77,7 +77,7 @@ def session_view(s):
         if child.get("kind")=="intake" and child.get("id"):ids.add(child["id"])
         for step in record.get("steps") or []:
             result=step.get("result") or {}
-            if step.get("tool") in ("intake_text","native_intake_review") and isinstance(result,dict) and result.get("id"):ids.add(result["id"])
+            if step.get("tool") in ("intake_text","native_intake_review","native_text_review") and isinstance(result,dict) and result.get("id"):ids.add(result["id"])
     return {"id":s.id,"title":s.title,"created_at":s.created_at,"updated_at":s.updated_at,"intake_job_ids":sorted(ids)}
 def latest_job(db,b):
     j=db.get(IntakeJob,b.job_id) if b.job_id else None
@@ -300,7 +300,7 @@ def rename(ident:str,body:Create,db:Session=Depends(get_db),user:User=Depends(cu
 def remove(ident:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     from app.services.work_removal import remove_workspace
     s=workspace(db,ident,True)
-    removed=remove_workspace(db,s)
+    removed=remove_workspace(db,s,user=user)
     audit(db,"work.delete",user.id);db.commit()
     return {"deleted":True,"id":ident,"removed_job_ids":removed}
 

@@ -107,6 +107,11 @@ def remove_session(ident:str,db:Session=Depends(get_db),user:User=Depends(curren
     ids=[m.id for m in rows]
     if ids:
         from app.core import ai_chat
+        native=[state for m in rows if m.role=="assistant" and (state:=ai_chat.load(db,m)) and state.get("native")]
+        if native:
+            if any(state.get("native_actor")!=user.id for state in native):raise HTTPException(403,"无权清理该原生会话")
+            result=qoder.request("POST","/agent/delete-workspace",{"workspace":s.id,"owner":user.id})
+            if not result.get("deleted"):raise HTTPException(503,"原生会话尚未清理，保留应用历史")
         db.execute(delete(FileReference).where(FileReference.owner_type=="chat_message",FileReference.owner_id.in_(ids)))
         db.execute(delete(Setting).where(Setting.key.in_([ai_chat.key(mid) for mid in ids])))
         db.execute(delete(ChatMessage).where(ChatMessage.session_id==s.id))

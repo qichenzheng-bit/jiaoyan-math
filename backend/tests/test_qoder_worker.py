@@ -238,3 +238,42 @@ def test_native_video_preserves_prompt_contract(monkeypatch):
     assert not worker.native_video_enabled()
     monkeypatch.setenv("WG_NATIVE_VIDEO","1")
     assert worker.native_video_enabled()
+
+def test_native_sdk_missing_is_not_ready(tmp_path,monkeypatch):
+    monkeypatch.setattr(worker,"SDK_PYTHON",tmp_path/"missing")
+    assert worker.check_native_sdk()=={"ready":False,"memory":False,"reason":"sdk_missing"}
+
+def test_native_workspace_delete_preserves_other_sessions_and_memory(tmp_path,monkeypatch):
+    from uuid import uuid4
+    workspace,session,other,job=map(str,[uuid4(),uuid4(),uuid4(),uuid4()])
+    monkeypatch.setattr(worker.Path,"home",lambda:tmp_path)
+    monkeypatch.setattr(worker,"SNAPSHOT_DIR",tmp_path/"results")
+    monkeypatch.delenv("QODERCN_CONFIG_DIR",raising=False)
+    cwd=worker.native_workspace_dir(workspace);cwd.mkdir(parents=True)
+    (cwd/"owner").write_text("1")
+    worker.remember_native_run(cwd,session,job)
+    (cwd/"session-mirror.sqlite3").write_text("mirror")
+    project=tmp_path/".qoder-cn"/"projects"/("project-"+workspace);project.mkdir(parents=True)
+    (project/(session+".jsonl")).write_text("transcript")
+    (project/session).mkdir()
+    (project/session/"state.json").write_text("{}")
+    (project/(other+".jsonl")).write_text("other")
+    memory=tmp_path/".jiaoyan-native-memory"/"1";memory.mkdir(parents=True)
+    (memory/"MEMORY.md").write_text("preference")
+    assert worker.remove_native_workspace({"workspace":workspace,"owner":2})[0]==403
+    assert worker.remove_native_workspace({"workspace":workspace,"owner":1})[0]==200
+    assert not cwd.exists() and not (project/(session+".jsonl")).exists() and not (project/session).exists()
+    assert (project/(other+".jsonl")).exists() and (memory/"MEMORY.md").exists()
+
+def test_native_workspace_delete_refuses_ambiguous_cli_path(tmp_path,monkeypatch):
+    from uuid import uuid4
+    workspace,session=str(uuid4()),str(uuid4())
+    monkeypatch.setattr(worker.Path,"home",lambda:tmp_path)
+    monkeypatch.delenv("QODERCN_CONFIG_DIR",raising=False)
+    cwd=worker.native_workspace_dir(workspace);cwd.mkdir(parents=True)
+    (cwd/"owner").write_text("1")
+    worker.remember_native_run(cwd,session)
+    project=tmp_path/".qoder-cn"/"projects"/"other-project";project.mkdir(parents=True)
+    local=project/(session+".jsonl");local.write_text("keep")
+    assert worker.remove_native_workspace({"workspace":workspace,"owner":1})[0]==409
+    assert local.exists() and cwd.exists()

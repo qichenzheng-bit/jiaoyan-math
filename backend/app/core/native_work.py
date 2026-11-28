@@ -22,7 +22,7 @@ from app.services import storage, material_vision, material_import, word_images
 VIDEO_JOBS={"video_generate","video_render","video_edit","video_retry"}
 SAFE_WRITES={"selection_create","book_create","chapter_create","document_append","chapter_order",
              "template_apply","document_patch","layout_update","cover_create","video_create",*VIDEO_JOBS}
-EXCLUDE={"original_read","model_usage","model_catalog","checkin_state","intake_status"}
+EXCLUDE={"original_read"}
 
 class Page(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -51,6 +51,14 @@ class Draft(BaseModel):
     replace_job_id:str|None=Field(default=None,max_length=36,description="仅重新识别未审核旧草稿时，填写实际旧任务ID")
     replace_revision:StrictInt|None=Field(default=None,ge=1,description="旧草稿的当前版本，避免覆盖并发人工编辑")
 
+class TextDraft(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    title:str=Field(min_length=1,max_length=200)
+    subject:str=Field(default="",max_length=40)
+    source_id:str|None=Field(default=None,max_length=36)
+    text:str=Field(min_length=1,max_length=24000)
+    items:list[dict]=Field(min_length=1,max_length=100)
+
 def enabled():
     return os.environ.get("WG_NATIVE_AGENT")=="1"
 
@@ -60,6 +68,7 @@ def tools():
         if spec["name"] in VIDEO_JOBS:
             spec["description"]+="。仅提交原视频引擎异步任务；提交后不要循环查询或等待成片，结束本轮释放共享模型，由系统追踪实际结果；不得重复提交。"
     rows.extend([
+        {"name":"native_text_review","description":"将用户直接提供的文字或明确要求创作的题目整理为待人工审核草稿。只能用于纯文字任务；不得代替附件原件读取，不冒充原始文献，不正式入库。items含题干、答案解析、知识标签等结构化内容。","parameters":TextDraft.model_json_schema(),"write":True},
         {"name":"native_workspace","description":"读取当前会话全部原始资料、实际页数或段数、既有批次、审核任务ID和进度。可用于继续或重新识别。","parameters":{"type":"object","properties":{},"additionalProperties":False},"write":False},
         {"name":"native_attach","description":"将用户指定的资料库真实文件ID关联到当前工作会话。连续图片可明确合并为PDF。不会删除原件。","parameters":AttachmentRequest.model_json_schema(),"write":True},
         {"name":"native_page","description":"读取当前工作会话附件的原始图片、PDF物理页、Word段落或文本。Word先读取段落正文及图片数量，再用image_index逐张读取原图。图像作为原始视觉内容返回，不另起AI调用。","parameters":Page.model_json_schema(),"write":False},
@@ -223,6 +232,28 @@ def draft_create(db,s,r,user,args,call_id):
     db.commit()
     return {"id":call_id,"state":"review","title":body.title,"item_count":len(items),"batch_id":batch_id}
 
+def create_text_draft(db,s,r,user,args,call_id):
+    body=TextDraft.model_validate(args)
+    if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题与文字正文不能为空")
+    if current_files(db,s):
+        raise HTTPException(422,"当前会话包含原始附件；请先使用原件读取和审核工具，纯文字草稿请另开工作")
+    existing=db.get(IntakeJob,call_id)
+    if existing:return {"id":existing.id,"state":existing.state,"title":existing.title,"item_count":len(existing.items)}
+    items=ai.parse_answer(json.dumps(body.items,ensure_ascii=False))
+    ai.validate_question_coverage(body.text,items)
+    items=[ai.tag_draft(db,b) if b.get("kind")=="question" else b for b in items]
+    for item in items:ai.validate_review_tags(item)
+    if body.source_id:ai.bank.active_source(db,body.source_id,True)
+    provenance={"kind":"chat_draft","intent":"mixed","workspace_id":s.id,
+        "single_review":True,"auto_enrichment":True,"reviewed_uids":[],"effort":r["effort"],
+        "original_transcript_verified":False}
+    db.add(IntakeJob(id=call_id,title=body.title.strip(),subject=ai.normalize_subject(body.subject),
+        input_text=body.text,model=r["model"],state="review",detail="AI文字草稿待人工审核，非原件转录",
+        items=items,document_id=None,source_id=body.source_id,provenance=provenance,retry_of=None,
+        revision=1,created_at=now(),updated_at=now()))
+    audit(db,"work.native.text_review",user.id);db.commit()
+    return {"id":call_id,"state":"review","title":body.title,"item_count":len(items)}
+
 def workspace_result(db,s):
     materials=[]
     for m in current_files(db,s):
@@ -269,6 +300,8 @@ def invoke_tool(db,s,r,user,call):
             value=attach_originals(db,s,user,args);response=text_result(value)
         elif name=="native_intake_review":
             value=draft_create(db,s,r,user,args,ident);response=text_result(value)
+        elif name=="native_text_review":
+            value=create_text_draft(db,s,r,user,args,ident);response=text_result(value)
         else:
             raw=ai_tools.execute(name,args,db,user,model=r["model"],effort=r["effort"])
             value=ai_tools.bounded_result(raw)
