@@ -10,7 +10,7 @@ CHOICE={"选择题","单选题","多选题"}
 OPTION=re.compile(r"^([A-Z])[.、)]\s+(.*)$")
 SUB=re.compile(r"^[（(]([1-9][0-9]*)[）)]\s*(.*)$")
 # In answer/solution text, a reference to an existing numbered formula is not a new subquestion.
-SUB_RESULT=re.compile(r"^[（(]([1-9][0-9]*)[）)](?!\s*(?:式|中的|中可|所示|所述|可知|可得|得出|成立|的结论|的结果))\s*(.*)$")
+SUB_RESULT=re.compile(r"^[（(]([1-9][0-9]*)[）)](?!\s*(?:式|中的|中可|所示|所述|的结论|的结果))\s*(.*)$")
 BLANK=r"$\underline{\qquad}$"
 TEXT_FIELDS=("content","answer","solution")
 
