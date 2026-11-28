@@ -10,7 +10,7 @@ from app.core.method_recommendation import video_solution
 from app.core.security import current_user, require_origin, audit, now
 from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile
 from app.api.resources import admin_lock, view as resource_view
-from app.services import work_facets
+from app.services import work_facets, video_source_context
 from app.api.studio import save_version
 from app.services import video_engine as engine, storage
 from app.api import qoder
@@ -112,7 +112,8 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
     data = snapshot(r)
     # Save mapping before contacting the independent service; if response is lost, do not retry create blindly.
     facets = work_facets.capture(db, {"subject":r.subject,"blocks":[{"resource_id":r.id,"snapshot":resource_view(r)}]})
-    row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot=data, work_facets=facets, created_at=now())
+    context = video_source_context.capture(db, r)
+    row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot={**data, "source_context": context}, work_facets=facets, created_at=now())
     db.add(row)
     audit(db, "video.create", user.id)
     db.commit()
@@ -145,16 +146,19 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
         with production_model_lock:
             from app.core.ai_preferences import video_supplement
             supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
-            if supplement["text"]:
+            context=(row.source_snapshot or {}).get("source_context") or {}
+            if supplement["text"] or context:
                 try:
                     supported=engine.call("GET","/jiaoyan/prompt-capability")
                 except HTTPException as e:
                     if e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
                     raise
                 if not supported.get("supported") or supported.get("snapshot")!="job":raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
+                if context and not supported.get("source_context"):raise HTTPException(503,"视频引擎尚不支持题源元数据，请升级适配器")
             prepare_model(db,body.effort if body else None,body.model if body else None)
-            if supplement["text"]:
-                return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",supplement)
+            if supplement["text"] or context:
+                payload={**supplement, **({"source_context":context} if context else {})}
+                return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",payload)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})
     return engine.call("POST", f"/lessons/{rid}/{action}", {})
 

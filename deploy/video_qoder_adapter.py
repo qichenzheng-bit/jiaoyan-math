@@ -21,19 +21,30 @@ _factory_ready=Event()
 _initializing=False
 
 
-def job_supplement():
+def job_prompt_data():
     if _initializing and not _factory_ready.wait(30):
         raise RuntimeError('VIDEO_PROMPT_STORE_NOT_READY')
-    if _session_factory is None:return ''
+    if _session_factory is None:return {}
     from sqlalchemy import select
     from weiguang_backend.services.task_control import active_job
     from weiguang_backend.core.models import ClientSetting
     ident=active_job()
-    if not ident:return ''
+    if not ident:return {}
     with _session_factory() as db:
         row=db.scalar(select(ClientSetting).where(ClientSetting.key=='jiaoyan:video:prompt:'+ident,ClientSetting.account_id==''))
-        if row is None:return ''
+        if row is None:return {}
         value=json.loads(row.value)
+        if not isinstance(value,dict):raise RuntimeError('VIDEO_PROMPT_SNAPSHOT_INVALID')
+        return value
+
+def job_source_context():
+    context=job_prompt_data().get('source_context') or {}
+    if not isinstance(context,dict) or len(json.dumps(context,ensure_ascii=False).encode())>12000:
+        raise RuntimeError('VIDEO_SOURCE_CONTEXT_INVALID')
+    return context
+
+def job_supplement():
+        value=job_prompt_data()
         text=value.get('text','') if isinstance(value,dict) else ''
         if not isinstance(text,str) or '\x00' in text or len(text.encode())>PROMPT_LIMIT:
             raise RuntimeError('VIDEO_PROMPT_SNAPSHOT_INVALID')
@@ -183,6 +194,14 @@ def chat_cli(*args, **kwargs):
     return {"status":"failed","error":"QODER_VIDEO_NO_RESULT"}
 
 
+def _source_context_ready():
+    try:
+        from weiguang_backend.pipeline import source_assets
+        return getattr(source_assets,'SOURCE_CONTEXT_PROVIDER',None) is job_source_context
+    except ImportError:
+        return False
+
+
 def add_prompt_routes(router):
     from fastapi import HTTPException, Request
     from pydantic import BaseModel, ConfigDict, Field
@@ -193,6 +212,7 @@ def add_prompt_routes(router):
         model_config=ConfigDict(extra='forbid')
         text:str=Field(default='',max_length=16000)
         revision:int=Field(ge=0)
+        source_context:dict|None=None
 
     def authorize(request:Request):
         expected=os.environ.get('WEIGUANG_API_TOKEN','')
@@ -202,14 +222,16 @@ def add_prompt_routes(router):
     @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):
         authorize(request)
-        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job'}
+        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready()}
 
     @router.post('/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):
         authorize(request)
         if '\x00' in body.text or len(body.text.encode())>PROMPT_LIMIT:
             raise HTTPException(422,'VIDEO_PROMPT_TOO_LONG')
-        token=_job_prompt.set(body.model_dump())
+        if body.source_context is not None and (not _source_context_ready() or len(json.dumps(body.source_context,ensure_ascii=False).encode())>12000):
+            raise HTTPException(422,'VIDEO_SOURCE_CONTEXT_UNSUPPORTED_OR_TOO_LARGE')
+        token=_job_prompt.set(body.model_dump(exclude_none=True))
         try:return original(id)
         finally:_job_prompt.reset(token)
     return router
@@ -230,6 +252,9 @@ def create_app():
     cli_probe.chat_cli_stream = chat_cli_stream
     model_selection.CLI_PROTOCOLS = ("qoder_cli",)
     model_runtime.CLI_PROTOCOLS = ("qoder_cli",)
+    from weiguang_backend.pipeline import source_assets
+    if hasattr(source_assets,'SOURCE_CONTEXT_PROVIDER'):
+        source_assets.SOURCE_CONTEXT_PROVIDER=job_source_context
     from weiguang_backend.main import create_app as upstream
     from weiguang_backend.core.models import AiProvider, GlobalAiSetting
     _initializing=True
