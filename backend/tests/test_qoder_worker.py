@@ -225,3 +225,16 @@ def test_native_sdk_waits_for_memory_and_store_drain():
     assert "await client.flush_memory()" in worker.SDK_AGENT_SCRIPT
     assert "user_scope" in worker.SDK_AGENT_SCRIPT and '"user_scope":False' in worker.SDK_AGENT_SCRIPT
     assert "emit(final or" in worker.SDK_AGENT_SCRIPT
+
+
+def test_native_video_preserves_prompt_contract(monkeypatch):
+    import ast
+    ast.parse(worker.SDK_VIDEO_SCRIPT)
+    assert 'await client.query(cfg["prompt"])' in worker.SDK_VIDEO_SCRIPT
+    assert 'opts["system_prompt"]=cfg["system"]' in worker.SDK_VIDEO_SCRIPT
+    assert '"skills":[]' in worker.SDK_VIDEO_SCRIPT and '"tools":[]' in worker.SDK_VIDEO_SCRIPT
+    assert 'opts["memory"]={}' in worker.SDK_VIDEO_SCRIPT
+    monkeypatch.delenv("WG_NATIVE_VIDEO",raising=False)
+    assert not worker.native_video_enabled()
+    monkeypatch.setenv("WG_NATIVE_VIDEO","1")
+    assert worker.native_video_enabled()

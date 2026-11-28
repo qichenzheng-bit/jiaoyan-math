@@ -37,7 +37,7 @@ rollback() {
 install -m 644 -o root -g root "$src" "$dest" || rollback
 systemctl restart jiaoyan-qoder.service || rollback
 for _ in $(seq 1 20); do
-  if status 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("native_agent") and s.get("worker_version",0)>=16' 2>/dev/null; then
+  if status 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("native_agent") and s.get("worker_version",0)>=17' 2>/dev/null; then
     echo "QODER_NATIVE_AGENT_READY (live SDK/MCP/vision smoke tests still required)"
     exit 0
   fi

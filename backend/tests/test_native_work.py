@@ -11,7 +11,8 @@ def test_native_pilot_opt_in(monkeypatch):
 def test_native_tools_no_nested_model_or_unbounded_permissions():
     tools={t["name"]:t for t in n.tools()}
     assert {"native_page","native_intake_review","question_search","selection_create"}<=tools.keys()
-    assert not {"original_read","intake_text","video_generate","video_edit","model_usage","Bash"}&tools.keys()
+    assert not {"original_read","intake_text","model_usage","Bash"}&tools.keys()
+    assert {"video_generate","video_render","video_edit","video_retry","video_job_read"}<=tools.keys()
     assert tools["native_intake_review"]["write"] and not tools["native_page"]["write"]
 
 def test_native_page_passes_original_image_not_ocr(monkeypatch):
@@ -65,3 +66,26 @@ def test_native_attach_and_workspace_tools_registered():
     assert not names["native_workspace"]["write"]
     assert names["native_attach"]["write"]
     assert "replace_revision" in names["native_intake_review"]["parameters"]["properties"]
+
+
+def test_native_video_waits_for_real_render(monkeypatch):
+    from types import SimpleNamespace
+    from app.core import native_work as n
+    from app.api import work_agent as wa
+    record={"phase_at":n.now(),"steps":[{"state":"queued","video_child":{"kind":"video","project":"p","id":"g"}}]}
+    monkeypatch.setattr(wa,"save",lambda *args:None)
+    db=SimpleNamespace(commit=lambda:None)
+    monkeypatch.setattr(n.video,"job_read",lambda *args:{"id":"g","kind":"generate","status":"succeeded"})
+    monkeypatch.setattr(n.video,"followup_render",lambda *args:{"id":"r","kind":"render","status":"queued"})
+    n.poll_video_jobs(db,None,record,None)
+    assert record["steps"][0]["video_child"]["id"]=="r"
+    assert record["steps"][0]["state"]=="queued"
+    monkeypatch.setattr(n.video,"job_read",lambda *args:{"id":"r","kind":"render","status":"succeeded"})
+    n.poll_video_jobs(db,None,record,None)
+    assert record["state"]=="done" and record["steps"][0]["state"]=="done"
+
+def test_native_video_tool_is_async():
+    from app.core import native_work as n
+    specs={x["name"]:x for x in n.tools()}
+    for name in n.VIDEO_JOBS:
+        assert "结束本轮" in specs[name]["description"]

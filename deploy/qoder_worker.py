@@ -461,7 +461,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 16, "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 17, "native_video":native_video_enabled() and SDK_PYTHON.is_file(), "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -529,6 +529,8 @@ def chat_event(event):
 def chat_snapshot(job,live=False):
     result={k:job[k] for k in ("id","state","answer","detail")}
     if job.get("native_session"):result["native_session"]=job["native_session"]
+    if job.get("video"):result["video_inference_mode"]="native_sdk" if job.get("native_video") else "legacy_cli"
+    elif job.get("video_inference_mode"):result["video_inference_mode"]=job["video_inference_mode"]
     for key in ("native_memory","native_memory_flush","native_mirror_error"):
         if key in job:result[key]=job[key]
     if live and job.get("pending"):result["pending_tool"]=job["pending"]
@@ -581,6 +583,12 @@ def prune_snapshots():
     except OSError:
         pass
 
+# Independently opt in after real SDK/video regression validation.
+def native_video_enabled():
+    return os.environ.get("WG_NATIVE_VIDEO")=="1"
+
+SDK_VIDEO_SCRIPT = "import asyncio,json,sys,inspect\nfrom qodercn_agent_sdk import QoderAgentOptions,QoderSDKClient,qodercli_auth,ResultMessage,AssistantMessage,TextBlock\ndef emit(event):\n    print(json.dumps(event,ensure_ascii=False),flush=True)\nasync def main():\n    cfg=json.loads(sys.stdin.readline())\n    extra={\"no-session-persistence\":None}\n    if cfg[\"effort\"]!=\"default\":extra[\"reasoning-effort\"]=cfg[\"effort\"]\n    # Preserve the original video prompt; no extra skills, memory or tool actions.\n    opts={\"auth\":qodercli_auth(),\"cli_path\":cfg[\"cli\"],\"cwd\":cfg[\"cwd\"],\n          \"model\":cfg[\"model\"],\"tools\":[],\"allowed_tools\":[],\n          \"setting_sources\":[],\"skills\":[],\"strict_mcp_config\":True,\n          \"permission_mode\":\"dontAsk\",\"extra_args\":extra,\"include_partial_messages\":True}\n    if cfg[\"system\"]:opts[\"system_prompt\"]=cfg[\"system\"]\n    if \"memory\" in inspect.signature(QoderAgentOptions).parameters:opts[\"memory\"]={}\n    final=None\n    async with QoderSDKClient(options=QoderAgentOptions(**opts)) as client:\n        await client.query(cfg[\"prompt\"])\n        async for message in client.receive_response():\n            if isinstance(message,AssistantMessage):\n                value=\"\".join(b.text for b in message.content if isinstance(b,TextBlock))\n                if value:emit({\"type\":\"assistant\",\"message\":{\"content\":value}})\n            elif isinstance(message,ResultMessage):\n                final={\"type\":\"result\",\"is_error\":message.subtype!=\"success\" or not isinstance(message.result,str) or not message.result.strip(),\"result\":message.result or \"\"}\n                break\n            elif isinstance(getattr(message,\"event\",None),dict):\n                event=message.event\n                if event.get(\"type\")==\"content_block_delta\" and event.get(\"delta\",{}).get(\"type\")==\"text_delta\":\n                    emit({\"type\":\"stream_event\",\"event\":event})\n    emit(final or {\"type\":\"error\"})\n    if not final or final[\"is_error\"]:sys.exit(1)\ntry:asyncio.run(main())\nexcept Exception:\n    emit({\"type\":\"error\"})\n    sys.exit(1)\n"
+
 def chat_run(job, exe, model, prompt, attachment=None):
     video = job.get("video", False)
     output_limit = 300000 if video else 48000
@@ -599,11 +607,22 @@ def chat_run(job, exe, model, prompt, attachment=None):
                 image=Path(cwd)/("source"+suffix)
                 image.write_bytes(raw)
                 args += ["--attachment",str(image)]
-            proc = subprocess.Popen(args+["-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+            native=video and job.get("native_video",False)
+            if native:
+                proc=subprocess.Popen([str(SDK_PYTHON),"-u","-c",SDK_VIDEO_SCRIPT],cwd=cwd,
+                    stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+            else:
+                proc=subprocess.Popen(args+["-p",prompt],cwd=cwd,stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
             with lock:
-                job["proc"] = proc
-                if job["cancel"]: stop_process(proc)
+                job["proc"]=proc
+                if job["cancel"]:stop_process(proc)
+            if native:
+                try:
+                    proc.stdin.write((json.dumps({"cli":exe,"cwd":cwd,"model":model,"effort":job["effort"],
+                        "system":job["system"],"prompt":prompt},ensure_ascii=False)+"\n").encode())
+                    proc.stdin.flush()
+                finally:proc.stdin.close()
             deadline = time.monotonic()+(job["timeout"] if video else 240)
             buffer = b""
             with selectors.DefaultSelector() as sel:
@@ -688,6 +707,8 @@ def chat_start(data, video=False, vision=False):
         return 422,{"detail":"视频模型参数无效"}
     exe=executable()
     if not exe: return 503,{"detail":"未安装 Qoder CN CLI"}
+    native_video=bool(video and native_video_enabled())
+    if native_video and not SDK_PYTHON.is_file():return 503,{"detail":"视频原生SDK尚未安装"}
     with lock:
         if ident in chat_jobs: return 200,chat_snapshot(chat_jobs[ident])
         cached=load_snapshot(ident)
@@ -697,7 +718,7 @@ def chat_start(data, video=False, vision=False):
         # Keep a bounded number of completed jobs for reconnecting clients.
         for old in list(chat_jobs)[:-31]:
             if chat_jobs[old]["state"]!="running": del chat_jobs[old]
-        job={"id":ident,"state":"running","answer":"","detail":"","proc":None,"cancel":False,"video":video,"system":system,"effort":effort,"timeout":timeout}
+        job={"id":ident,"state":"running","answer":"","detail":"","proc":None,"cancel":False,"video":video,"system":system,"effort":effort,"timeout":timeout,"native_video":native_video}
         try: save_snapshot(job)
         except OSError: return 503,{"detail":"任务结果缓存不可写，请检查执行服务存储"}
         chat_jobs[ident]=job

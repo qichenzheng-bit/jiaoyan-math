@@ -287,6 +287,16 @@ def cancel(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(c
             if e.status_code!=404:raise
     child=r.get("child")
     detail="已停止后续执行；保留已完成成果"
+    if r.get("native"):
+        from app.core.native_work import video_waiting
+        from app.api import video
+        for entry in video_waiting(r):
+            item=entry["video_child"]
+            try:
+                video.job_action(item["project"],item["id"],"cancel",db)
+                entry["detail"]="已请求停止原视频任务"
+            except HTTPException:entry["detail"]="未确认停止；请到视频模块核对"
+        if video_waiting(r):detail+="；已尝试停止关联视频任务"
     if r["state"]=="running" and r.get("phase")=="business" and child:
         try:
             from app.api import video,intelligence

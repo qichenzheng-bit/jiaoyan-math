@@ -29,3 +29,8 @@
 
 - `deploy/native-agent-smoke.py --model Auto --vision`：真实SDK、MCP回调、原生会话恢复、可选图片输入。测试使用独立合成数据，消耗实际模型额度，不碰业务数据库，不作为已执行验收。
 - `deploy/backup-native-state.sh AGE_PUBLIC_RECIPIENT OUTPUT.age`：管理员离线加密备份，仅覆盖两个应用专属原生目录，不包含CLI认证。需先停止Worker并维持停机，备份后由管理员恢复服务；仍需恢复演练及并入既有自动备份。
+
+
+### 视频引擎原生接入（Worker 17）
+保留原视频引擎固定版本、现有提示词及补充规则、生成/校验/渲染/微调/TTS/审核接口。新的 SDK 视频推理通道只传原始 prompt、system、model、effort，仍使用原流式结果协议，默认关闭。视频任务不加载聊天记忆和额外技能，不运行生成代码；由现有引擎完成渲染校验。原生工作工具可以提交原引擎视频任务，Agent 结束轮次释放共享模型后再轮询生成与自动渲染结果；未成功渲染不得视为完成。
+部署后先升级 Worker，真实模型联调、同一题生成与微调回归通过后，管理员在 jiaoyan-qoder.service 的 Environment 中设置 WG_NATIVE_VIDEO=1 并重启空闲 Worker。关闭该变量恢复原 CLI 调用。当前未执行真实模型或渲染验收。

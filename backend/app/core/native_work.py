@@ -10,18 +10,19 @@ from uuid import uuid4
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import select
-from app.api import qoder, workspaces as w, intelligence as ai
+from app.api import qoder, workspaces as w, intelligence as ai, video
 from app.core import ai_tools
 from app.core.ai_preferences import work_context
 from app.core.security import now, audit
 from app.models import WorkMaterial, WorkBatch, IntakeImport, IntakeJob
 from app.services import storage, material_vision, material_import, word_images
 
-# These existing tools perform business operations without starting a second AI
-# invocation. Additional model-dependent tools need native adapters.
+# Video operations submit to the existing engine. Wait only after the Agent
+# releases the shared model worker; do not run nested inference inside MCP.
+VIDEO_JOBS={"video_generate","video_render","video_edit","video_retry"}
 SAFE_WRITES={"selection_create","book_create","chapter_create","document_append","chapter_order",
-             "template_apply","document_patch","layout_update","cover_create","video_create"}
-EXCLUDE={"original_read","model_usage","model_catalog","checkin_state","intake_status","video_job_read"}
+             "template_apply","document_patch","layout_update","cover_create","video_create",*VIDEO_JOBS}
+EXCLUDE={"original_read","model_usage","model_catalog","checkin_state","intake_status"}
 
 class Page(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -55,6 +56,9 @@ def enabled():
 
 def tools():
     rows=[t for t in ai_tools.catalogue() if t["name"] not in EXCLUDE and (not t["write"] or t["name"] in SAFE_WRITES)]
+    for spec in rows:
+        if spec["name"] in VIDEO_JOBS:
+            spec["description"]+="。仅提交原视频引擎异步任务；提交后不要循环查询或等待成片，结束本轮释放共享模型，由系统追踪实际结果；不得重复提交。"
     rows.extend([
         {"name":"native_workspace","description":"读取当前会话全部原始资料、实际页数或段数、既有批次、审核任务ID和进度。可用于继续或重新识别。","parameters":{"type":"object","properties":{},"additionalProperties":False},"write":False},
         {"name":"native_attach","description":"将用户指定的资料库真实文件ID关联到当前工作会话。连续图片可明确合并为PDF。不会删除原件。","parameters":AttachmentRequest.model_json_schema(),"write":True},
@@ -78,6 +82,7 @@ SYSTEM=("你是微光数学教研智能体。以自然语言理解和回应用�
         "数学公式用LaTeX；题目录入优先读取全部相关原始页，跨页合并，保留原文已有答案解析，"
         "仅补充缺失内容并标记生成来源；每题2—5个准确知识标签及一个主标签。"
         "创建审核草稿后由用户审核，禁止自行正式入库。必要时根据实际数据澄清，不要求固定措辞。"
+        "视频制作沿用原引擎和原教学提示词；提交异步任务后结束本轮释放模型，系统追踪实际生成及渲染结果，不虚报成片。"
         "如某项能力未提供，明确说明，不能假装完成。")
 
 def begin(db,s,body,user):
@@ -248,7 +253,7 @@ def invoke_tool(db,s,r,user,call):
     old=next((x for x in r["steps"] if x["id"]==ident),None)
     if old and old["state"]=="running" and spec["write"]:
         raise HTTPException(409,"上次业务写入结果尚未确认，已停止以防重复执行")
-    if old and old["state"] in ("done","failed") and name!="native_page":
+    if old and old["state"] in ("done","failed","queued") and name!="native_page":
         return text_result(old.get("result") or {"error":old["detail"]},old["state"]=="failed")
     entry={"id":ident,"tool":name,"state":"running","detail":spec["description"],"at":now()}
     # Journal business mutations before executing; do not store full generated
@@ -265,9 +270,16 @@ def invoke_tool(db,s,r,user,call):
         elif name=="native_intake_review":
             value=draft_create(db,s,r,user,args,ident);response=text_result(value)
         else:
-            value=ai_tools.bounded_result(ai_tools.execute(name,args,db,user,model=r["model"],effort=r["effort"]))
-            response=text_result(value)
-        entry.update(state="done",result=ai_tools.bounded_result(value),detail=spec["description"])
+            raw=ai_tools.execute(name,args,db,user,model=r["model"],effort=r["effort"])
+            value=ai_tools.bounded_result(raw)
+            if name in VIDEO_JOBS:
+                from app.core.ai_work import child_task
+                child=child_task(name,args,raw)
+                if not child:raise HTTPException(502,"视频引擎未返回可追踪任务ID")
+                entry["video_child"]=child
+                response=text_result({"submitted":True,"job":value,"detail":"原引擎已接收；结束本轮后自动追踪实际结果。"})
+            else:response=text_result(value)
+        entry.update(state="queued" if entry.get("video_child") else "done",result=ai_tools.bounded_result(value),detail=spec["description"])
         db.commit()
     except (ValueError,TypeError,HTTPException) as exc:
         db.rollback()
@@ -285,10 +297,52 @@ def invoke_tool(db,s,r,user,call):
     wa.save(db,fresh,r);db.commit()
     return response
 
+def video_waiting(r):
+    return [x for x in r.get("steps",[]) if x.get("video_child") and x.get("state")=="queued"]
+
+def poll_video_jobs(db,s,r,user):
+    from app.api import work_agent as wa
+    from app.core.ai_work import fail
+    if now()-r.get("phase_at",now())>7200:
+        fail(db,s,r,"视频任务等待超时；请在原视频模块核对，未重复提交");return
+    for entry in video_waiting(r):
+        child=entry["video_child"]
+        try:
+            result=video.job_read(child["project"],child["id"],db)
+            if result.get("kind")=="generate" and result.get("status")=="succeeded":
+                result=video.followup_render(child["project"],result,db)
+                entry["video_child"]={**child,"id":result["id"]}
+        except HTTPException as e:
+            if e.status_code in (502,503,504):continue
+            entry.update(state="failed",detail=str(e.detail)[:400]);continue
+        status=result.get("status")
+        entry["result"]=ai_tools.bounded_result(result)
+        if status=="succeeded":entry.update(state="done",detail="原视频引擎确认任务成功")
+        elif status in ("queued","running","cancelling"):entry["detail"]="原视频引擎："+str(result.get("phase") or status)
+        else:entry.update(state="failed",detail=str(result.get("error") or status or "视频任务状态未知")[:400])
+    if video_waiting(r):
+        r["detail"]="正在等待原视频引擎实际生成或渲染"
+    else:
+        failed=[x for x in r.get("steps",[]) if x.get("video_child") and x.get("state")=="failed"]
+        amendments=r.get("amendments",[]);count=r.get("native_amendment_count",0)
+        if len(amendments)>count and r.get("native_session"):
+            additional=amendments[count:]
+            facts=[{"state":x["state"],"result":x.get("result"),"detail":x["detail"]} for x in r["steps"] if x.get("video_child")]
+            r.update(phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,
+                native_resume=r["native_session"],native_amendment_count=len(amendments),
+                native_prompt=user_prompt(db,s,"原视频任务实际结果："+json.dumps(facts,ensure_ascii=False)+"\n用户追加要求：\n"+"\n".join(a["text"] for a in additional),additional[-1].get("selected_id")),
+                detail="原生Agent继续处理视频追加要求")
+        else:
+            r.update(state="failed" if failed else "done",detail="存在失败的视频任务，请查看真实引擎记录" if failed else "原视频引擎已确认本轮视频任务完成；等待人工验收")
+    wa.save(db,s,r);db.commit()
+
 def retry(db,s,r,user):
     from app.api import work_agent as wa
     if any(x["state"]=="running" and next((t["write"] for t in tools() if t["name"]==x["tool"]),True) for x in r.get("steps",[])):
         raise HTTPException(409,"上次写入结果不明确，请先核对业务成果")
+    if video_waiting(r):
+        r.update(state="running",phase="native_video_wait",phase_at=now(),detail="恢复原视频任务状态，不重复生成")
+        wa.save(db,s,r);db.commit();return wa.public(r)
     r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),detail="恢复原生Agent会话",
         native_resume=r.get("native_session") or r.get("native_resume"),
         native_prompt=user_prompt(db,s,"继续未完成的工作，核对实际成果，不要重复创建。") if r.get("native_session") else user_prompt(db,s,r["instruction"]))
@@ -298,6 +352,7 @@ def retry(db,s,r,user):
 def tick(db,s,r,user):
     from app.api import work_agent as wa
     from app.core.ai_work import fail
+    if r.get("phase")=="native_video_wait":return poll_video_jobs(db,s,r,user)
     if now()-r.get("phase_at",now())>1260:
         try:qoder.request("POST","/chat/"+r["model_job"]+"/cancel",{})
         except HTTPException:pass
@@ -337,6 +392,9 @@ def tick(db,s,r,user):
                 fail(db,s,r,exc.detail);return
         else:wa.save(db,s,r);db.commit()
         return
+    if video_waiting(r) and reply.get("state") in ("done","failed","stopped"):
+        r.update(phase="native_video_wait",phase_at=now(),detail="Agent已释放模型；等待原视频引擎实际结果")
+        wa.save(db,s,r);db.commit();return
     if reply.get("state")!="done":
         fail(db,s,r,reply.get("detail") or "原生Agent未完成");return
     amendments=r.get("amendments",[]);count=r.get("native_amendment_count",0)
