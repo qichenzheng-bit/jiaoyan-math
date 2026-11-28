@@ -1,0 +1,70 @@
+# A09 algebra_proof
+
+完整课堂参考草稿；数学内容仅为示例，具体字号、位置、动画、教学结构必须按当前题目与实际安全区重设计。尚未通过实际 Manim 成片验收。
+
+```python title=scene_01
+from manim import *
+from animation_engine.code.authored_scene import AuthoredScene
+from animation_engine.code.board_kit import board_bounds, fit_stem, mixed_text, highlight_clause
+
+class A09Lesson(AuthoredScene):
+    def construct(self):
+        self.camera.background_color = WHITE
+        bounds = board_bounds()
+        stem = mixed_text(("t", "设 "), ("m", r"U,W"), ("t", " 为同一线性空间的子空间，且 "), ("m", r"U\cap W=\{0\}"), ("t", "，证明和空间中分解唯一。"), font_size=28)
+        self.add(stem)
+        self.start_cue("A09_open", "今天来看一道关于子空间直和的证明。", "", tts_text="今天来看一道关于子空间直和的证明。")
+        self.end_cue("A09_open")
+        self.start_cue("A09_read", "设 U 和 W 为同一个线性空间的子空间，并且交集只含零向量。证明它们的和空间中，每个向量的分解唯一。", "", tts_text="设 U 和 W 为同一个线性空间的子空间，并且交集只含零向量。证明它们的和空间中，每个向量的分解唯一。")
+        highlight_clause(self, stem)
+        self.end_cue("A09_read")
+        self.start_cue("A09_guide", "要证明分解唯一，可以假设存在两种分解，利用交集条件证明它们实际上相同。", "", tts_text="要证明分解唯一，可以假设存在两种分解，利用交集条件证明它们实际上相同。")
+        guide = mixed_text(("t", "假设同一个向量具有两种分解"), font_size=26)
+        fit_stem(stem, bounds)
+        guide.next_to(stem, DOWN, buff=0.42)
+        self.play(Write(guide), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.end_cue("A09_guide")
+        self.start_cue("A09_knowledge", "和空间中的向量都能写成两个子空间中向量的和。子空间对加法、减法和数乘封闭。", "", tts_text="和空间中的向量都能写成两个子空间中向量的和。子空间对加法、减法和数乘封闭。")
+        knowledge = mixed_text(("m", r"U+W=\{u+w\mid u\in U,\ w\in W\}"), font_size=26)
+        knowledge.next_to(guide, DOWN, buff=0.34)
+        self.play(Write(knowledge), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.check_layout('引导与知识', question=stem, guide=guide, knowledge=knowledge)
+        self.end_cue("A09_knowledge")
+        self.start_cue("A09_step1", "设同一个向量有两种分解，两个 u 都属于 U，两个 w 都属于 W。", "", tts_text="设同一个向量有两种分解，两个 u 都属于 U，两个 w 都属于 W。")
+        self.play(FadeOut(guide), FadeOut(knowledge), run_time=min(0.45, self.cue_time_left()*0.2))
+        step1 = mixed_text(("m", r"u_1+w_1=u_2+w_2,\quad u_i\in U,\ w_i\in W"), font_size=26)
+        step1.next_to(stem, DOWN, buff=0.48, aligned_edge=LEFT)
+        step1.set_x(0)
+        self.play(Write(step1), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A09_step1")
+        self.start_cue("A09_step2", "移项得到左边属于 U，右边属于 W，二者相等，所以这个向量属于交集。", "", tts_text="移项得到左边属于 U，右边属于 W，二者相等，所以这个向量属于交集。")
+        step2 = mixed_text(("m", r"u_1-u_2=w_2-w_1\in U\cap W"), font_size=26)
+        step2.next_to(step1, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step2), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A09_step2")
+        self.start_cue("A09_step3", "这里必须使用子空间对减法封闭，不能只凭两个原向量的归属就直接说差属于交集。", "", tts_text="这里必须使用子空间对减法封闭，不能只凭两个原向量的归属就直接说差属于交集。")
+        step3 = mixed_text(("t", "注意：利用的是两个子空间的封闭性。"), font_size=24)
+        step3.set_color("#B91C1C")
+        step3.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step3), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A09_step3")
+        self.start_cue("A09_step4", "交集只有零向量，因此这两个差都为零，两种分解完全相同。存在性由和空间定义保证，所以分解唯一。", "", tts_text="交集只有零向量，因此这两个差都为零，两种分解完全相同。存在性由和空间定义保证，所以分解唯一。")
+        self.play(FadeOut(step3), run_time=min(0.35, self.cue_time_left()*0.16))
+        step4 = mixed_text(("m", r"u_1-u_2=w_2-w_1=0\Rightarrow u_1=u_2,\ w_1=w_2"), font_size=26)
+        step4.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step4), run_time=min(0.9, self.cue_time_left()*0.4))
+        answer_box = SurroundingRectangle(step4, color="#1D4ED8", buff=0.10)
+        self.play(Create(answer_box), run_time=min(0.4, self.cue_time_left()*0.25))
+        self.end_cue("A09_step4")
+        self.start_cue("A09_summary", "证明直和分解唯一，可以比较两种分解，把差转化为交集中的向量，再利用交集只含零向量。", "", tts_text="证明直和分解唯一，可以比较两种分解，把差转化为交集中的向量，再利用交集只含零向量。")
+        self.play(FadeOut(step1), FadeOut(step2), FadeOut(step4), FadeOut(answer_box), run_time=min(0.45, self.cue_time_left()*0.14))
+        summary_title = Text('方法与注意点总结', color='#0F766E', font_size=28)
+        summary_lines = VGroup(mixed_text(("t", "识别：和空间中的分解唯一性"), font_size=25), mixed_text(("t", "策略：设两种分解并比较"), font_size=25), mixed_text(("t", "核心：移项得到交集中的向量"), font_size=25), mixed_text(("t", "注意：存在性与唯一性均需依据"), font_size=25)).arrange(DOWN, aligned_edge=LEFT, buff=0.26)
+        summary = VGroup(summary_title, summary_lines).arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+        summary.next_to(stem, DOWN, buff=0.45)
+        summary.set_x(0)
+        self.play(Write(summary_title), run_time=min(0.5, self.cue_time_left()*0.12))
+        self.play(LaggedStart(*[Write(item) for item in summary_lines], lag_ratio=0.18), run_time=min(2.4, self.cue_time_left()*0.55))
+        self.check_layout('总结', question=stem, pedagogy=summary)
+        self.end_cue("A09_summary")
+```

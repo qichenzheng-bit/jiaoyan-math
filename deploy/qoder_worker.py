@@ -508,7 +508,7 @@ def status():
         prune_model_waiters()
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 24, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 24, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "video_reference_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -744,7 +744,7 @@ def chat_start(data, video=False, vision=False):
     if not isinstance(ident,str) or not JOB_ID.fullmatch(ident) or not allowed_model(model) or not isinstance(prompt,str) or "\x00" in prompt or not 0<len(prompt.encode("utf-8"))<=(120000 if video else 100000):
         return 422,{"detail":"模型或上下文无效；请检查模型及提示词长度"}
     attachment=None
-    if vision:
+    if vision or (video and data.get("attachment") is not None):
         try: attachment=vision_attachment(data.get("attachment"))
         except ValueError: return 422,{"detail":"图片附件无效或超过8 MiB"}
     system,effort,timeout=data.get("system",""),data.get("effort","default"),data.get("timeout",900)
@@ -754,7 +754,7 @@ def chat_start(data, video=False, vision=False):
         return 422,{"detail":"视频模型参数无效"}
     exe=executable()
     if not exe: return 503,{"detail":"未安装 Qoder CN CLI"}
-    native_video=bool(video and native_video_enabled())
+    native_video=bool(video and native_video_enabled() and attachment is None)
     if native_video and not native_sdk_info["ready"]:return 503,{"detail":"视频原生SDK接口未通过检查"}
     with lock:
         if ident in chat_jobs: return 200,chat_snapshot(chat_jobs[ident])
@@ -770,7 +770,7 @@ def chat_start(data, video=False, vision=False):
         except OSError: return 503,{"detail":"任务结果缓存不可写，请检查执行服务存储"}
         chat_jobs[ident]=job
         chat_active=ident
-        threading.Thread(target=chat_run,args=(job,exe,model,prompt,attachment) if vision else (job,exe,model,prompt),daemon=True).start()
+        threading.Thread(target=chat_run,args=(job,exe,model,prompt,attachment) if attachment is not None else (job,exe,model,prompt),daemon=True).start()
         return 200,chat_snapshot(job)
 
 
@@ -1224,7 +1224,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/chat/start", "/video/start", "/vision/start"):
             try:
                 n=int(self.headers.get("Content-Length","0"))
-                if not 0<n<=(12*1024*1024 if self.path=="/vision/start" else 800000 if self.path == "/video/start" else 200000): raise ValueError()
+                if not 0<n<=(12*1024*1024 if self.path in ("/vision/start","/video/start") else 200000): raise ValueError()
                 data=json.loads(self.rfile.read(n))
             except (ValueError,UnicodeError): return self.reply(422,{"detail":"请求无效"})
             return self.reply(*chat_start(data, video=self.path == "/video/start", vision=self.path=="/vision/start"))

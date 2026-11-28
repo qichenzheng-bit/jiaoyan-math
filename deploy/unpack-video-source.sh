@@ -20,5 +20,9 @@ test -f "$target/app/backend/src/weiguang_backend/main.py"
 test -f "$target/app/animation_engine/src/animation_engine/code/scene_contract.py"
 test -f "$target/app/backend/src/weiguang_backend/ai/prompts/manim_teacher.md"
 test -f "$target/app/backend/src/weiguang_backend/ai/prompts/manim_editor.md"
+if [[ -d "$repo/vendor/video-overlay" ]]; then
+  cp -a "$repo/vendor/video-overlay/." "$target/"
+  printf '%s\n' 'video-prompt-v1' > "$target/PROMPT_OVERLAY_REVISION"
+fi
 printf '%s\n' "$pinned" > "$target/SOURCE_REVISION"
 echo "Verified upstream video source: $pinned"

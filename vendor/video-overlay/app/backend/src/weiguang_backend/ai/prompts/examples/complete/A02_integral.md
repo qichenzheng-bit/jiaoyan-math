@@ -1,0 +1,70 @@
+# A02 integral
+
+完整课堂参考草稿；数学内容仅为示例，具体字号、位置、动画、教学结构必须按当前题目与实际安全区重设计。尚未通过实际 Manim 成片验收。
+
+```python title=scene_01
+from manim import *
+from animation_engine.code.authored_scene import AuthoredScene
+from animation_engine.code.board_kit import board_bounds, fit_stem, mixed_text, highlight_clause
+
+class A02Lesson(AuthoredScene):
+    def construct(self):
+        self.camera.background_color = WHITE
+        bounds = board_bounds()
+        stem = mixed_text(("t", "求不定积分 "), ("m", r"\int x\cos x\,\mathrm{d}x"), font_size=28)
+        self.add(stem)
+        self.start_cue("A02_open", "今天来看一道典型的分部积分题。", "", tts_text="今天来看一道典型的分部积分题。")
+        self.end_cue("A02_open")
+        self.start_cue("A02_read", "求 x 乘 cosine x 的不定积分。", "", tts_text="求 x 乘 cosine x 的不定积分。")
+        highlight_clause(self, stem)
+        self.end_cue("A02_read")
+        self.start_cue("A02_guide", "x 求导就变成一，cosine x 又容易积分，所以考虑分部积分。", "", tts_text="x 求导就变成一，cosine x 又容易积分，所以考虑分部积分。")
+        guide = mixed_text(("m", r"u=x,\quad \mathrm{d}v=\cos x\,\mathrm{d}x"), ("t", "选择容易求导和积分的两部分"), font_size=26)
+        fit_stem(stem, bounds)
+        guide.next_to(stem, DOWN, buff=0.42)
+        self.play(Write(guide), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.end_cue("A02_guide")
+        self.start_cue("A02_knowledge", "分部积分公式把原积分转成乘积减去另一个积分。这里两个函数可微，所需积分存在。", "", tts_text="分部积分公式把原积分转成乘积减去另一个积分。这里两个函数可微，所需积分存在。")
+        knowledge = mixed_text(("m", r"\int u\,\mathrm{d}v=uv-\int v\,\mathrm{d}u"), font_size=26)
+        knowledge.next_to(guide, DOWN, buff=0.34)
+        self.play(Write(knowledge), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.check_layout('引导与知识', question=stem, guide=guide, knowledge=knowledge)
+        self.end_cue("A02_knowledge")
+        self.start_cue("A02_step1", "先将 cosine x d x 写成 d sine x。", "", tts_text="先将 cosine x d x 写成 d sine x。")
+        self.play(FadeOut(guide), FadeOut(knowledge), run_time=min(0.45, self.cue_time_left()*0.2))
+        step1 = mixed_text(("m", r"\begin{aligned}I&=\int x\,\mathrm{d}(\sin x)\end{aligned}"), font_size=26)
+        step1.next_to(stem, DOWN, buff=0.48, aligned_edge=LEFT)
+        step1.set_x(0)
+        self.play(Write(step1), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A02_step1")
+        self.start_cue("A02_step2", "应用公式，得到 x 乘 sine x，减去 sine x 的积分。", "", tts_text="应用公式，得到 x 乘 sine x，减去 sine x 的积分。")
+        step2 = mixed_text(("m", r"\begin{aligned}\phantom I&=x\sin x-\int\sin x\,\mathrm{d}x\end{aligned}"), font_size=26)
+        step2.next_to(step1, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step2), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A02_step2")
+        self.start_cue("A02_step3", "sine x 的原函数是负 cosine x，前面还有一个负号。别漏掉积分常数。", "", tts_text="sine x 的原函数是负 cosine x，前面还有一个负号。别漏掉积分常数。")
+        step3 = mixed_text(("t", "注意负号与积分常数"), font_size=24)
+        step3.set_color("#B91C1C")
+        step3.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step3), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A02_step3")
+        self.start_cue("A02_step4", "两个负号抵消，所以最终得到 x 乘 sine x 加 cosine x，再加积分常数 C。", "", tts_text="两个负号抵消，所以最终得到 x 乘 sine x 加 cosine x，再加积分常数 C。")
+        self.play(FadeOut(step3), run_time=min(0.35, self.cue_time_left()*0.16))
+        step4 = mixed_text(("m", r"\begin{aligned}\phantom I&=x\sin x+\cos x+C\end{aligned}"), font_size=26)
+        step4.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step4), run_time=min(0.9, self.cue_time_left()*0.4))
+        answer_box = SurroundingRectangle(step4, color="#1D4ED8", buff=0.10)
+        self.play(Create(answer_box), run_time=min(0.4, self.cue_time_left()*0.25))
+        self.end_cue("A02_step4")
+        self.start_cue("A02_summary", "遇到乘积形式时，可以观察一部分求导后是否简化，另一部分是否容易积分，再选择分部积分。最后注意负号和积分常数。", "", tts_text="遇到乘积形式时，可以观察一部分求导后是否简化，另一部分是否容易积分，再选择分部积分。最后注意负号和积分常数。")
+        self.play(FadeOut(step1), FadeOut(step2), FadeOut(step4), FadeOut(answer_box), run_time=min(0.45, self.cue_time_left()*0.14))
+        summary_title = Text('方法与注意点总结', color='#0F766E', font_size=28)
+        summary_lines = VGroup(mixed_text(("t", "识别：乘积结构"), font_size=25), mixed_text(("t", "选择：一部分求导后简化，另一部分易积分"), font_size=25), mixed_text(("t", "步骤：确定两部分，套用公式，再积分"), font_size=25), mixed_text(("t", "注意：负号与积分常数"), font_size=25)).arrange(DOWN, aligned_edge=LEFT, buff=0.26)
+        summary = VGroup(summary_title, summary_lines).arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+        summary.next_to(stem, DOWN, buff=0.45)
+        summary.set_x(0)
+        self.play(Write(summary_title), run_time=min(0.5, self.cue_time_left()*0.12))
+        self.play(LaggedStart(*[Write(item) for item in summary_lines], lag_ratio=0.18), run_time=min(2.4, self.cue_time_left()*0.55))
+        self.check_layout('总结', question=stem, pedagogy=summary)
+        self.end_cue("A02_summary")
+```

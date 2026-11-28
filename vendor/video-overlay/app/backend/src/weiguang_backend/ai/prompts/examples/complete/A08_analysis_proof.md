@@ -1,0 +1,70 @@
+# A08 analysis_proof
+
+完整课堂参考草稿；数学内容仅为示例，具体字号、位置、动画、教学结构必须按当前题目与实际安全区重设计。尚未通过实际 Manim 成片验收。
+
+```python title=scene_01
+from manim import *
+from animation_engine.code.authored_scene import AuthoredScene
+from animation_engine.code.board_kit import board_bounds, fit_stem, mixed_text, highlight_clause
+
+class A08Lesson(AuthoredScene):
+    def construct(self):
+        self.camera.background_color = WHITE
+        bounds = board_bounds()
+        stem = mixed_text(("t", "用数列极限的定义证明 "), ("m", r"\lim\limits_{n\to\infty}\frac1n=0"), ("t", "。"), font_size=28)
+        self.add(stem)
+        self.start_cue("A08_open", "今天来看一道用定义证明数列极限的例题。", "", tts_text="今天来看一道用定义证明数列极限的例题。")
+        self.end_cue("A08_open")
+        self.start_cue("A08_read", "用数列极限的定义证明，n 趋于无穷时，n 分之一的极限等于零。", "", tts_text="用数列极限的定义证明，n 趋于无穷时，n 分之一的极限等于零。")
+        highlight_clause(self, stem)
+        self.end_cue("A08_read")
+        self.start_cue("A08_guide", "我们要控制 n 分之一与零的距离。只要这个距离小于任意给定的 epsilon 就可以。", "", tts_text="我们要控制 n 分之一与零的距离。只要这个距离小于任意给定的 epsilon 就可以。")
+        guide = mixed_text(("m", r"\left|\frac1n-0\right|<\varepsilon"), font_size=26)
+        fit_stem(stem, bounds)
+        guide.next_to(stem, DOWN, buff=0.42)
+        self.play(Write(guide), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.end_cue("A08_guide")
+        self.start_cue("A08_knowledge", "数列极限的定义要求，对任意正的 epsilon，都能找到正整数 N，使所有不小于 N 的 n 对应的距离都小于 epsilon。", "", tts_text="数列极限的定义要求，对任意正的 epsilon，都能找到正整数 N，使所有不小于 N 的 n 对应的距离都小于 epsilon。")
+        knowledge = mixed_text(("m", r"\forall\varepsilon>0,\ \exists N\in\mathbb N^*,\ n\ge N\Rightarrow |a_n-a|<\varepsilon"), font_size=26)
+        knowledge.next_to(guide, DOWN, buff=0.34)
+        self.play(Write(knowledge), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.check_layout('引导与知识', question=stem, guide=guide, knowledge=knowledge)
+        self.end_cue("A08_knowledge")
+        self.start_cue("A08_step1", "因为 n 和 epsilon 都为正，把距离不等式化成 n 大于 epsilon 分之一。", "", tts_text="因为 n 和 epsilon 都为正，把距离不等式化成 n 大于 epsilon 分之一。")
+        self.play(FadeOut(guide), FadeOut(knowledge), run_time=min(0.45, self.cue_time_left()*0.2))
+        step1 = mixed_text(("m", r"\frac1n<\varepsilon\quad\Longleftrightarrow\quad n>\frac1{\varepsilon}"), font_size=26)
+        step1.next_to(stem, DOWN, buff=0.48, aligned_edge=LEFT)
+        step1.set_x(0)
+        self.play(Write(step1), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A08_step1")
+        self.start_cue("A08_step2", "任给正的 epsilon，取 N 为 epsilon 分之一的向下取整再加一。", "", tts_text="任给正的 epsilon，取 N 为 epsilon 分之一的向下取整再加一。")
+        step2 = mixed_text(("t", "任给 "), ("m", r"\varepsilon>0,\quad N=\left\lfloor\frac1\varepsilon\right\rfloor+1"), font_size=26)
+        step2.next_to(step1, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step2), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A08_step2")
+        self.start_cue("A08_step3", "多加一保证严格大于 epsilon 分之一，不能忽略定义中的严格小于。", "", tts_text="多加一保证严格大于 epsilon 分之一，不能忽略定义中的严格小于。")
+        step3 = mixed_text(("t", "注意："), ("m", r"N>\frac1\varepsilon"), ("t", " 是严格不等式。"), font_size=24)
+        step3.set_color("#B91C1C")
+        step3.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step3), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A08_step3")
+        self.start_cue("A08_step4", "当 n 大于等于 N 时，距离等于 n 分之一，不超过 N 分之一，而它严格小于 epsilon，因此按定义极限为零。", "", tts_text="当 n 大于等于 N 时，距离等于 n 分之一，不超过 N 分之一，而它严格小于 epsilon，因此按定义极限为零。")
+        self.play(FadeOut(step3), run_time=min(0.35, self.cue_time_left()*0.16))
+        step4 = mixed_text(("m", r"n\ge N\Rightarrow\left|\frac1n-0\right|=\frac1n\le\frac1N<\varepsilon"), font_size=26)
+        step4.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step4), run_time=min(0.9, self.cue_time_left()*0.4))
+        answer_box = SurroundingRectangle(step4, color="#1D4ED8", buff=0.10)
+        self.play(Create(answer_box), run_time=min(0.4, self.cue_time_left()*0.25))
+        self.end_cue("A08_step4")
+        self.start_cue("A08_summary", "用定义证明极限时，可以先反解不等式寻找阈值。正式证明一定按任给误差、选择阈值、验证所有后续项的顺序写。", "", tts_text="用定义证明极限时，可以先反解不等式寻找阈值。正式证明一定按任给误差、选择阈值、验证所有后续项的顺序写。")
+        self.play(FadeOut(step1), FadeOut(step2), FadeOut(step4), FadeOut(answer_box), run_time=min(0.45, self.cue_time_left()*0.14))
+        summary_title = Text('方法与注意点总结', color='#0F766E', font_size=28)
+        summary_lines = VGroup(mixed_text(("t", "识别：按定义证明数列极限"), font_size=25), mixed_text(("t", "先反解距离不等式，寻找阈值"), font_size=25), mixed_text(("t", "正式证明先任给误差，再选阈值"), font_size=25), mixed_text(("t", "检查量词顺序与严格不等式"), font_size=25)).arrange(DOWN, aligned_edge=LEFT, buff=0.26)
+        summary = VGroup(summary_title, summary_lines).arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+        summary.next_to(stem, DOWN, buff=0.45)
+        summary.set_x(0)
+        self.play(Write(summary_title), run_time=min(0.5, self.cue_time_left()*0.12))
+        self.play(LaggedStart(*[Write(item) for item in summary_lines], lag_ratio=0.18), run_time=min(2.4, self.cue_time_left()*0.55))
+        self.check_layout('总结', question=stem, pedagogy=summary)
+        self.end_cue("A08_summary")
+```

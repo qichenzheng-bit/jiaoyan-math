@@ -1,0 +1,70 @@
+# A07 statistics
+
+完整课堂参考草稿；数学内容仅为示例，具体字号、位置、动画、教学结构必须按当前题目与实际安全区重设计。尚未通过实际 Manim 成片验收。
+
+```python title=scene_01
+from manim import *
+from animation_engine.code.authored_scene import AuthoredScene
+from animation_engine.code.board_kit import board_bounds, fit_stem, mixed_text, highlight_clause
+
+class A07Lesson(AuthoredScene):
+    def construct(self):
+        self.camera.background_color = WHITE
+        bounds = board_bounds()
+        stem = mixed_text(("t", "设随机样本来自期望为 "), ("m", r"\mu"), ("t", " 的总体，证明样本均值无偏。"), font_size=28)
+        self.add(stem)
+        self.start_cue("A07_open", "今天来看一道关于无偏估计的证明题。", "", tts_text="今天来看一道关于无偏估计的证明题。")
+        self.end_cue("A07_open")
+        self.start_cue("A07_read", "设随机样本来自期望为 mu 的总体，证明样本均值是总体均值的无偏估计。", "", tts_text="设随机样本来自期望为 mu 的总体，证明样本均值是总体均值的无偏估计。")
+        highlight_clause(self, stem)
+        self.end_cue("A07_read")
+        self.start_cue("A07_guide", "无偏问题的关键就是求估计量的数学期望。先把样本均值写成各样本之和。", "", tts_text="无偏问题的关键就是求估计量的数学期望。先把样本均值写成各样本之和。")
+        guide = mixed_text(("m", r"\overline X=\frac{1}{n}\sum\limits_{i=1}^nX_i"), font_size=26)
+        fit_stem(stem, bounds)
+        guide.next_to(stem, DOWN, buff=0.42)
+        self.play(Write(guide), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.end_cue("A07_guide")
+        self.start_cue("A07_knowledge", "若估计量 T 的期望等于待估参数 theta，就称它为无偏估计量。期望的线性性要求相关期望存在，不要求独立。", "", tts_text="若估计量 T 的期望等于待估参数 theta，就称它为无偏估计量。期望的线性性要求相关期望存在，不要求独立。")
+        knowledge = mixed_text(("m", r"E(T)=\theta"), ("t", "：估计量无偏"), font_size=26)
+        knowledge.next_to(guide, DOWN, buff=0.34)
+        self.play(Write(knowledge), run_time=min(0.8, self.cue_time_left()*0.45))
+        self.check_layout('引导与知识', question=stem, guide=guide, knowledge=knowledge)
+        self.end_cue("A07_knowledge")
+        self.start_cue("A07_step1", "把样本均值的定义代入期望。", "", tts_text="把样本均值的定义代入期望。")
+        self.play(FadeOut(guide), FadeOut(knowledge), run_time=min(0.45, self.cue_time_left()*0.2))
+        step1 = mixed_text(("m", r"E(\overline X)=E\left(\frac1n\sum\limits_{i=1}^n X_i\right)"), font_size=26)
+        step1.next_to(stem, DOWN, buff=0.48, aligned_edge=LEFT)
+        step1.set_x(0)
+        self.play(Write(step1), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A07_step1")
+        self.start_cue("A07_step2", "利用期望的线性性质，把常数提出并分别求期望。", "", tts_text="利用期望的线性性质，把常数提出并分别求期望。")
+        step2 = mixed_text(("m", r"\phantom{E(\overline X)}=\frac1n\sum\limits_{i=1}^n E(X_i)"), font_size=26)
+        step2.next_to(step1, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step2), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A07_step2")
+        self.start_cue("A07_step3", "这里证明的是均值无偏，不需要把分母 n 改成 n 减一。", "", tts_text="这里证明的是均值无偏，不需要把分母 n 改成 n 减一。")
+        step3 = mixed_text(("t", "注意：样本均值与样本方差的无偏条件不同。"), font_size=24)
+        step3.set_color("#B91C1C")
+        step3.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step3), run_time=min(0.9, self.cue_time_left()*0.4))
+        self.end_cue("A07_step3")
+        self.start_cue("A07_step4", "每个样本的期望都是 mu，求和后除以 n 就是 mu，因此样本均值无偏。", "", tts_text="每个样本的期望都是 mu，求和后除以 n 就是 mu，因此样本均值无偏。")
+        self.play(FadeOut(step3), run_time=min(0.35, self.cue_time_left()*0.16))
+        step4 = mixed_text(("m", r"\phantom{E(\overline X)}=\frac1n\cdot n\mu=\mu"), font_size=26)
+        step4.next_to(step2, DOWN, buff=0.34, aligned_edge=LEFT)
+        self.play(Write(step4), run_time=min(0.9, self.cue_time_left()*0.4))
+        answer_box = SurroundingRectangle(step4, color="#1D4ED8", buff=0.10)
+        self.play(Create(answer_box), run_time=min(0.4, self.cue_time_left()*0.25))
+        self.end_cue("A07_step4")
+        self.start_cue("A07_summary", "证明无偏先明确要估计哪个参数，再求估计量的期望，并检查是否恰好等于该参数。", "", tts_text="证明无偏先明确要估计哪个参数，再求估计量的期望，并检查是否恰好等于该参数。")
+        self.play(FadeOut(step1), FadeOut(step2), FadeOut(step4), FadeOut(answer_box), run_time=min(0.45, self.cue_time_left()*0.14))
+        summary_title = Text('方法与注意点总结', color='#0F766E', font_size=28)
+        summary_lines = VGroup(mixed_text(("t", "识别：无偏估计的证明"), font_size=25), mixed_text(("t", "路线：写出统计量，求期望"), font_size=25), mixed_text(("t", "依据：期望线性性"), font_size=25), mixed_text(("t", "注意：不同统计量不能混用分母规则"), font_size=25)).arrange(DOWN, aligned_edge=LEFT, buff=0.26)
+        summary = VGroup(summary_title, summary_lines).arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+        summary.next_to(stem, DOWN, buff=0.45)
+        summary.set_x(0)
+        self.play(Write(summary_title), run_time=min(0.5, self.cue_time_left()*0.12))
+        self.play(LaggedStart(*[Write(item) for item in summary_lines], lag_ratio=0.18), run_time=min(2.4, self.cue_time_left()*0.55))
+        self.check_layout('总结', question=stem, pedagogy=summary)
+        self.end_cue("A07_summary")
+```

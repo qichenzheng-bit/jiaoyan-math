@@ -10,7 +10,7 @@ from app.core.method_recommendation import video_solution
 from app.core.security import current_user, require_origin, audit, now
 from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile
 from app.api.resources import admin_lock, view as resource_view
-from app.services import work_facets
+from app.services import work_facets, video_source_context, video_figures
 from app.api.studio import save_version
 from app.services import video_engine as engine, storage
 from app.api import qoder
@@ -83,8 +83,7 @@ def snapshot(r):
         result[key] = result[key] or ""
         if len(result[key]) > size:
             raise HTTPException(422, f"题源字段 {key} 超过引擎限制")
-    if any("![" in result[k] or "[[img:" in result[k] for k in ("problem", "reference_solution", "answer", "analysis")):
-        raise HTTPException(422, "含附图题源需先完成跨引擎附件迁移，暂不可直接生成")
+    video_figures.prepare(result)  # Validate tokens without replacing the authoritative local snapshot.
     return result
 
 @router.get("/status")
@@ -110,14 +109,22 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
     if old:
         return view(old)
     data = snapshot(r)
+    engine_data,figure_ids=video_figures.prepare(data)
+    if figure_ids:
+        supported=engine.call('GET','/jiaoyan/prompt-capability')
+        if not supported.get('reference_figures'):raise HTTPException(503,'请先升级支持参考题图的视频引擎')
+        video_figures.payload(db,figure_ids)  # Check availability before creating the project.
     # Save mapping before contacting the independent service; if response is lost, do not retry create blindly.
     facets = work_facets.capture(db, {"subject":r.subject,"blocks":[{"resource_id":r.id,"snapshot":resource_view(r)}]})
-    row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot=data, work_facets=facets, created_at=now())
+    context = video_source_context.capture(db, r)
+    row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot={**data, "source_context": context, "figure_ids":figure_ids}, work_facets=facets, created_at=now())
     db.add(row)
+    for file_id in figure_ids:
+        storage.link_file(db,file_id,"video_project",row.id)
     audit(db, "video.create", user.id)
     db.commit()
     try:
-        result = engine.call("POST", "/lessons", data)
+        result = engine.call("POST", "/lessons", engine_data)
         row.engine_id = engine.engine_id(result.get("id") if isinstance(result,dict) else None)
         db.commit()
     except HTTPException:
@@ -145,16 +152,25 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
         with production_model_lock:
             from app.core.ai_preferences import video_supplement
             supplement=video_supplement(db,user) if isinstance(user,User) else {"text":"","revision":0}
-            if supplement["text"]:
+            saved_context=(getattr(row,"source_snapshot",None) or {}).get("source_context") or {}
+            # Source provenance remains in the bank/project snapshot, not in lesson opening.
+            context={"knowledge_tags":saved_context["knowledge_tags"]} if saved_context.get("knowledge_tags") else {}
+            figure_ids=(getattr(row,"source_snapshot",None) or {}).get("figure_ids") or []
+            if supplement["text"] or context or figure_ids:
                 try:
                     supported=engine.call("GET","/jiaoyan/prompt-capability")
                 except HTTPException as e:
-                    if e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
-                    raise
-                if not supported.get("supported") or supported.get("snapshot")!="job":raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
+                    if e.status_code in (404,405) and not supplement["text"] and not figure_ids:supported={}
+                    elif e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
+                    else:raise
+                if supplement["text"] and (not supported.get("supported") or supported.get("snapshot")!="job"):raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
+                if not supported.get("source_context"):context={}
+                if figure_ids and not supported.get("reference_figures"):raise HTTPException(503,"视频引擎尚不支持参考题图")
             prepare_model(db,body.effort if body else None,body.model if body else None)
-            if supplement["text"]:
-                return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",supplement)
+            if supplement["text"] or context or figure_ids:
+                payload={**supplement, **({"source_context":context} if context else {})}
+                if figure_ids:payload["figures"]=video_figures.payload(db,figure_ids)
+                return engine.call("POST",f"/jiaoyan/lessons/{rid}/generate",payload)
             return engine.call("POST", f"/lessons/{rid}/{action}", {})
     return engine.call("POST", f"/lessons/{rid}/{action}", {})
 
@@ -164,10 +180,8 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db), user:User
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
-    from app.core.ai_preferences import video_supplement
-    extra=video_supplement(db,user)["text"] if isinstance(user,User) else ""
-    instruction=body.instruction+("\n\n【教学补充要求；当前微调指令优先】\n"+extra if extra else "")
-    if len(instruction)>12000:raise HTTPException(422,"微调要求及教学补充内容过长")
+    # Preserve exact edit scope. The engine inherits the original lesson supplement separately.
+    instruction=body.instruction
     with production_model_lock:
         prepare_model(db,body.effort,body.model)
         return engine.call("POST", f"/videos/{rid}/edits", {"instruction":instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})
