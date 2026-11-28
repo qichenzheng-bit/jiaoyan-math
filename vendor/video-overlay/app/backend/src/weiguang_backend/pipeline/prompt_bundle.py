@@ -59,8 +59,9 @@ def snapshot(source, user, output_dir):
     repair = entry("manim_repair.md") + SEP + shared
     data = {"version":"v1", "shared_sha256":hashlib.sha256(shared.encode()).hexdigest(),
             "source_sha256":source.source_sha256, "examples":selected, "system":system,
-            "repair_system":repair}
+            "repair_system":repair, "user_json":user}
     target = Path(output_dir) / "prompt_snapshot.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return system
 
