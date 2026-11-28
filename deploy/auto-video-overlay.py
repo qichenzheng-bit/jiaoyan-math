@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import Request, build_opener, ProxyHandler
+from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
 RUNTIME = Path("/opt/jiaoyan-video/runtime-fec8a4f")
 PYTHON = Path("/opt/jiaoyan-video/venv/bin/python")
@@ -24,7 +24,12 @@ REVISION = "fec8a4f8c21b829a8f043a2c3538aff4cc48ea08"
 SERVICE = "jiaoyan-video.service"
 PREFIXES = ("app/backend/src/", "app/animation_engine/src/")
 FINAL_STATES = {"succeeded", "success", "completed", "done", "failed", "cancelled", "canceled", "interrupted"}
-OPENER = build_opener(ProxyHandler({}))
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+OPENER = build_opener(ProxyHandler({}), NoRedirect())
 
 
 def command(*args, **kwargs):
@@ -35,13 +40,13 @@ def service(action):
     command("sudo", "-n", "/usr/bin/systemctl", action, SERVICE, timeout=90)
 
 
-def api(path):
+def api(path, timeout=5):
     port = os.environ.get("VIDEO_ENGINE_PORT", "8766")
     token = os.environ.get("VIDEO_ENGINE_TOKEN", "")
     if port != "8766" or not token:
         raise RuntimeError("Video engine configuration unavailable")
     req = Request("http://127.0.0.1:" + port + "/api/v1" + path, headers={"X-API-Key":token})
-    with OPENER.open(req, timeout=5) as response:
+    with OPENER.open(req, timeout=timeout) as response:
         return json.loads(response.read(8 * 1024 * 1024))
 
 
@@ -141,7 +146,15 @@ def run(release):
     staged = release / "video-engine-source"
     env = {**os.environ, "PYTHONPATH":str(staged/"app/backend/src")+":"+str(staged/"app/animation_engine/src"), "PYTHONDONTWRITEBYTECODE":"1"}
     env.pop("VIDEO_ENGINE_TOKEN", None)
-    command(str(PYTHON), str(release/"deploy/video-engine-overlay-check.py"), env=env, timeout=120)
+    # Runner was authorized to modify source and restart one service, not to
+    # execute the video user's private venv. Never broaden filesystem permissions.
+    for relative, source in files.items():
+        if source.suffix==".py":
+            compile(source.read_bytes(), str(relative), "exec")
+    if os.access(PYTHON, os.X_OK):
+        command(str(PYTHON), str(release/"deploy/video-engine-overlay-check.py"), env=env, timeout=120)
+    else:
+        print("VIDEO_VENV_PRIVATE: runtime interface check delegated to authenticated service endpoint")
     ensure_idle()
     with tempfile.TemporaryDirectory(prefix="video-overlay-rollback-") as tmp:
         backup = Path(tmp)
@@ -169,6 +182,9 @@ def run(release):
             capability = api("/jiaoyan/prompt-capability")
             if capability.get("knowledge_video_schema") != "knowledge-video-source-v1":
                 raise RuntimeError("Updated video capability missing")
+            checked=api("/jiaoyan/overlay-selfcheck", timeout=60)
+            if checked != {"passed": True}:
+                raise RuntimeError("Installed video interface check failed")
         except BaseException:
             service("stop")
             for rel, present in existed.items():

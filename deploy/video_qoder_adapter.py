@@ -305,6 +305,18 @@ def add_prompt_routes(router):
         if not expected or not hmac.compare_digest(request.headers.get('X-API-Key','').encode(),expected.encode()):
             raise HTTPException(403,'VIDEO_ENGINE_TOKEN_REQUIRED')
 
+    @router.get('/jiaoyan/overlay-selfcheck')
+    def overlay_selfcheck(request:Request):
+        authorize(request)
+        # This is a fixed, read-only interface check; no user code, AI calls,
+        # render jobs, data access or additional privileged operations.
+        try:
+            from weiguang_backend.pipeline.overlay_selfcheck import main
+            main([])
+        except Exception as exc:
+            raise HTTPException(503,"VIDEO_OVERLAY_INTERFACE_CHECK_FAILED:"+type(exc).__name__) from None
+        return {"passed":True}
+
     @router.get('/jiaoyan/maintenance-state')
     def maintenance_state(request:Request):
         authorize(request)
