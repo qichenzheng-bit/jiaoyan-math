@@ -24,3 +24,8 @@
 - Worker 16 在原生回复完成后等待SDK关闭及记忆flush；检测会话镜像失败与记忆保存异常，不能把模型结束当作已确认记忆写入。
 - 应用用户ID绑定工作目录；自动记忆只使用当前用户专属 MEMORY.md，禁用共享CLI用户级记忆。原有显式设置继续保留。若当前SDK无memory字段，不启用自动记忆并报告不可用。
 - 会话镜像位于 Worker home 下 .jiaoyan-native-workspaces/<会话ID>/session-mirror.sqlite3；自动记忆在 .jiaoyan-native-memory/<用户ID>/MEMORY.md。需纳入加密备份并做恢复验收；外置删除仅删除镜像，不等价于删除 CLI 本机历史。生产开关继续关闭，直至本机删除同步、备份恢复、SDK联调完成。
+
+### 阶段四验收入口
+
+- `deploy/native-agent-smoke.py --model Auto --vision`：真实SDK、MCP回调、原生会话恢复、可选图片输入。测试使用独立合成数据，消耗实际模型额度，不碰业务数据库，不作为已执行验收。
+- `deploy/backup-native-state.sh AGE_PUBLIC_RECIPIENT OUTPUT.age`：管理员离线加密备份，仅覆盖两个应用专属原生目录，不包含CLI认证。需先停止Worker并维持停机，备份后由管理员恢复服务；仍需恢复演练及并入既有自动备份。
