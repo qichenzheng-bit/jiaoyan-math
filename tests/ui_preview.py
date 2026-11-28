@@ -142,8 +142,8 @@ def answer(route):
         manual_runs[ident]=run
         manual_saved[ident]={**body,"blocks":saved,"revision":body["revision"]+1}
         result={"document":manual_saved[ident],"run":run}
-    if p.endswith("/manual-commit") and route.request.method=="POST":
-        body=manual_saved[p.split("/")[2]]
+    if (p.endswith("/manual-commit") or p.endswith("/manual-direct")) and route.request.method=="POST":
+        body=route.request.post_data_json if p.endswith("/manual-direct") else manual_saved[p.split("/")[2]]
         saved=[{**b,"kind":"reference","resource_id":"saved-"+b["uid"],"snapshot":{**b,"id":"saved-"+b["uid"],"code":"QNEW","revision":1}} if b["kind"] in ("question","knowledge") else b for b in body["blocks"]]
         result={"document":{**body,"blocks":saved,"revision":body["revision"]+1},"counts":{"question_create":sum(b["kind"]=="question" for b in body["blocks"]),"knowledge_create":sum(b["kind"]=="knowledge" for b in body["blocks"]),"question_reuse":0,"knowledge_reuse":0,"updated":0}}
     if p=="/documents/manual-matches" and route.request.method=="POST":
@@ -396,23 +396,21 @@ with sync_playwright() as p:
                 assert page.locator(".mobile-tabs,.clean-context-menu,.clean-local-nav").count()==0
                 page.evaluate("document.fonts.ready")
                 if name=="01-intake":
-                    expect(page.locator(".intake-entry")).to_have_count(2)
-                    expect(page.locator(".intake-entry[href='/work?workspace=new']")).to_be_visible()
+                    expect(page.locator(".intake-entry")).to_have_count(1)
                     expect(page.locator(".intake-entry[href='/intake?mode=document']")).to_be_visible()
-                    assert page.locator(".intake-hub a[href^='/intake-single']").count()==0
+                    expect(page.locator(".intake-entry[href='/work?workspace=new']")).to_have_count(0)
                     expect(page.get_by_label("资料类型",exact=True)).to_be_visible()
-                    expect(page.locator(".intake-record")).to_have_count(2)
-                    page.get_by_role("button",name="待审核",exact=True).click()
                     expect(page.locator(".intake-record")).to_have_count(1)
-                    expect(page.locator(".intake-record-name")).to_contain_text("AI 审核示例")
+                    page.get_by_role("button",name="草稿",exact=True).click()
+                    expect(page.locator(".intake-record")).to_have_count(0)
                     page.locator(".intake-state-tabs").get_by_role("button",name="全部",exact=True).click()
-                    expect(page.locator(".intake-record")).to_have_count(2)
+                    expect(page.locator(".intake-record")).to_have_count(1)
                     page.get_by_label("搜索资料",exact=True).fill("考研")
                     expect(page.locator(".intake-record")).to_have_count(1)
                     expect(page.locator(".intake-record-name")).to_contain_text("考研")
                     page.get_by_label("搜索资料",exact=True).fill("")
                     expect(page.get_by_label("搜索资料",exact=True)).to_have_value("")
-                    expect(page.locator(".intake-record")).to_have_count(2)
+                    expect(page.locator(".intake-record")).to_have_count(1)
                 if name=="16-intake-document":
                     expect(page.get_by_text("整份资料不限定科目，逐条填写科目。",exact=True)).to_be_visible()
                     page.get_by_role("button",name="试卷",exact=True).click()
@@ -1559,18 +1557,8 @@ with sync_playwright() as p:
             assert submitted["blocks"][3]["answer"]=="(1) $2x$"
             assert submitted["blocks"][3]["solution"]=="(1) 利用导数公式"
             page.get_by_text("草稿已保存，尚未入库",exact=True).wait_for()
-            page.get_by_role("button",name="检查并入库",exact=True).click()
-            page.get_by_role("heading",name="入库审核",exact=True).wait_for()
-            expect(page.get_by_role("button",name="入库预览",exact=True)).to_be_disabled()
-            progress=page.locator(".manual-unified-review [role=progressbar]")
-            total=int(progress.get_attribute("aria-valuemax"))
-            for i in range(total):
-                page.get_by_role("button",name="通过并继续",exact=True).click()
-                expect(progress).to_have_attribute("aria-valuenow",str(i+1))
-            page.get_by_role("button",name="入库预览",exact=True).click()
-            page.get_by_role("heading",name="正式入库确认",exact=True).wait_for()
-            if page.locator(".manual-review-accept input").count():page.locator(".manual-review-accept input").check()
-            page.get_by_role("button",name=re.compile(r"^确认入库 ·")).click()
+            with page.expect_request(lambda req:req.url.endswith("/manual-direct") and req.method=="POST"):
+                page.get_by_role("button",name="确认入库",exact=True).click()
             page.get_by_role("heading",name="入库成功",exact=True).wait_for()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             capture(page,path=str(OUT/"28-mobile-review.png"),full_page=False)

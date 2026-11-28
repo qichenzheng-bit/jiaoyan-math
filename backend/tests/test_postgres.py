@@ -1542,6 +1542,15 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
         assert client.get("/api/documents/"+unused_doc["id"]).json()["source_id"] is None
         registered_source=client.get("/api/resources/"+receipt["source_id"]).json()
         assert client.delete("/api/resources/"+receipt["source_id"]+"/source",headers=origin,params={"revision":registered_source["revision"]}).status_code==409
+        # Manual intake uses one final confirmation, no approval rows or preview token.
+        md=client.post("/api/documents/setup",headers=origin,json={"title":"手动直接入库回归","source_type":"handout","subject":"数学分析"}).json()
+        manual_body={**md,"subject":"数学分析","blocks":[{"uid":"manual-direct-q","kind":"question","title":"手动直接入库测试","content":"求 $f(x)=71x^9+53x^3$ 的导数","answer":"$639x^8+159x^2$","solution":"逐项使用幂函数求导公式。","question_type":"综合题","difficulty":"简单","subject":"数学分析","knowledge_tags":["导数"],"dedup_reason":"独立回归用例"}]}
+        manual_url="/api/documents/"+md["id"]+"/manual-direct"
+        direct_manual=client.post(manual_url,headers=origin,json=manual_body)
+        assert direct_manual.status_code==200,direct_manual.text
+        assert direct_manual.json()["counts"]["question_create"]==1
+        assert direct_manual.json()["document"]["blocks"][0]["kind"]=="reference"
+        assert client.post(manual_url,headers=origin,json=manual_body).status_code==409
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
