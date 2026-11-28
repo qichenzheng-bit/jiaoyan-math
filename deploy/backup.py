@@ -82,7 +82,25 @@ FILE_KEY = re.compile(r"(original|generated)/([0-9a-f-]{36})\Z")
 
 def business_settings(cur):
     cur.execute("SELECT key,value FROM public.settings WHERE key = ANY(%s) OR key ~ '^bank[.]history[.][0-9a-f-]{36}[.][0-9a-f-]{36}$' OR key ~ '^bank[.]cart[.][0-9]+$' OR key ~ '^source[.]statistics[.]scopes[.][0-9]+$' OR key ~ '^knowledge[.]unit[.]detail[.][0-9a-f-]{36}$' OR key ~ '^source[.]file[.]versions[.][0-9a-f-]{36}$' OR key ~ '^layout:[0-9]+:[0-9a-f]{64}$' OR key ~ '^ai[.]memory[.][0-9]+[.]all$' OR key ~ '^ai[.]prompt[.][0-9]+[.](global|chat|work|intake|document|video|cover)$' ORDER BY key", (list(SAFE_SETTINGS),))
-    return dict(cur.fetchall())
+    result=dict(cur.fetchall())
+    # Preserve only completed native chat anchors, not active prompts or tool payloads.
+    cur.execute("""SELECT s.key,s.value,m.session_id FROM public.settings s
+        JOIN public.chat_messages m ON s.key='ai.chat.active.' || CAST(m.id AS text)
+        WHERE m.role='assistant' AND m.state='done' ORDER BY s.key""")
+    for key,value,workspace in cur.fetchall():
+        anchor=native_chat_anchor(value,str(workspace))
+        if anchor is not None:result[key]=anchor
+    return result
+
+def native_chat_anchor(raw,workspace):
+    try:data=json.loads(raw)
+    except (ValueError,TypeError):return None
+    if not isinstance(data,dict) or data.get("native") is not True or data.get("phase")!="terminal" or data.get("workspace")!=workspace:return None
+    uid=data.get("native_actor")
+    if type(uid) is not int or not 0<uid<2147483647:return None
+    uuid_pattern=r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+    if any(not isinstance(data.get(k),str) or not re.fullmatch(uuid_pattern,data[k]) for k in ("workspace","native_session","job")):return None
+    return json.dumps({k:data[k] for k in ("native","phase","native_actor","workspace","native_session","job")},ensure_ascii=False)
 
 def digest(path):
     h = hashlib.sha256()

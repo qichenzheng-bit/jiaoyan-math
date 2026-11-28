@@ -168,7 +168,8 @@ def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt=
         error=str(exc) if isinstance(exc,RuntimeError) else "QODER_VIDEO_TRANSPORT_ERROR"
         yield done("failed",error=error)
     finally:
-        if accepted and not terminal:
+        if not terminal:
+            # A queued or ambiguously accepted job may already reserve an ID.
             try:
                 request("POST","/chat/"+ident+"/cancel",{})
             except (OSError, ValueError, http.client.HTTPException, RuntimeError):

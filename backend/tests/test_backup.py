@@ -176,3 +176,13 @@ def test_native_online_snapshot_excludes_smoke_and_login(tmp_path):
     assert result.is_dir() and (result/"session-mirror.sqlite3").exists()
     assert len(list((stage/work.name).iterdir()))==1
     assert not (result/"unrelated-token").exists() and not (stage/".qoder-cn").exists()
+
+
+def test_native_chat_anchor_is_terminal_and_only_contains_identity():
+    from uuid import uuid4
+    workspace,sid,job=map(str,[uuid4(),uuid4(),uuid4()])
+    state={"native":True,"phase":"terminal","native_actor":1,"workspace":workspace,"native_session":sid,"job":job,"prompt":"secret","steps":[{"args":"secret"}]}
+    clean=json.loads(backup.native_chat_anchor(json.dumps(state),workspace))
+    assert clean["native_session"]==sid and "prompt" not in clean and "steps" not in clean
+    assert backup.native_chat_anchor(json.dumps({**state,"phase":"model"}),workspace) is None
+    assert backup.native_chat_anchor(json.dumps(state),str(uuid4())) is None

@@ -13,12 +13,12 @@ base=/var/lib/jiaoyan-native-backup
 install -d -m 0750 -o root -g "$group" "$base"
 install -m 0644 -o root -g root "$src/snapshot-native-state.py" /opt/jiaoyan-qoder/
 install -m 0755 -o root -g root "$src/publish-native-snapshot.sh" /opt/jiaoyan-qoder/
-printf '%s\n' "$recipient" >/opt/jiaoyan-qoder/native-backup-recipient
-chmod 0600 /opt/jiaoyan-qoder/native-backup-recipient
 # If the recipient changes, refuse to label an old archive with the new key.
 if [[ -f "$base/recipient" && "$(cat "$base/recipient")" != "$recipient" ]]; then
   echo "Native backup recipient changed; administrator must verify key rotation before continuing."; exit 1
 fi
+printf '%s\n' "$recipient" >/opt/jiaoyan-qoder/native-backup-recipient
+chmod 0600 /opt/jiaoyan-qoder/native-backup-recipient
 printf '%s\n' "$recipient" >"$base/recipient"
 chown root:"$group" "$base/recipient"; chmod 0640 "$base/recipient"
 install -m 0644 -o root -g root "$src/jiaoyan-native-backup.service" /etc/systemd/system/
