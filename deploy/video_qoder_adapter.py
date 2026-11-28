@@ -32,7 +32,13 @@ def job_prompt_data():
     if not ident:return {}
     with _session_factory() as db:
         row=db.scalar(select(ClientSetting).where(ClientSetting.key=='jiaoyan:video:prompt:'+ident,ClientSetting.account_id==''))
-        if row is None:return {}
+        if row is None:
+            from weiguang_backend.core.models import Job
+            job=db.get(Job,ident)
+            if job is not None and job.kind=='render':
+                # Auto-render job carries the generation rules under its own ID.
+                return {}
+            return {}
         value=json.loads(row.value)
         if not isinstance(value,dict):raise RuntimeError('VIDEO_PROMPT_SNAPSHOT_INVALID')
         return value
@@ -70,7 +76,7 @@ def job_rules():
 
 def capture_job_add(original, root=None):
     def wrapped(db,lesson,kind,*args,**kwargs):
-        if kind not in ('generate','edit'):
+        if kind not in ('generate','edit','render'):
             return original(db,lesson,kind,*args,**kwargs)
         from weiguang_backend.core.models import ClientSetting
         from weiguang_backend.pipeline import prompt_bundle
@@ -95,10 +101,13 @@ def capture_job_add(original, root=None):
                     ident=SceneContract.read(path).meta.get('prompt_job_id')
                     if ident:prior=_job_record(db,ident)
             if prior.get('rules'):
-                snapshot['rules']={**prior['rules'],'inherited_supplement':prior.get('text','')}
+                snapshot['rules']={**prior['rules'],'inherited_supplement':prior.get('text','') or prior['rules'].get('inherited_supplement','')}
+                snapshot['text']=prior.get('text','') or prior['rules'].get('inherited_supplement','')
             else:
                 shared=prompt_bundle.shared_specs()
-                snapshot['rules']={'editor_system':prompt_bundle.entry('manim_editor.md')+prompt_bundle.SEP+shared}
+                snapshot['rules']={'editor_system':prompt_bundle.entry('manim_editor.md')+prompt_bundle.SEP+shared,
+                    'repair_system':prompt_bundle.entry('manim_repair.md')+prompt_bundle.SEP+shared,
+                    'system':prompt_bundle.entry('manim_teacher.md')+prompt_bundle.SEP+shared, 'examples':[]}
         commit=kwargs.pop('commit',True)
         job=original(db,lesson,kind,*args,commit=False,**kwargs)
         if kind=='generate' and figures:
@@ -313,6 +322,8 @@ def create_app():
     original_builder=routers.build_production_router
     def build_with_prompt_routes(ctx,exports):
         production.job_add=capture_job_add(production.job_add,ctx.root)
+        from weiguang_backend.services.stages import generate
+        generate.job_add=capture_job_add(generate.job_add,ctx.root)
         return add_prompt_routes(original_builder(ctx,exports))
     routers.build_production_router=build_with_prompt_routes
     from weiguang_backend.ai import cli_login, cli_probe, model_selection, model_runtime

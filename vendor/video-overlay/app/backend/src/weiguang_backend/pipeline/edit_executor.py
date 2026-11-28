@@ -270,6 +270,8 @@ def assert_only_tts_text_changed(previous: dict[str, str],
     - 去掉 tts_text 后结构不同 → 说明改了别的东西，拒绝；
     - 连 tts_text 都没变（只改注释/格式）→ 要求模型重新给有效改动。
     """
+    if tuple(previous) != tuple(updated):
+        raise EditOutputError("EDIT_VOICE_ONLY_SCENE_SET_CHANGED")
     changed_tts = False
     for name, code in updated.items():
         old = previous.get(name)
@@ -292,11 +294,14 @@ def assert_only_tts_text_changed(previous: dict[str, str],
 
 def validate_edit_scope_ast(before: dict[str, str], after: dict[str, str], *,
                             targets: tuple[str, ...],
-                            allow_new: bool = False) -> None:
+                            allow_new: bool = False,
+                            allowed_removed: tuple[str, ...] = ()) -> None:
     """AST 级微调范围守卫：确保未授权场景一字未改、未发生无意义结构偏移。"""
     target_set = set(targets)
     for name, old_code in before.items():
         if name not in after:
+            if name not in allowed_removed:
+                raise EditOutputError("EDIT_UNAUTHORIZED_REMOVAL: " + name)
             continue
         new_code = after[name]
         if new_code == old_code:

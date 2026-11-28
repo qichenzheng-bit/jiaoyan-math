@@ -253,7 +253,7 @@ def run_scene_edit(session: Path, *, instruction: str, client, fps: int,
     progress 是渲染引擎的进度回调（阶段 + 已渲染帧数），微调里那次渲染同样
     要能逐帧回写，否则界面上只有一个不动的百分比。
     """
-    reference_images = [str(p) for p in (images or ()) if str(p)]
+    reference_images = list(dict.fromkeys(str(p) for p in (*source_reference_images, *(images or ())) if str(p)))
     session = Path(session)
     state = _read_state(session)
     current = _current_version(session, state)
@@ -479,7 +479,7 @@ def run_scene_edit(session: Path, *, instruction: str, client, fps: int,
                         assert_only_tts_text_changed(sources, candidate)
                     else:
                         validate_edit_scope_ast(
-                            sources, candidate, targets=selected, allow_new=allow_new)
+                            sources, candidate, targets=selected, allow_new=allow_new, allowed_removed=removed)
                     for name in removed:
                         candidate.pop(name, None)
                     problems = _validate_sources(
