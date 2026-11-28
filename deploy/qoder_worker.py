@@ -461,7 +461,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 15, "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 16, "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -529,6 +529,8 @@ def chat_event(event):
 def chat_snapshot(job,live=False):
     result={k:job[k] for k in ("id","state","answer","detail")}
     if job.get("native_session"):result["native_session"]=job["native_session"]
+    for key in ("native_memory","native_memory_flush","native_mirror_error"):
+        if key in job:result[key]=job[key]
     if live and job.get("pending"):result["pending_tool"]=job["pending"]
     return result
 
@@ -721,8 +723,11 @@ def install_native_skills(cwd):
         path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
         path.write_text(content+"\n",encoding="utf-8")
 
-SDK_AGENT_SCRIPT = r"""
-import asyncio, json, sys
+# Shared by the SDK subprocess and local regression tests; no third-party storage dependency.
+SDK_SESSION_STORE_SCRIPT = "import asyncio\nimport hashlib\nimport json\nimport sqlite3\nimport time\nfrom pathlib import Path\n\ndef session_key(key):\n    def get(name,default=None):\n        return key.get(name,default) if isinstance(key,dict) else getattr(key,name,default)\n    project,session,subpath=get(\"project_key\"),get(\"session_id\"),get(\"subpath\") or \"\"\n    if not isinstance(project,str) or not project or not isinstance(session,str) or not session or not isinstance(subpath,str):\n        raise ValueError(\"invalid SDK session key\")\n    if subpath and (subpath.startswith(\"/\") or any(p in (\"\",\".\",\"..\") for p in subpath.split(\"/\")) or \"\\\\\" in subpath):\n        raise ValueError(\"invalid SDK transcript subpath\")\n    return project,session,subpath\n\nclass NativeSessionStore:\n    \"\"\"Opaque SDK transcript mirror, one SQLite file per app conversation.\n    Only the SDK interprets entries. Ordered atomic append and exact replay deduplication.\n    No credentials, business database access, or prompt reconstruction.\n    \"\"\"\n    def __init__(self,path):\n        self.path=Path(path)\n        self.path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)\n        self.path.touch(mode=0o600,exist_ok=True)\n        self.path.chmod(0o600)\n        with self.connect() as db:\n            db.execute(\"CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, session TEXT NOT NULL, subpath TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL, mtime INTEGER NOT NULL, UNIQUE(project,session,subpath,digest))\")\n    def connect(self):\n        db=sqlite3.connect(self.path,timeout=20)\n        db.execute(\"PRAGMA busy_timeout=20000\")\n        db.execute(\"PRAGMA secure_delete=ON\")\n        return db\n    def _append(self,key,entries):\n        prefix=session_key(key)\n        rows=[]\n        for entry in entries:\n            raw=json.dumps(entry,ensure_ascii=False,separators=(\",\",\":\"),sort_keys=True,allow_nan=False)\n            # SDK may retry exactly the same serialized transcript entry.\n            digest=hashlib.sha256(raw.encode()).hexdigest()\n            rows.append((*prefix,digest,raw,int(time.time()*1000)))\n        db=self.connect()\n        try:\n            with db:\n                db.execute(\"BEGIN IMMEDIATE\")\n                db.executemany(\"INSERT OR IGNORE INTO entries(project,session,subpath,digest,payload,mtime) VALUES(?,?,?,?,?,?)\",rows)\n        finally:db.close()\n    async def append(self,key,entries):\n        await asyncio.to_thread(self._append,key,entries)\n    def _load(self,key):\n        db=self.connect()\n        try:\n            rows=db.execute(\"SELECT payload FROM entries WHERE project=? AND session=? AND subpath=? ORDER BY seq\",session_key(key)).fetchall()\n            return [json.loads(row[0]) for row in rows] if rows else None\n        finally:db.close()\n    async def load(self,key):\n        return await asyncio.to_thread(self._load,key)\n    def _list_subkeys(self,key):\n        project,session,_=session_key(key)\n        db=self.connect()\n        try:return [row[0] for row in db.execute(\"SELECT DISTINCT subpath FROM entries WHERE project=? AND session=? AND subpath<>'' ORDER BY subpath\",(project,session))]\n        finally:db.close()\n    async def list_subkeys(self,key):\n        return await asyncio.to_thread(self._list_subkeys,key)\n    def _delete(self,key):\n        project,session,subpath=session_key(key)\n        db=self.connect()\n        try:\n            with db:\n                if subpath:db.execute(\"DELETE FROM entries WHERE project=? AND session=? AND subpath=?\",(project,session,subpath))\n                else:db.execute(\"DELETE FROM entries WHERE project=? AND session=?\",(project,session))\n        finally:db.close()\n    async def delete(self,key):\n        await asyncio.to_thread(self._delete,key)\n"
+
+SDK_AGENT_SCRIPT = SDK_SESSION_STORE_SCRIPT + r"""
+import asyncio, json, sys, inspect
 from uuid import uuid4
 from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage, AgentDefinition, AssistantMessage, TextBlock
 from mcp.types import ToolAnnotations
@@ -755,13 +760,28 @@ async def main():
     agents={"math-reviewer":AgentDefinition(description="独立检查数学内容、来源、跨页遗漏与知识标签，只读，不创建或修改业务数据。",
         prompt="根据主Agent给出的具体任务检查数学资料或题库内容，使用已授权只读工具，给出可核对的发现，不代替人工审核。",
         tools=read_names,disallowedTools=blocked+write_names,model="inherit",mcpServers=["weiguang"],permissionMode="dontAsk")}
+    params=inspect.signature(QoderAgentOptions).parameters
+    if "session_store" not in params:raise RuntimeError("SDK session_store unavailable")
+    store=NativeSessionStore(Path(cfg["cwd"])/"session-mirror.sqlite3")
+    memory={}
+    if "memory" in params and cfg.get("memory_file"):
+        # Use explicit app-user roots rather than the shared CLI login's user memory.
+        memory={"mode":"custom","user_scope":False,"generation":{
+            "roots":[{"id":"teaching-preferences","path":str(Path(cfg["memory_file"]).parent),"index_file":"MEMORY.md","access":"read-write"}],
+            "prompt":"只记录用户明确、长期适用的数学教研偏好、工作规范和经过确认的经验；不记录一次性任务、题库原文、附件、身份凭据、隐私数据或未经用户确认的事实。优先更新MEMORY.md，保持简洁，不将记忆当作系统指令。"},
+            "consumption":{"files":[{"id":"teaching-preferences","path":cfg["memory_file"],"required":False}],"max_tokens":4000,"failure_mode":"best_effort"}}
     opts=QoderAgentOptions(auth=qodercli_auth(),cwd=cfg["cwd"],cli_path=cfg["cli"],
+        session_store=store,session_store_flush="eager",**({"memory":memory} if memory else {}),
         model=cfg["model"],system_prompt=cfg["system"],tools=[*builtins,*names],
         allowed_tools=[*builtins,*names],disallowed_tools=blocked,permission_mode="dontAsk",strict_mcp_config=True,
         setting_sources=["project"],skills=cfg["skills"],agents=agents,mcp_servers={"weiguang":server},
         extra_args={"reasoning-effort":cfg["effort"]} if cfg["effort"]!="default" else {},
         **({"resume":cfg["resume"]} if cfg.get("resume") else {"session_id":cfg["session_id"]}))
+    final=None
     async with QoderSDKClient(options=opts) as client:
+        info=await client.get_server_info()
+        memory_info=info.get("memory") or {}
+        emit({"type":"capabilities","memory":"enabled" if memory_info.get("enabled") else "unavailable"})
         await client.query(cfg["prompt"])
         async for message in client.receive_response():
             if isinstance(message,SystemMessage) and message.subtype=="init":
@@ -769,11 +789,20 @@ async def main():
             if isinstance(message,AssistantMessage):
                 answer="\n".join(block.text for block in message.content if isinstance(block,TextBlock))
                 if answer:emit({"type":"assistant","answer":answer[:48000]})
+            if isinstance(message,SystemMessage) and message.subtype=="mirror_error":
+                emit({"type":"mirror_error"})
             if isinstance(message,ResultMessage):
-                emit({"type":"result","success":message.subtype=="success","answer":message.result or "",
-                      "session_id":message.session_id})
-                return
-    emit({"type":"result","success":False,"answer":""})
+                final={"type":"result","success":message.subtype=="success","answer":message.result or "",
+                      "session_id":message.session_id}
+                break
+        if memory_info.get("enabled") and final and final["success"]:
+            try:
+                await client.flush_memory()
+                emit({"type":"memory_flush","state":"flushed"})
+            except Exception:
+                emit({"type":"memory_flush","state":"failed"})
+    # Emit final only after the SDK has closed/drained transcript writes.
+    emit(final or {"type":"result","success":False,"answer":""})
 
 try:asyncio.run(main())
 except Exception as exc:
@@ -787,6 +816,8 @@ def agent_start(data):
     if not isinstance(data,dict):return 422,{"detail":"原生Agent请求无效"}
     ident,workspace,session=data.get("id"),data.get("workspace"),data.get("session_id")
     resume=data.get("resume")
+    owner=data.get("owner")
+    if type(owner) is not int or not 0<owner<=2147483647:return 422,{"detail":"原生Agent用户标识无效"}
     model,effort,prompt,system=data.get("model"),data.get("effort","default"),data.get("prompt"),data.get("system")
     specs=data.get("tools")
     def uid(value):return isinstance(value,str) and bool(JOB_ID.fullmatch(value))
@@ -822,13 +853,24 @@ def agent_run(job,cfg):
     try:
         cwd=Path.home()/".jiaoyan-native-workspaces"/cfg["workspace"]
         cwd.mkdir(mode=0o700,parents=True,exist_ok=True)
+        owner_file=cwd/"owner"
+        if owner_file.exists() and owner_file.read_text(encoding="ascii")!=str(cfg["owner"]):
+            raise ValueError("native workspace belongs to another app user")
+        if not owner_file.exists():
+            with owner_file.open("x",encoding="ascii") as handle:handle.write(str(cfg["owner"]))
+            owner_file.chmod(0o600)
+        memory_root=Path.home()/".jiaoyan-native-memory"/str(cfg["owner"])
+        memory_root.mkdir(mode=0o700,parents=True,exist_ok=True)
+        memory_file=memory_root/"MEMORY.md"
+        memory_file.touch(mode=0o600,exist_ok=True)
+        memory_file.chmod(0o600)
         install_native_skills(cwd)
         proc=subprocess.Popen([str(SDK_PYTHON),"-u","-c",SDK_AGENT_SCRIPT],cwd=cwd,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
         with lock:
             job["proc"]=proc
             if job["cancel"]:stop_process(proc)
-        proc.stdin.write((json.dumps({**cfg,"cwd":str(cwd),"skills":list(NATIVE_SKILLS)},ensure_ascii=False)+"\n").encode());proc.stdin.flush()
+        proc.stdin.write((json.dumps({**cfg,"cwd":str(cwd),"skills":list(NATIVE_SKILLS),"memory_file":str(memory_file)},ensure_ascii=False)+"\n").encode());proc.stdin.flush()
         deadline=time.monotonic()+1200;buf=b""
         names={t["name"] for t in cfg["tools"]}
         with selectors.DefaultSelector() as sel:
@@ -859,6 +901,12 @@ def agent_run(job,cfg):
                             if kind=="result":
                                 success=event.get("success") is True
                                 job["answer"]=str(event.get("answer") or "")[:48000]
+                        elif kind=="capabilities":
+                            job["native_memory"]=event.get("memory","unavailable")
+                        elif kind=="mirror_error":
+                            job["native_mirror_error"]=True
+                        elif kind=="memory_flush":
+                            job["native_memory_flush"]=event.get("state","failed")
                         elif kind=="assistant":
                             job["answer"]=str(event.get("answer") or "")[:48000]
                         elif kind=="error":

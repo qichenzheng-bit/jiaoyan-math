@@ -38,7 +38,7 @@ def test_chat_cannot_read_unattached_file():
 
 def test_native_chat_pending_does_not_use_legacy_query(monkeypatch):
     db=Mock();m=SimpleNamespace(model="Auto",detail="")
-    state={"job":"j","workspace":"w","resume":"old","prompt":"继续","system":"sys","effort":"default",
+    state={"job":"j","workspace":"w","native_actor":1,"resume":"old","prompt":"继续","system":"sys","effort":"default",
            "phase":"pending","at":n.now(),"steps":[]}
     request=Mock(return_value={"state":"running"})
     monkeypatch.setattr(n.qoder,"request",request)

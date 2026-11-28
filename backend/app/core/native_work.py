@@ -303,7 +303,7 @@ def tick(db,s,r,user):
         except HTTPException:pass
         fail(db,s,r,"原生Agent执行超时，保留已完成成果");return
     if r["phase"]=="pending":
-        try:qoder.request("POST","/agent/start",{"id":r["model_job"],"workspace":s.id,
+        try:qoder.request("POST","/agent/start",{"id":r["model_job"],"workspace":s.id,"owner":user.id,
             "session_id":r["model_job"],"resume":r.get("native_resume"),"model":r["model"],
             "effort":r["effort"],"prompt":r["native_prompt"],"system":r["native_system"],"tools":tools()})
         except HTTPException as e:
@@ -320,6 +320,8 @@ def tick(db,s,r,user):
         if e.status_code==404 and now()-r["phase_at"]>20:fail(db,s,r,"原生Agent任务已丢失")
         return
     if reply.get("native_session"):r["native_session"]=reply["native_session"]
+    for key in ("native_memory","native_memory_flush","native_mirror_error"):
+        if key in reply:r[key]=reply[key]
     if reply.get("answer"):r["native_answer"]=reply["answer"]
     if reply.get("state")=="running":
         call=reply.get("pending_tool")
@@ -348,6 +350,8 @@ def tick(db,s,r,user):
         failed=[x for x in r["steps"] if x.get("state")=="failed"]
         successful=[x for x in r["steps"] if x.get("state")=="done" and next((t["write"] for t in tools() if t["name"]==x["tool"]),False)]
         detail="原生Agent本轮结束；实际业务成果以工具记录为准"
+        if r.get("native_mirror_error"):detail+="；会话镜像写入异常"
+        if r.get("native_memory_flush")=="failed":detail+="；记忆保存未确认"
         if failed and not successful:detail="原生Agent本轮回复结束，存在未完成的工具操作；请查看实际记录"
         r.update(state="done",native_answer=reply.get("answer",""),detail=detail)
     wa.save(db,s,r);db.commit()

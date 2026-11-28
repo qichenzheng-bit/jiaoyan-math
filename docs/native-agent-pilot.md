@@ -16,3 +16,11 @@
 - 用户提供的原始附件可直接读取，禁止聊天原件工具读取未关联的文件。
 - 旧聊天历史、停止、分支和转工作入口兼容；原生会话本地存储的删除同步、备份与实机恢复验证尚未完成，因此试点保持关闭。
 - Python SDK 长期自动记忆仍不支持配置，保留现有用户偏好及教学规范。
+
+## 阶段四：官方会话存储和原生自动记忆
+
+- 官方最新 Memory 文档已新增 Python 原生 `memory` 选项和 `flush_memory()`。旧版本文档/SDK 未必具备；采用实际接口检测，不盲目更换语言。参考 https://docs.qoder.cn/en/cli/sdk/memory 。
+- 采用官方 `session_store` 接口，SQLite仅存储 SDK 原始会话条目，不理解或重新生成内容；每个会话独立文件，事务顺序、精确重放去重、子Agent记录隔离。参考 https://docs.qoder.cn/cli/sdk/session-storage 。
+- Worker 16 在原生回复完成后等待SDK关闭及记忆flush；检测会话镜像失败与记忆保存异常，不能把模型结束当作已确认记忆写入。
+- 应用用户ID绑定工作目录；自动记忆只使用当前用户专属 MEMORY.md，禁用共享CLI用户级记忆。原有显式设置继续保留。若当前SDK无memory字段，不启用自动记忆并报告不可用。
+- 会话镜像位于 Worker home 下 .jiaoyan-native-workspaces/<会话ID>/session-mirror.sqlite3；自动记忆在 .jiaoyan-native-memory/<用户ID>/MEMORY.md。需纳入加密备份并做恢复验收；外置删除仅删除镜像，不等价于删除 CLI 本机历史。生产开关继续关闭，直至本机删除同步、备份恢复、SDK联调完成。

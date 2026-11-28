@@ -82,7 +82,7 @@ def begin_turn(db,s,rows,body,user,attached,refs,context,effort):
     return chat.detail(db,chat.session(db,s.id,True))
 
 def finish(db,m,state):
-    keep={k:state[k] for k in ("native","native_actor","native_session","workspace","job") if k in state}
+    keep={k:state[k] for k in ("native","native_actor","native_session","workspace","job","native_memory","native_memory_flush","native_mirror_error") if k in state}
     keep["phase"]="terminal";keep["steps"]=[{k:x[k] for k in ("id","tool","state","detail") if k in x} for x in state.get("steps",[])]
     ai_chat.store(db,m,keep)
 
@@ -90,7 +90,7 @@ def pending(db,m,state):
     if now()-state["at"]>900:
         m.state="failed";m.detail="原生Agent排队超时";finish(db,m,state);return
     try:
-        qoder.request("POST","/agent/start",{"id":state["job"],"workspace":state["workspace"],
+        qoder.request("POST","/agent/start",{"id":state["job"],"workspace":state["workspace"],"owner":state["native_actor"],
             "session_id":state["job"],"resume":state.get("resume"),"model":m.model,
             "effort":state["effort"],"prompt":state["prompt"],"system":state["system"],"tools":tools()})
     except HTTPException as e:
@@ -150,6 +150,8 @@ def sync(db,m,state):
             m.state="failed";m.detail="原生Agent任务已丢失";finish(db,m,state)
         return
     if reply.get("native_session"):state["native_session"]=reply["native_session"]
+    for key in ("native_memory","native_memory_flush","native_mirror_error"):
+        if key in reply:state[key]=reply[key]
     if reply.get("answer"):m.content=str(reply["answer"])[:48000]
     status=reply.get("state")
     if status=="running":
@@ -167,4 +169,6 @@ def sync(db,m,state):
         return
     if status in ("done","failed","stopped"):
         m.state=status;m.detail=str(reply.get("detail",""))[:400] if status!="done" else ""
+        if state.get("native_mirror_error"):m.detail+="；会话镜像写入异常"
+        if state.get("native_memory_flush")=="failed":m.detail+="；记忆保存未确认"
         finish(db,m,state)

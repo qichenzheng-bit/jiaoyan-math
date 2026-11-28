@@ -186,3 +186,42 @@ def test_native_sdk_has_visible_mcp_tools_and_safe_subagent():
     assert "maxResultSizeChars" in worker.SDK_AGENT_SCRIPT
     assert "tools=read_names" in worker.SDK_AGENT_SCRIPT
     assert "setting_sources=[\"project\"]" in worker.SDK_AGENT_SCRIPT
+
+def test_native_session_mirror_order_isolation_and_replay(tmp_path):
+    import asyncio
+    scope={}
+    exec(worker.SDK_SESSION_STORE_SCRIPT,scope)
+    store=scope["NativeSessionStore"](tmp_path/"mirror.sqlite3")
+    async def scenario():
+        a={"project_key":"p","session_id":"a"}
+        child={**a,"subpath":"subagents/agent-1"}
+        other={"project_key":"p","session_id":"b"}
+        first={"type":"user","uuid":"1","text":"第一轮"}
+        second={"type":"assistant","uuid":"2","text":"第二轮"}
+        await store.append(a,[first,second])
+        await store.append(a,[first,second])
+        await store.append(child,[{"type":"assistant","uuid":"3"}])
+        await store.append(other,[first])
+        assert await store.load(a)==[first,second]
+        assert await store.list_subkeys(a)==["subagents/agent-1"]
+        reopened=scope["NativeSessionStore"](tmp_path/"mirror.sqlite3")
+        assert await reopened.load(a)==[first,second]
+        await reopened.delete(a)
+        assert await reopened.load(a) is None and await reopened.load(child) is None
+        assert await reopened.load(other)==[first]
+    asyncio.run(scenario())
+
+def test_native_session_mirror_rejects_path_traversal(tmp_path):
+    import asyncio,pytest
+    scope={}
+    exec(worker.SDK_SESSION_STORE_SCRIPT,scope)
+    store=scope["NativeSessionStore"](tmp_path/"mirror.sqlite3")
+    with pytest.raises(ValueError):asyncio.run(store.append({"project_key":"p","session_id":"a","subpath":"../other"},[{"type":"x"}]))
+
+def test_native_sdk_waits_for_memory_and_store_drain():
+    import ast
+    ast.parse(worker.SDK_AGENT_SCRIPT)
+    assert "session_store=store" in worker.SDK_AGENT_SCRIPT
+    assert "await client.flush_memory()" in worker.SDK_AGENT_SCRIPT
+    assert "user_scope" in worker.SDK_AGENT_SCRIPT and '"user_scope":False' in worker.SDK_AGENT_SCRIPT
+    assert "emit(final or" in worker.SDK_AGENT_SCRIPT
