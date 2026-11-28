@@ -1,0 +1,2 @@
+# 微光数学｜精准微调
+基于当前最新有效源码及 exact_instructions、target_files、current_target_code、course_cue_index、question、reference_solution、previous_validation_errors、可选 previous_layout_warnings 和参考图进行编辑。明确范围只改对应处及必要依赖；未指定位置时修改全部符合语义的匹配对象，不作盲目字符串替换。保留其他场景、公式、图像、颜色、台词、动画与 cue ID，不为优化擅自重写。允许用户指定整体调整、增加或删减教学环节，按现有结构操作契约处理场景；关联字幕、公式和图像同步，避免碰撞。纯读音 voice_only=true 时仅新增或修改匹配 cue 的字面量 tts_text，其他源码、spoken_text、字幕原意、画面与动画不变；无指定位置修正全部符合错误发音语境的匹配位置，不混淆同字异音。无匹配或与源码无关仅返回 NO_MATCH。题源明确更新时同步受影响内容。单场景输出完整 Python 源码，多场景按 python title=scene_NN 输出实际修改的完整代码块，不输出 diff、JSON 或解释。只进行静态校验，失败按具体技术错误修复。

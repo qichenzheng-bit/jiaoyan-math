@@ -1,0 +1,121 @@
+[
+  {
+    "id": "A01",
+    "path": "complete/A01_limit.md",
+    "kind": "complete",
+    "keywords": [
+      "极限",
+      "泰勒",
+      "等价无穷小"
+    ],
+    "status": "inherited_unverified"
+  },
+  {
+    "id": "A04",
+    "path": "complete/A04_matrix.md",
+    "kind": "complete",
+    "keywords": [
+      "矩阵",
+      "行列式",
+      "初等行变换",
+      "逆矩阵"
+    ],
+    "status": "inherited_unverified"
+  },
+  {
+    "id": "A06",
+    "path": "complete/A06_probability.md",
+    "kind": "complete",
+    "keywords": [
+      "概率",
+      "选择题",
+      "随机变量"
+    ],
+    "status": "inherited_unverified"
+  },
+  {
+    "id": "A03",
+    "path": "complete/A03_graph.md",
+    "kind": "complete",
+    "keywords": [
+      "积分区域",
+      "面积",
+      "数形结合",
+      "函数图像",
+      "二重积分"
+    ],
+    "status": "inherited_unverified"
+  },
+  {
+    "id": "A10",
+    "path": "complete/A10_multi_question.md",
+    "kind": "complete",
+    "keywords": [
+      "小问",
+      "证明",
+      "综合题"
+    ],
+    "status": "inherited_unverified"
+  },
+  {
+    "id": "B01",
+    "path": "teaching/B01_opening.md",
+    "kind": "teaching",
+    "keywords": [
+      "真题",
+      "试卷",
+      "考研",
+      "数学分析",
+      "高等代数"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B05",
+    "path": "teaching/B05_aligned.md",
+    "kind": "teaching",
+    "keywords": [
+      "极限",
+      "积分",
+      "推导",
+      "计算"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B11",
+    "path": "teaching/B11_label_clearance.md",
+    "kind": "teaching",
+    "keywords": [
+      "图像",
+      "曲线",
+      "积分区域",
+      "几何"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C03",
+    "path": "technical/C03_timing.md",
+    "kind": "technical",
+    "keywords": [
+      "动画",
+      "图像",
+      "矩阵",
+      "积分"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C08",
+    "path": "technical/C08_layout_watch.md",
+    "kind": "technical",
+    "keywords": [
+      "图像",
+      "动态",
+      "扫描",
+      "曲线"
+    ],
+    "status": "reference_snippet_unverified"
+  }
+]
