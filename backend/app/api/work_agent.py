@@ -108,7 +108,7 @@ def current(s):return (s.agent_history or [])[-1] if s.agent_history else None
 def save(db,s,r):
     s.agent_history=[*[x for x in (s.agent_history or []) if x["id"]!=r["id"]],r][-12:]
     s.updated_at=now()
-def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context","linked_chat","native_system","native_prompt","native_resume","native_amendment_count","native_restart","native_receipts"}} if r else None
+def public(r):return {k:v for k,v in r.items() if k not in {"allowed_files","prompt","actor_id","model_job","attempts","phase_at","preference_snapshot","initial_context","linked_chat","native_system","native_prompt","native_resume","native_amendment_count","native_restart","native_receipts","native_interrupt_requested"}} if r else None
 
 def workflow(db,s,r):
     """Derive progress from real extraction, review and registration records.

@@ -114,18 +114,23 @@ def parse_answer(text,page_hints=None,bounds=None):
             if hints:page_hints[b.uid]=hints
     return result
 def validate_question_coverage(text,items):
-    """Only compare explicit, unambiguous exercise headers; never invent a total."""
-    expected=set(re.findall(r"(?m)^\s*(?:#{1,6}\s*)?习题\s*(\d+(?:\.\d+)+)\b",text))
-    if not expected:return
+    """Check explicit top-level labels, not ambiguous bare numbers or solution steps."""
+    expected=set()
+    for match in re.finditer(r"(?m)^\s*(?:#{1,6}\s*)?(?:习题\s*(\d+(?:\.\d+)+)\b|第\s*(\d+)\s*题(?:\s|[：:、.．]|$))",text):
+        expected.add(match.group(1) or match.group(2))
     found=set()
     for item in items:
         if item.get("kind")!="question":continue
-        for field in ("original_question_number","title"):
-            found.update(re.findall(r"\d+(?:\.\d+)+",str(item.get(field,""))))
+        if any(marker in str(item.get("content","")) for marker in ("【无法辨认】","OCR失真","OCR 失真","无法确认，待核对")):
+            raise ValueError("题干有未识别内容")
+        number=str(item.get("original_question_number","")).strip()
+        title=str(item.get("title","")).strip()
+        explicit=re.match(r"^(?:习题\s*|第\s*)?(\d+(?:\.\d+)*)(?:\s*题)?(?:$|[\s：:、.．])",number)
+        if explicit:found.add(explicit.group(1))
+        header=re.match(r"^(?:习题\s*(\d+(?:\.\d+)+)\b|第\s*(\d+)\s*题)",title)
+        if header:found.add(header.group(1) or header.group(2))
     missing=expected-found
     if missing:raise ValueError("遗漏题号："+", ".join(sorted(missing)))
-    if any(any(marker in str(item.get("content","")) for marker in ("【无法辨认】","OCR失真","OCR 失真","无法确认，待核对")) for item in items if item.get("kind")=="question"):
-        raise ValueError("题干有未识别内容")
 
 def view(j,full=False):
     r={k:getattr(j,k) for k in ("id","title","subject","model","state","detail","document_id","revision","created_at","updated_at","source_id")}

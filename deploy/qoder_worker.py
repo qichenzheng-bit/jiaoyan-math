@@ -483,7 +483,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 19, "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 20, "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -553,7 +553,7 @@ def chat_snapshot(job,live=False):
     if job.get("native_session"):result["native_session"]=job["native_session"]
     if job.get("video"):result["video_inference_mode"]="native_sdk" if job.get("native_video") else "legacy_cli"
     elif job.get("video_inference_mode"):result["video_inference_mode"]=job["video_inference_mode"]
-    for key in ("native_memory","native_memory_flush","native_mirror_error"):
+    for key in ("native_memory","native_memory_flush","native_mirror_error","native_interrupted"):
         if key in job:result[key]=job[key]
     if live and job.get("pending"):result["pending_tool"]=job["pending"]
     return result
@@ -770,7 +770,7 @@ def install_native_skills(cwd):
 SDK_SESSION_STORE_SCRIPT = "import asyncio\nimport hashlib\nimport json\nimport sqlite3\nimport time\nfrom pathlib import Path\n\ndef session_key(key):\n    def get(name,default=None):\n        return key.get(name,default) if isinstance(key,dict) else getattr(key,name,default)\n    project,session,subpath=get(\"project_key\"),get(\"session_id\"),get(\"subpath\") or \"\"\n    if not isinstance(project,str) or not project or not isinstance(session,str) or not session or not isinstance(subpath,str):\n        raise ValueError(\"invalid SDK session key\")\n    if subpath and (subpath.startswith(\"/\") or any(p in (\"\",\".\",\"..\") for p in subpath.split(\"/\")) or \"\\\\\" in subpath):\n        raise ValueError(\"invalid SDK transcript subpath\")\n    return project,session,subpath\n\nclass NativeSessionStore:\n    \"\"\"Opaque SDK transcript mirror, one SQLite file per app conversation.\n    Only the SDK interprets entries. Ordered atomic append and exact replay deduplication.\n    No credentials, business database access, or prompt reconstruction.\n    \"\"\"\n    def __init__(self,path):\n        self.path=Path(path)\n        self.path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)\n        self.path.touch(mode=0o600,exist_ok=True)\n        self.path.chmod(0o600)\n        with self.connect() as db:\n            db.execute(\"CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, session TEXT NOT NULL, subpath TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL, mtime INTEGER NOT NULL, UNIQUE(project,session,subpath,digest))\")\n    def connect(self):\n        db=sqlite3.connect(self.path,timeout=20)\n        db.execute(\"PRAGMA busy_timeout=20000\")\n        db.execute(\"PRAGMA secure_delete=ON\")\n        return db\n    def _append(self,key,entries):\n        prefix=session_key(key)\n        rows=[]\n        for entry in entries:\n            raw=json.dumps(entry,ensure_ascii=False,separators=(\",\",\":\"),sort_keys=True,allow_nan=False)\n            # SDK may retry exactly the same serialized transcript entry.\n            digest=hashlib.sha256(raw.encode()).hexdigest()\n            rows.append((*prefix,digest,raw,int(time.time()*1000)))\n        db=self.connect()\n        try:\n            with db:\n                db.execute(\"BEGIN IMMEDIATE\")\n                db.executemany(\"INSERT OR IGNORE INTO entries(project,session,subpath,digest,payload,mtime) VALUES(?,?,?,?,?,?)\",rows)\n        finally:db.close()\n    async def append(self,key,entries):\n        await asyncio.to_thread(self._append,key,entries)\n    def _load(self,key):\n        db=self.connect()\n        try:\n            rows=db.execute(\"SELECT payload FROM entries WHERE project=? AND session=? AND subpath=? ORDER BY seq\",session_key(key)).fetchall()\n            return [json.loads(row[0]) for row in rows] if rows else None\n        finally:db.close()\n    async def load(self,key):\n        return await asyncio.to_thread(self._load,key)\n    def _list_subkeys(self,key):\n        project,session,_=session_key(key)\n        db=self.connect()\n        try:return [row[0] for row in db.execute(\"SELECT DISTINCT subpath FROM entries WHERE project=? AND session=? AND subpath<>'' ORDER BY subpath\",(project,session))]\n        finally:db.close()\n    async def list_subkeys(self,key):\n        return await asyncio.to_thread(self._list_subkeys,key)\n    def _delete(self,key):\n        project,session,subpath=session_key(key)\n        db=self.connect()\n        try:\n            with db:\n                if subpath:db.execute(\"DELETE FROM entries WHERE project=? AND session=? AND subpath=?\",(project,session,subpath))\n                else:db.execute(\"DELETE FROM entries WHERE project=? AND session=?\",(project,session))\n        finally:db.close()\n    async def delete(self,key):\n        await asyncio.to_thread(self._delete,key)\n"
 
 SDK_AGENT_SCRIPT = SDK_SESSION_STORE_SCRIPT + r"""
-import asyncio, json, sys, inspect
+import asyncio, json, sys, inspect, signal
 from uuid import uuid4
 from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage, AgentDefinition, AssistantMessage, TextBlock, SDKMirrorErrorMessage
 from mcp.types import ToolAnnotations
@@ -781,9 +781,11 @@ def emit(value):
 async def main():
     cfg=json.loads(sys.stdin.readline())
     serial=asyncio.Lock()
+    interrupt_requested=False
     def define(spec):
         async def call(args):
             async with serial:
+                if interrupt_requested:return {"is_error":True,"content":[{"type":"text","text":"当前轮已被用户新指令中断，未执行工具。"}]}
                 ident=str(uuid4())
                 emit({"type":"call","id":ident,"name":spec["name"],"args":args})
                 line=await asyncio.to_thread(sys.stdin.readline)
@@ -817,16 +819,31 @@ async def main():
         session_store=store,session_store_flush="eager",**({"memory":memory} if memory else {}),
         model=cfg["model"],system_prompt=cfg["system"],tools=[*builtins,*names],
         allowed_tools=[*builtins,*names],disallowed_tools=blocked,permission_mode="dontAsk",strict_mcp_config=True,
-        setting_sources=["project"],skills=cfg["skills"],agents=agents,mcp_servers={"weiguang":server},
+        setting_sources=["project"],skills=cfg["skills"],agents=agents,mcp_servers={"weiguang":server},include_partial_messages=True,
         extra_args={"reasoning-effort":cfg["effort"]} if cfg["effort"]!="default" else {},
         **({"resume":cfg["resume"]} if cfg.get("resume") else {"session_id":cfg["session_id"]}))
     final=None
     async with QoderSDKClient(options=opts) as client:
-        info=await client.get_server_info()
+        info=await client.get_server_info() or {}
         memory_info=info.get("memory") or {}
         emit({"type":"capabilities","memory":"enabled" if memory_info.get("enabled") else "unavailable"})
+        interrupt_task=None
+        def request_interrupt():
+            nonlocal interrupt_requested,interrupt_task
+            if not interrupt_requested:
+                interrupt_requested=True
+                interrupt_task=asyncio.create_task(client.interrupt())
+        loop=asyncio.get_running_loop()
+        if callable(getattr(client,"interrupt",None)):
+            loop.add_signal_handler(signal.SIGUSR1,request_interrupt)
         await client.query(cfg["prompt"])
+        if callable(getattr(client,"interrupt",None)):emit({"type":"interrupt_ready"})
         async for message in client.receive_response():
+            event=getattr(message,"event",None)
+            if isinstance(event,dict):
+                if event.get("type")=="message_start":emit({"type":"stream_start"})
+                elif event.get("type")=="content_block_delta" and event.get("delta",{}).get("type")=="text_delta":
+                    emit({"type":"stream_delta","text":event["delta"].get("text","")})
             if isinstance(message,SystemMessage) and message.subtype=="init":
                 emit({"type":"session","session_id":message.data.get("session_id") or cfg.get("resume") or cfg["session_id"]})
             if isinstance(message,AssistantMessage):
@@ -838,7 +855,12 @@ async def main():
                 final={"type":"result","success":message.subtype=="success","answer":message.result or "",
                       "session_id":message.session_id}
                 break
-        if memory_info.get("enabled") and final and final["success"]:
+        if interrupt_task:
+            try:
+                await interrupt_task
+                emit({"type":"interrupted"})
+            except Exception:pass
+        if memory_info.get("enabled") and final and final["success"] and not interrupt_requested:
             try:
                 await client.flush_memory()
                 emit({"type":"memory_flush","state":"flushed"})
@@ -1024,7 +1046,11 @@ def agent_run(job,cfg):
                                 job["native_session"]=sid
                             if kind=="result":
                                 success=event.get("success") is True
-                                job["answer"]=str(event.get("answer") or "")[:48000]
+                                if event.get("answer"):job["answer"]=str(event["answer"])[:48000]
+                        elif kind=="interrupt_ready":job["interrupt_ready"]=True
+                        elif kind=="interrupted":job["native_interrupted"]=True
+                        elif kind=="stream_start":job["answer"]=""
+                        elif kind=="stream_delta":job["answer"]=(job["answer"]+str(event.get("text","")))[:48000]
                         elif kind=="capabilities":
                             job["native_memory"]=event.get("memory","unavailable")
                         elif kind=="mirror_error":
@@ -1048,7 +1074,7 @@ def agent_run(job,cfg):
             if proc.stdin:proc.stdin.close()
             if proc.stdout:proc.stdout.close()
         with lock:
-            state="stopped" if job["cancel"] else "done" if success and proc and proc.returncode==0 else "failed"
+            state="stopped" if job["cancel"] or job.get("native_interrupted") else "done" if success and proc and proc.returncode==0 else "failed"
             if state=="done":
                 verified_at=int(time.time());retained_auth=True;persist_auth_metadata()
             job.update(state=state,detail=detail or ("原生Agent执行完成" if state=="done" else "原生Agent已停止或失败"),proc=None)
@@ -1056,6 +1082,18 @@ def agent_run(job,cfg):
             try:save_snapshot(job);prune_snapshots()
             except OSError:pass
             chat_active=None
+
+def agent_interrupt(ident):
+    with lock:
+        job=chat_jobs.get(ident)
+        if not job or not job.get("native") or job["state"]!="running":return 409,{"detail":"原生任务已结束"}
+        if job.get("interrupt_requested"):return 200,{"interrupt_requested":True}
+        if job.get("pending") or not job.get("interrupt_ready") or not job.get("proc"):
+            return 409,{"detail":"等待当前工具边界后再中断"}
+        try:job["proc"].send_signal(signal.SIGUSR1)
+        except OSError:return 409,{"detail":"原生进程已结束"}
+        job["interrupt_requested"]=True
+        return 200,{"interrupt_requested":True}
 
 def agent_reply(ident,data):
     if not isinstance(data,dict) or not isinstance(data.get("id"),str) or not isinstance(data.get("result"),dict):
@@ -1111,6 +1149,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/chat/") and self.path.endswith("/cancel"):
             return self.reply(*chat_state(self.path.split("/")[2], True))
+        if self.path.startswith("/agent/") and self.path.endswith("/interrupt"):
+            return self.reply(*agent_interrupt(self.path.split("/")[2]))
         if self.path in ("/agent/start","/agent/delete-workspace") or self.path.startswith("/agent/") and self.path.endswith("/tool-result"):
             try:
                 n=int(self.headers.get("Content-Length","0"))

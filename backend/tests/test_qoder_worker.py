@@ -287,3 +287,18 @@ def test_native_sdk_uses_bundled_cli(monkeypatch):
     assert "cli_path=" not in worker.SDK_AGENT_SCRIPT
     assert '"cli_path":' not in worker.SDK_VIDEO_SCRIPT
     assert 'code==42' in worker.SDK_AGENT_SCRIPT
+
+
+def test_native_interrupt_only_at_safe_tool_boundary(monkeypatch):
+    from unittest.mock import Mock
+    ident="test-native"
+    proc=Mock()
+    job={"native":True,"state":"running","proc":proc,"interrupt_ready":True,"pending":{"id":"tool"}}
+    monkeypatch.setitem(worker.chat_jobs,ident,job)
+    assert worker.agent_interrupt(ident)[0]==409
+    proc.send_signal.assert_not_called()
+    job.pop("pending")
+    assert worker.agent_interrupt(ident)[0]==200
+    proc.send_signal.assert_called_once_with(worker.signal.SIGUSR1)
+    assert worker.agent_interrupt(ident)[0]==200
+    assert proc.send_signal.call_count==1

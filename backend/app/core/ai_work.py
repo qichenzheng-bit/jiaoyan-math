@@ -422,7 +422,7 @@ def tick():
             r=wa.current(session)
             if r and r.get("auto") and r["state"] in ("running","ready","confirmed","dispatched"):
                 # Poll active calls first; FIFO within each priority with aging to prevent starvation.
-                active=r.get("phase") in ("model","business") or r["state"]=="dispatched"
+                active=r.get("phase") in ("model","business","native_video_wait") or r["state"]=="dispatched"
                 high=r.get("priority")=="high" or now()-r.get("created_at",now())>120
                 candidates.append((0 if active else 1,0 if high else 1,r.get("created_at",0),session.id))
         ids=[v[-1] for v in sorted(candidates)]

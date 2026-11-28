@@ -4,6 +4,7 @@ Legacy workflows remain available until real server SDK and visual MCP smoke tes
 No nested inference calls while the native Agent occupies the single Qoder worker.
 """
 import base64
+import hashlib
 import json
 import os
 from uuid import uuid4
@@ -23,6 +24,36 @@ VIDEO_JOBS={"video_generate","video_render","video_edit","video_retry"}
 SAFE_WRITES={"selection_create","book_create","chapter_create","document_append","chapter_order",
              "template_apply","document_patch","layout_update","cover_create","video_create",*VIDEO_JOBS}
 EXCLUDE={"original_read"}
+DETAIL_READS={"resource_read","resource_methods","document_read","video_code","video_history","video_read","video_job_read","intake_status","source_read","work_read"}
+
+class DetailRead(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    tool:str
+    args:dict
+    offset:StrictInt=Field(default=0,ge=0)
+    count:StrictInt=Field(default=6000,ge=1,le=8000)
+    digest:str|None=Field(default=None,pattern=r"^[a-f0-9]{64}$")
+
+def detail_tool():
+    return {"name":"native_read_detail","description":"按字符区间继续读取真实题目、解析、文档、视频代码或录入详情的完整JSON。仅允许列出的只读详情工具；从offset=0开始，后续使用返回的next_offset及digest；数据版本变化时重新读取。","parameters":DetailRead.model_json_schema(),"write":False}
+
+def read_detail(db,user,args,mode="work",model=None,effort=None):
+    body=DetailRead.model_validate(args)
+    if body.tool not in DETAIL_READS:raise HTTPException(403,"该工具不支持详情分段读取")
+    value=ai_tools.execute(body.tool,body.args,db,user,mode=mode,model=model,effort=effort)
+    raw=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":"),default=str)
+    digest=hashlib.sha256(raw.encode()).hexdigest()
+    if body.digest and body.digest!=digest:raise HTTPException(409,"详情版本已变化，请从offset=0重新读取")
+    if body.offset>len(raw):raise HTTPException(422,"详情读取偏移超出范围")
+    end=min(len(raw),body.offset+body.count)
+    return {"tool":body.tool,"offset":body.offset,"total":len(raw),"digest":digest,
+        "text":raw[body.offset:end],"next_offset":end if end<len(raw) else None}
+
+def result_preview(value,name):
+    result=ai_tools.bounded_result(value)
+    if name in DETAIL_READS and isinstance(result,dict) and result.get("truncated"):
+        result={**result,"read_more":"使用native_read_detail，传入原工具名和同一组args，逐段读取完整内容"}
+    return result
 
 class Page(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -68,6 +99,7 @@ def tools():
         if spec["name"] in VIDEO_JOBS:
             spec["description"]+="。仅提交原视频引擎异步任务；提交后不要循环查询或等待成片，结束本轮释放共享模型，由系统追踪实际结果；不得重复提交。"
     rows.extend([
+        detail_tool(),
         {"name":"native_text_review","description":"将用户直接提供的文字或明确要求创作的题目整理为待人工审核草稿。只能用于纯文字任务；不得代替附件原件读取，不冒充原始文献，不正式入库。items含题干、答案解析、知识标签等结构化内容。","parameters":TextDraft.model_json_schema(),"write":True},
         {"name":"native_workspace","description":"读取当前会话全部原始资料、实际页数或段数、既有批次、审核任务ID和进度。可用于继续或重新识别。","parameters":{"type":"object","properties":{},"additionalProperties":False},"write":False},
         {"name":"native_attach","description":"将用户指定的资料库真实文件ID关联到当前工作会话。连续图片可明确合并为PDF。不会删除原件。","parameters":AttachmentRequest.model_json_schema(),"write":True},
@@ -134,6 +166,7 @@ def read_file_page(f,total,p):
     if p.image_index is not None and f.media_type!=material_import.DOCX:
         raise HTTPException(422,"image_index仅用于Word内嵌图片")
     if f.media_type in storage.IMAGE_TYPES or f.media_type=="application/pdf":
+        if f.media_type in storage.IMAGE_TYPES and p.page!=1:raise HTTPException(422,"图片仅有一页")
         media,raw=material_vision.attachment(f,p.page)
         content=[{"type":"image","mimeType":media,"data":base64.b64encode(raw).decode("ascii")}]
         info={"file_id":f.id,"page":p.page,"name":f.name,"type":media}
@@ -159,6 +192,21 @@ def read_file_page(f,total,p):
     content.insert(0,{"type":"text","text":json.dumps(info,ensure_ascii=False)})
     # Never save encoded image content in the DB.
     return info,{"content":content}
+
+def validate_draft_items(items):
+    from app.core.question_structure import resolve
+    for item in items:
+        ai.validate_review_tags(item)
+        if item.get("kind")!="question":continue
+        data=resolve(item.get("content",""),item.get("answer",""),item.get("solution",""),item.get("question_type",""),item.get("question_data"))
+        def has_solution(methods):return any(x.body.strip() for x in methods)
+        if data.subquestions:
+            missing=[str(p.number) for p in data.subquestions if not p.answer.strip() or not has_solution(p.methods)]
+            if missing:raise HTTPException(422,"题目 "+item.get("title","")+" 的小问 "+",".join(missing)+" 缺少答案或解析，请补齐并标记AI生成内容")
+        elif data.blanks:
+            if any(not x.answer.strip() for x in data.blanks) or not has_solution(data.methods):raise HTTPException(422,"填空题缺少答案或解析："+item.get("title",""))
+        elif not (data.answer.strip() or data.correct_options) or not has_solution(data.methods):
+            raise HTTPException(422,"题目缺少答案或解析："+item.get("title","")+"；请自动补充并标记AI生成内容")
 
 def draft_create(db,s,r,user,args,call_id):
     body=Draft.model_validate(args);m,f=attached(db,s,body.file_id)
@@ -186,16 +234,19 @@ def draft_create(db,s,r,user,args,call_id):
             raise HTTPException(409,"与现有批次部分重叠；请按实际批次范围处理")
         old_batch=w.batch(db,s,overlaps[0].id,True)
         candidate=w.latest_job(db,old_batch)
-        if not body.replace_job_id:
-            raise HTTPException(409,"已有批次；若用户要求重新识别，请使用replace_job_id与replace_revision。现有任务："+str(candidate.id if candidate else "未生成草稿")+"，版本："+str(candidate.revision if candidate else "无"))
-        old=ai.get_job(db,body.replace_job_id)
-        if not candidate or candidate.id!=old.id or old.revision!=body.replace_revision:
-            raise HTTPException(409,"旧草稿或版本已变化，请重新读取实际工作进度")
-        if old.state not in ("review","failed","stopped") or old.document_id or old_batch.verified_text is not None or (old.provenance or {}).get("reviewed_uids"):
-            raise HTTPException(409,"旧批次已核对、审核、转换或仍在执行，不能自动替换")
-        from app.models import IntakeSupplement
-        if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==old.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
-            raise HTTPException(409,"旧草稿仍有待处理补充内容，不能自动替换")
+        if old_batch.verified_text is not None:raise HTTPException(409,"旧批次已经人工核对，不能自动替换")
+        if candidate:
+            if not body.replace_job_id:raise HTTPException(409,"已有草稿；如需重做请提供旧任务ID："+candidate.id+"，版本："+str(candidate.revision))
+            old=ai.get_job(db,body.replace_job_id)
+            if candidate.id!=old.id or old.revision!=body.replace_revision:
+                raise HTTPException(409,"旧草稿或版本已变化，请重新读取实际工作进度")
+            if old.state not in ("review","failed","stopped") or old.document_id or (old.provenance or {}).get("reviewed_uids"):
+                raise HTTPException(409,"旧草稿已审核、转换或仍在执行，不能自动替换")
+            from app.models import IntakeSupplement
+            if db.scalar(select(IntakeSupplement.id).where(IntakeSupplement.job_id==old.id,IntakeSupplement.state.in_(("running","review"))).limit(1)):
+                raise HTTPException(409,"旧草稿仍有待处理补充内容，不能自动替换")
+        elif body.replace_job_id or body.replace_revision is not None or old_batch.job_id:
+            raise HTTPException(409,"旧批次任务状态不一致，请重新查询")
     elif body.replace_job_id or body.replace_revision is not None:
         raise HTTPException(422,"没有对应可重做的旧批次")
     text="\n\n".join("【原文位置 "+str(p.page)+"】\n"+p.text for p in pages)
@@ -203,8 +254,8 @@ def draft_create(db,s,r,user,args,call_id):
     hints={}
     items=ai.parse_answer(json.dumps(body.items,ensure_ascii=False),hints,(start,end) if f.media_type=="application/pdf" else None)
     ai.validate_question_coverage(text,items)
-    items=[ai.tag_draft(db,b) if b.get("kind")=="question" else b for b in items]
-    for item in items:ai.validate_review_tags(item)
+    items=[ai.tag_draft(db,{**b,"subject":b.get("subject") or body.subject}) if b.get("kind")=="question" else b for b in items]
+    validate_draft_items(items)
     source_id=body.source_id or (old.source_id if old else None)
     if source_id:ai.bank.active_source(db,source_id,True)
     batch_id=old_batch.id if old_batch else str(uuid4());import_id=str(uuid4())
@@ -222,7 +273,9 @@ def draft_create(db,s,r,user,args,call_id):
     db.flush()
     units=[{"unit":p.page,"state":"done","text":p.text,"method":"native_agent","warnings":metadata["warnings"]} for p in pages]
     if old_batch:
-        old.state="stopped";old.detail="已由重新识别的新版本替代；保留旧草稿";old.revision+=1;old.updated_at=now()
+        if old:
+            old.state="stopped";old.detail="已由重新识别的新版本替代；保留旧草稿";old.revision+=1;old.updated_at=now()
+        else:old_batch.job_id=call_id
         old_batch.units=units;old_batch.import_id=import_id;old_batch.updated_at=now()
     else:
         db.add(WorkBatch(id=batch_id,material_id=m.id,start=start,end=end,units=units,
@@ -241,8 +294,8 @@ def create_text_draft(db,s,r,user,args,call_id):
     if existing:return {"id":existing.id,"state":existing.state,"title":existing.title,"item_count":len(existing.items)}
     items=ai.parse_answer(json.dumps(body.items,ensure_ascii=False))
     ai.validate_question_coverage(body.text,items)
-    items=[ai.tag_draft(db,b) if b.get("kind")=="question" else b for b in items]
-    for item in items:ai.validate_review_tags(item)
+    items=[ai.tag_draft(db,{**b,"subject":b.get("subject") or body.subject}) if b.get("kind")=="question" else b for b in items]
+    validate_draft_items(items)
     if body.source_id:ai.bank.active_source(db,body.source_id,True)
     provenance={"kind":"chat_draft","intent":"mixed","workspace_id":s.id,
         "single_review":True,"auto_enrichment":True,"reviewed_uids":[],"effort":r["effort"],
@@ -284,15 +337,18 @@ def invoke_tool(db,s,r,user,call):
     old=next((x for x in r["steps"] if x["id"]==ident),None)
     if old and old["state"]=="running" and spec["write"]:
         raise HTTPException(409,"上次业务写入结果尚未确认，已停止以防重复执行")
-    if old and old["state"] in ("done","failed","queued") and name!="native_page":
+    if old and old["state"] in ("done","failed","queued") and name not in ("native_page","native_read_detail"):
         return text_result(old.get("result") or {"error":old["detail"]},old["state"]=="failed")
-    entry={"id":ident,"tool":name,"state":"running","detail":spec["description"],"at":now()}
+    fingerprint=hashlib.sha256(json.dumps([name,args],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    entry={"id":ident,"tool":name,"state":"running","detail":spec["description"],"at":now(),"fingerprint":fingerprint}
     # Journal business mutations before executing; do not store full generated
     # drafts or image data in work history.
     r["steps"]=[x for x in r["steps"] if x["id"]!=ident]+[entry]
     wa.save(db,s,r);db.commit()
     try:
         if name=="native_page":value,response=page_read(db,s,args)
+        elif name=="native_read_detail":
+            value=read_detail(db,user,args,model=r["model"],effort=r["effort"]);response=text_result(value)
         elif name=="native_workspace":
             if args:raise ValueError("native_workspace不接收参数")
             value=workspace_result(db,s);response=text_result(value)
@@ -304,7 +360,7 @@ def invoke_tool(db,s,r,user,call):
             value=create_text_draft(db,s,r,user,args,ident);response=text_result(value)
         else:
             raw=ai_tools.execute(name,args,db,user,model=r["model"],effort=r["effort"])
-            value=ai_tools.bounded_result(raw)
+            value=result_preview(raw,name)
             if name in VIDEO_JOBS:
                 from app.core.ai_work import child_task
                 child=child_task(name,args,raw)
@@ -320,15 +376,47 @@ def invoke_tool(db,s,r,user,call):
         if spec["write"] and isinstance(exc,HTTPException) and exc.status_code>=500:
             raise HTTPException(409,"业务写入结果不明确，已停止以防重复")
         entry.update(state="failed",result={"error":detail},detail=detail)
-        response=text_result(entry["result"],True)
+        response=text_result({**entry["result"],"failed_call_id":ident},True)
     # The underlying business handlers may commit and release the session lock.
     db.expire_all();fresh=w.workspace(db,s.id,True);latest=wa.current(fresh)
     if not latest or latest["id"]!=r["id"] or latest["state"]!="running":
         raise HTTPException(409,"工作已停止或变化")
     r.clear();r.update(latest)
     r["steps"]=[x if x["id"]!=ident else entry for x in r["steps"]]
+    if entry["state"]=="done":
+        for earlier in r["steps"]:
+            if earlier.get("state")=="failed" and earlier.get("fingerprint")==fingerprint:
+                earlier["state"]="recovered";earlier["resolved_by"]=ident
     wa.save(db,fresh,r);db.commit()
     return response
+
+def unresolved_errors(r):
+    return [x for x in r.get("steps",[])[r.get("stage_start",0):] if x.get("state") in ("failed","running")]
+
+def complete_turn(r,answer):
+    failures=unresolved_errors(r)
+    detail="原生Agent本轮结束；实际业务成果以工具记录为准"
+    if failures:detail="本轮存在未确认成功的工具操作；已保留成功成果，可继续处理"
+    if r.get("native_mirror_error"):detail+="；会话镜像写入异常"
+    if r.get("native_memory_flush")=="failed":detail+="；记忆保存未确认"
+    r.update(state="failed" if failures else "done",native_answer=answer,detail=detail)
+
+def pending_amendments(r):
+    return r.get("amendments",[])[r.get("native_amendment_count",0):]
+
+def next_amended_turn(db,s,r):
+    additional=pending_amendments(r)
+    if not additional:return False
+    resume=r.get("native_session") or r.get("native_resume")
+    prompt="\n".join(a["text"] for a in additional)
+    if not resume:prompt=r["instruction"]+"\n最新追加要求（后者优先）：\n"+prompt
+    r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,
+        native_resume=resume,native_amendment_count=len(r.get("amendments",[])),
+        native_prompt=user_prompt(db,s,prompt,additional[-1].get("selected_id")),
+        native_interrupt_requested=False,native_answer="",detail="原生Agent继续处理最新要求")
+    # The old turn was superseded, not silently treated as a successful execution.
+    r["stage_start"]=len(r.get("steps",[]))
+    return True
 
 def video_waiting(r):
     return [x for x in r.get("steps",[]) if x.get("video_child") and x.get("state")=="queued"]
@@ -376,7 +464,7 @@ def retry(db,s,r,user):
     if video_waiting(r):
         r.update(state="running",phase="native_video_wait",phase_at=now(),detail="恢复原视频任务状态，不重复生成")
         wa.save(db,s,r);db.commit();return wa.public(r)
-    r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),detail="恢复原生Agent会话",
+    r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,native_interrupt_requested=False,detail="恢复原生Agent会话",
         native_resume=r.get("native_session") or r.get("native_resume"),
         native_prompt=user_prompt(db,s,"继续未完成的工作，核对实际成果，不要重复创建。") if r.get("native_session") else user_prompt(db,s,r["instruction"]))
     wa.save(db,s,r);audit(db,"work.native.retry",user.id);db.commit()
@@ -391,6 +479,8 @@ def tick(db,s,r,user):
         except HTTPException:pass
         fail(db,s,r,"原生Agent执行超时，保留已完成成果");return
     if r["phase"]=="pending":
+        if pending_amendments(r) and not r.get("attempts"):
+            next_amended_turn(db,s,r);wa.save(db,s,r);db.commit()
         try:qoder.request("POST","/agent/start",{"id":r["model_job"],"workspace":s.id,"owner":user.id,
             "session_id":r["model_job"],"resume":r.get("native_resume"),"model":r["model"],
             "effort":r["effort"],"prompt":r["native_prompt"],"system":r["native_system"],"tools":tools()})
@@ -415,7 +505,15 @@ def tick(db,s,r,user):
         call=reply.get("pending_tool")
         if call:
             try:
-                result=invoke_tool(db,s,r,user,call)
+                # An amendment is a new user message, not a keyword or intent.
+                # Never start another stale business write; replay a committed
+                # call if its response was lost, otherwise return a real error.
+                prior=next((x for x in r["steps"] if x["id"]==call["id"]),None)
+                if pending_amendments(r) and prior is None:
+                    result=text_result({"error":"用户已经追加新的要求，当前调用未执行；请停止本轮。"},True)
+                    wa.save(db,s,r);db.commit()
+                else:
+                    result=invoke_tool(db,s,r,user,call)
                 qoder.request("POST","/agent/"+r["model_job"]+"/tool-result",{"id":call["id"],"result":result})
             except HTTPException as exc:
                 if exc.status_code in (503,504):return
@@ -423,26 +521,23 @@ def tick(db,s,r,user):
                 try:qoder.request("POST","/chat/"+r["model_job"]+"/cancel",{})
                 except HTTPException:pass
                 fail(db,s,r,exc.detail);return
-        else:wa.save(db,s,r);db.commit()
+        else:
+            if pending_amendments(r) and not r.get("native_interrupt_requested"):
+                try:
+                    interrupted=qoder.request("POST","/agent/"+r["model_job"]+"/interrupt",{})
+                    r["native_interrupt_requested"]=interrupted.get("interrupt_requested") is True
+                    if r["native_interrupt_requested"]:r["detail"]="正在原生中断旧要求，准备处理最新消息"
+                except HTTPException as exc:
+                    if exc.status_code not in (404,409,503,504):raise
+            wa.save(db,s,r);db.commit()
         return
     if video_waiting(r) and reply.get("state") in ("done","failed","stopped"):
         r.update(phase="native_video_wait",phase_at=now(),detail="Agent已释放模型；等待原视频引擎实际结果")
         wa.save(db,s,r);db.commit();return
     if reply.get("state")!="done":
+        if reply.get("native_interrupted") and pending_amendments(r):
+            next_amended_turn(db,s,r);wa.save(db,s,r);db.commit();return
         fail(db,s,r,reply.get("detail") or "原生Agent未完成");return
-    amendments=r.get("amendments",[]);count=r.get("native_amendment_count",0)
-    if len(amendments)>count:
-        additional=amendments[count:]
-        r.update(phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,
-            native_resume=r.get("native_session"),native_amendment_count=len(amendments),
-            native_prompt=user_prompt(db,s,"\n".join(a["text"] for a in additional),additional[-1].get("selected_id")),
-            detail="原生Agent继续处理追加要求")
-    else:
-        failed=[x for x in r["steps"] if x.get("state")=="failed"]
-        successful=[x for x in r["steps"] if x.get("state")=="done" and next((t["write"] for t in tools() if t["name"]==x["tool"]),False)]
-        detail="原生Agent本轮结束；实际业务成果以工具记录为准"
-        if r.get("native_mirror_error"):detail+="；会话镜像写入异常"
-        if r.get("native_memory_flush")=="failed":detail+="；记忆保存未确认"
-        if failed and not successful:detail="原生Agent本轮回复结束，存在未完成的工具操作；请查看实际记录"
-        r.update(state="done",native_answer=reply.get("answer",""),detail=detail)
+    if not next_amended_turn(db,s,r):
+        complete_turn(r,reply.get("answer") or r.get("native_answer",""))
     wa.save(db,s,r);db.commit()

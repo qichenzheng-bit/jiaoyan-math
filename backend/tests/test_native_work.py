@@ -99,3 +99,35 @@ def test_native_text_review_cannot_bypass_attachment_reading(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         n.create_text_draft(None,None,{},None,{"title":"文字","text":"题","items":[{"kind":"question"}]},"draft")
     assert exc.value.status_code==422
+
+
+def test_native_completion_does_not_hide_failed_tool():
+    r={"steps":[{"state":"done"},{"state":"failed"}]}
+    n.complete_turn(r,"模型说完成")
+    assert r["state"]=="failed"
+    r["steps"][1]["state"]="recovered"
+    n.complete_turn(r,"已修复")
+    assert r["state"]=="done"
+
+def test_native_detail_pagination_preserves_full_content(monkeypatch):
+    import json
+    monkeypatch.setattr(n.ai_tools,"execute",lambda *a,**k:{"content":"数学"*12000})
+    first=n.read_detail(None,None,{"tool":"resource_read","args":{"id":"x"}})
+    text=first["text"];page=first
+    while page["next_offset"] is not None:
+        page=n.read_detail(None,None,{"tool":"resource_read","args":{"id":"x"},"offset":page["next_offset"],"digest":first["digest"]})
+        text+=page["text"]
+    assert json.loads(text)=={"content":"数学"*12000}
+    with pytest.raises(n.HTTPException):n.read_detail(None,None,{"tool":"video_generate","args":{}})
+
+def test_native_draft_requires_complete_answers_and_solutions():
+    b={"kind":"question","title":"极限","content":"求极限","answer":"","solution":"","knowledge_tags":["极限","连续"],"primary_knowledge_tag":"极限"}
+    with pytest.raises(n.HTTPException):n.validate_draft_items([b])
+    n.validate_draft_items([{**b,"answer":"0","solution":"由连续性得0"}])
+
+def test_amended_turn_retains_original_if_no_session(monkeypatch):
+    monkeypatch.setattr(n,"user_prompt",lambda db,s,prompt,selected=None:prompt)
+    r={"instruction":"原题","amendments":[{"text":"改成第二页"}],"steps":[],"native_amendment_count":0}
+    assert n.next_amended_turn(None,None,r)
+    assert "原题" in r["native_prompt"] and "改成第二页" in r["native_prompt"]
+    assert not n.pending_amendments(r)

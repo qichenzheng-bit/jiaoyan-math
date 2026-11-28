@@ -33,6 +33,7 @@ def enabled():
 def tools():
     rows=[t for t in ai_tools.catalogue("chat") if t["name"] not in native_work.EXCLUDE]
     rows.extend([
+        native_work.detail_tool(),
         {"name":"native_page","description":"读取本聊天中用户上传的原始图片、PDF页、Word段落或文本。Word先读段落正文与图片数量，再用image_index逐张读取原图。","parameters":native_work.Page.model_json_schema(),"write":False},
         {"name":"native_suggest_work","description":"用户明确要求实际录入题目、知识或资料时提供转入工作模式的入口；不创建任务或写入题库。","parameters":SuggestWork.model_json_schema(),"write":False},
     ])
@@ -120,6 +121,8 @@ def invoke(db,m,state,call):
             page=native_work.Page.model_validate(args)
             f=file_for_chat(db,m,page.file_id)
             _,result=native_work.read_file_page(f,native_work.w.unit_count(f),page)
+        elif name=="native_read_detail":
+            result=native_work.text_result(native_work.read_detail(db,user,args,mode="chat",model=m.model,effort=state["effort"]))
         elif name=="native_suggest_work":
             suggestion=SuggestWork.model_validate(args)
             m.intake_intent=suggestion.intent
@@ -127,7 +130,7 @@ def invoke(db,m,state,call):
         else:
             value=ai_tools.execute(name,args,db,user,mode="chat",model=m.model,effort=state["effort"])
             ai_chat.add_refs(db,m,value)
-            result=native_work.text_result(ai_tools.bounded_result(value))
+            result=native_work.text_result(native_work.result_preview(value,name))
         step={"id":ident,"tool":name,"state":"done","detail":"已调用实际只读工具"}
     except (ValueError,TypeError,HTTPException) as e:
         detail=str(e.detail)[:400] if isinstance(e,HTTPException) else str(e)[:400]

@@ -89,3 +89,12 @@ def test_batch_reference_proposals_are_independent():
     assert result=={"a":{"answer":"原答案1"},"b":{}}
     with pytest.raises(ValueError):parse_batch_source('{"c":{"answer":"原答案1"}}',targets,"原答案1")
     with pytest.raises(HTTPException):batch_match_targets(items,["a","a"],["answer"])
+
+
+def test_coverage_checks_explicit_exam_labels_and_unreadable_stems():
+    import pytest
+    from app.api.intelligence import validate_question_coverage
+    items=[{"kind":"question","title":"第一问","original_question_number":"1","content":"求极限"}]
+    with pytest.raises(ValueError,match="遗漏题号"):validate_question_coverage("第1题：极限\n第2题：积分",items)
+    with pytest.raises(ValueError,match="未识别"):validate_question_coverage("普通题目",[{**items[0],"content":"【无法辨认】"}])
+    validate_question_coverage("第1题：极限\n解：\n1. 代入",items)
