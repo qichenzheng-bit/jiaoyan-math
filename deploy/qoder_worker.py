@@ -461,7 +461,7 @@ def status():
     with lock:
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 14, "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 15, "native_agent": SDK_PYTHON.is_file(), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -706,10 +706,26 @@ def chat_start(data, video=False, vision=False):
 
 # The SDK owns the reasoning loop. This subprocess exchanges only MCP calls/results
 # with the host; it never receives a database connection or arbitrary shell access.
+# Trusted project skills, generated from application-owned definitions only.
+NATIVE_SKILLS = {
+    "math-intake": "---\nname: math-intake\ndescription: 数学试卷、教材、图片和Word的原文识别、题目录入及逐题审核。\n---\n忠实保留题干、题号、公式、选项和已有答案解析。读取用户指定的完整资料范围，识别连续页之间的题目与解答归属；不可将单页开头续接解析当作新题。数学公式使用标准 LaTeX。题干无法辨认时重新查看原图或如实说明，不猜测。\n对确实缺失的答案解析自动求解，标注 generated_fields，不冒充原文。小问各自有答案和解析，无公共重复解析。解析应可核对、规范分步。知识点与知识标签不同：每道题生成2至5个具体标签，选一个主标签；准确匹配已有标签，不能强行套用。\n使用实际审核草稿工具产生结果，检查题号覆盖及页码。审核前不得正式入库；重新识别须实际读取原件，旧草稿仅在未审核且版本匹配时才能生成替代版本。",
+    "math-teaching": "---\nname: math-teaching\ndescription: 数学教研创作、题库检索、讲义教材及组卷设计。\n---\n理解用户的对象、范围、教学目的与实际素材。使用题库真实检索及来源工具，按需查询多个科目、院校、年份和知识标签，不能捏造题库记录。用可靠业务工具生成可编辑的教研草稿；保持原题和引用的真实性。数学表达用LaTeX，教学推导清晰，分值与题型以用户要求为准。需要导出、正式登记或最终审核时，如实说明当前成果。",
+    "math-review": "---\nname: math-review\ndescription: 数学题目与解析的完整性、来源对应、重复题及知识标签检查。\n---\n检查实际资料是否全部覆盖、题干与答案解析是否一一对应、公式是否完整、是否出现重复或跨页遗漏。已有知识标签仅在含义和科目准确匹配时复用。区分原文和AI补充，不以推测作为来源。查重候选不是自动判定重复。保留用户人工审核。",
+    "math-presentation": "---\nname: math-presentation\ndescription: 微光数学文档排版、封面和教学作品的创作规范。\n---\n沿用用户已有模板和配色。数学公式用LaTeX，版面清晰、不重叠；按实际文档版本局部调整，不修改题库原件。利用现有工具进行封面、排版和作品草稿创作；不虚报已渲染、已导出或已发布。"
+}
+
+def install_native_skills(cwd):
+    root=cwd/".qoder-cn"/"skills"
+    for name,content in NATIVE_SKILLS.items():
+        path=root/name/"SKILL.md"
+        path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        path.write_text(content+"\n",encoding="utf-8")
+
 SDK_AGENT_SCRIPT = r"""
 import asyncio, json, sys
 from uuid import uuid4
-from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage
+from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage, AgentDefinition, AssistantMessage, TextBlock
+from mcp.types import ToolAnnotations
 
 def emit(value):
     print(json.dumps(value,ensure_ascii=False),flush=True)
@@ -727,13 +743,22 @@ async def main():
                 result=json.loads(line)
                 if result.get("id")!=ident:raise RuntimeError("host result mismatch")
                 return result["result"]
-        return tool(spec["name"],spec["description"],spec["parameters"])(call)
+        annotations=ToolAnnotations(readOnlyHint=not spec.get("write",False),
+            destructiveHint=False,openWorldHint=False,maxResultSizeChars=12*1024*1024 if spec["name"]=="native_page" else 240000)
+        return tool(spec["name"],spec["description"],spec["parameters"],annotations=annotations)(call)
     server=create_sdk_mcp_server("weiguang",tools=[define(t) for t in cfg["tools"]])
     names=["mcp__weiguang__"+t["name"] for t in cfg["tools"]]
+    read_names=["mcp__weiguang__"+t["name"] for t in cfg["tools"] if not t.get("write",False)]
+    write_names=[name for name in names if name not in read_names]
+    blocked=["Bash","Read","Write","Edit","MultiEdit","Glob","Grep","WebFetch","WebSearch"]
+    builtins=["TodoWrite","Skill","Agent"]
+    agents={"math-reviewer":AgentDefinition(description="独立检查数学内容、来源、跨页遗漏与知识标签，只读，不创建或修改业务数据。",
+        prompt="根据主Agent给出的具体任务检查数学资料或题库内容，使用已授权只读工具，给出可核对的发现，不代替人工审核。",
+        tools=read_names,disallowedTools=blocked+write_names,model="inherit",mcpServers=["weiguang"],permissionMode="dontAsk")}
     opts=QoderAgentOptions(auth=qodercli_auth(),cwd=cfg["cwd"],cli_path=cfg["cli"],
-        model=cfg["model"],system_prompt=cfg["system"],tools=["TodoWrite"],
-        allowed_tools=["TodoWrite",*names],permission_mode="dontAsk",strict_mcp_config=True,
-        setting_sources=[],mcp_servers={"weiguang":server},
+        model=cfg["model"],system_prompt=cfg["system"],tools=[*builtins,*names],
+        allowed_tools=[*builtins,*names],disallowed_tools=blocked,permission_mode="dontAsk",strict_mcp_config=True,
+        setting_sources=["project"],skills=cfg["skills"],agents=agents,mcp_servers={"weiguang":server},
         extra_args={"reasoning-effort":cfg["effort"]} if cfg["effort"]!="default" else {},
         **({"resume":cfg["resume"]} if cfg.get("resume") else {"session_id":cfg["session_id"]}))
     async with QoderSDKClient(options=opts) as client:
@@ -741,6 +766,9 @@ async def main():
         async for message in client.receive_response():
             if isinstance(message,SystemMessage) and message.subtype=="init":
                 emit({"type":"session","session_id":message.data.get("session_id") or cfg.get("resume") or cfg["session_id"]})
+            if isinstance(message,AssistantMessage):
+                answer="\n".join(block.text for block in message.content if isinstance(block,TextBlock))
+                if answer:emit({"type":"assistant","answer":answer[:48000]})
             if isinstance(message,ResultMessage):
                 emit({"type":"result","success":message.subtype=="success","answer":message.result or "",
                       "session_id":message.session_id})
@@ -794,12 +822,13 @@ def agent_run(job,cfg):
     try:
         cwd=Path.home()/".jiaoyan-native-workspaces"/cfg["workspace"]
         cwd.mkdir(mode=0o700,parents=True,exist_ok=True)
+        install_native_skills(cwd)
         proc=subprocess.Popen([str(SDK_PYTHON),"-u","-c",SDK_AGENT_SCRIPT],cwd=cwd,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
         with lock:
             job["proc"]=proc
             if job["cancel"]:stop_process(proc)
-        proc.stdin.write((json.dumps({**cfg,"cwd":str(cwd)},ensure_ascii=False)+"\n").encode());proc.stdin.flush()
+        proc.stdin.write((json.dumps({**cfg,"cwd":str(cwd),"skills":list(NATIVE_SKILLS)},ensure_ascii=False)+"\n").encode());proc.stdin.flush()
         deadline=time.monotonic()+1200;buf=b""
         names={t["name"] for t in cfg["tools"]}
         with selectors.DefaultSelector() as sel:
@@ -830,6 +859,8 @@ def agent_run(job,cfg):
                             if kind=="result":
                                 success=event.get("success") is True
                                 job["answer"]=str(event.get("answer") or "")[:48000]
+                        elif kind=="assistant":
+                            job["answer"]=str(event.get("answer") or "")[:48000]
                         elif kind=="error":
                             detail=str(event.get("detail",""))[:200]
                 if success:break

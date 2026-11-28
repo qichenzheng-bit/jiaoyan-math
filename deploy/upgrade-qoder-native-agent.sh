@@ -16,7 +16,7 @@ ast.parse(source)
 assert '"/agent/start"' in source and 'native_agent' in source
 PY
 sdk=/opt/jiaoyan-qoder/sdk-venv/bin/python
-if ! "$sdk" -c 'from qodercn_agent_sdk import QoderSDKClient, QoderAgentOptions, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage; assert callable(getattr(QoderSDKClient,"receive_response",None))' 2>/dev/null; then
+if ! "$sdk" -c 'from qodercn_agent_sdk import QoderSDKClient, QoderAgentOptions, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage, AgentDefinition, AssistantMessage, TextBlock; from mcp.types import ToolAnnotations; assert callable(getattr(QoderSDKClient,"receive_response",None))' 2>/dev/null; then
   echo "Install or upgrade the official qodercn-agent-sdk in /opt/jiaoyan-qoder/sdk-venv first; no login changes are required."
   exit 1
 fi
@@ -37,7 +37,7 @@ rollback() {
 install -m 644 -o root -g root "$src" "$dest" || rollback
 systemctl restart jiaoyan-qoder.service || rollback
 for _ in $(seq 1 20); do
-  if status 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("native_agent") and s.get("worker_version",0)>=14' 2>/dev/null; then
+  if status 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("native_agent") and s.get("worker_version",0)>=15' 2>/dev/null; then
     echo "QODER_NATIVE_AGENT_READY (live SDK/MCP/vision smoke tests still required)"
     exit 0
   fi

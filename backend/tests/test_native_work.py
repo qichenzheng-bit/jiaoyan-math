@@ -37,3 +37,31 @@ def test_draft_requires_read_evidence(monkeypatch):
     with pytest.raises(HTTPException) as e:
         n.draft_create(DB(),None,{"steps":[]},None,{"file_id":"file","title":"题目","pages":[{"page":1,"text":"题目"}],"items":[{"kind":"question"}]},"job")
     assert e.value.status_code==422
+
+def test_native_word_reads_text_and_selected_image_without_ocr(monkeypatch):
+    f=SimpleNamespace(id="word",name="math.docx",media_type=n.material_import.DOCX)
+    monkeypatch.setattr(n,"attached",lambda *a:(SimpleNamespace(total_units=1),f))
+    monkeypatch.setattr(n.storage,"file_path",lambda f:"fixture")
+    def scan(path,page,handler):
+        text=handler(1,"image/png",lambda:("image/png",b"original"))
+        return {"text":"公式 "+text,"image_total":1,"warnings":[]}
+    monkeypatch.setattr(n.word_images,"scan",scan)
+    info,result=n.page_read(None,None,{"file_id":"word","page":1})
+    assert info["image_total"]==1 and len(result["content"])==1
+    info,result=n.page_read(None,None,{"file_id":"word","page":1,"image_index":1})
+    assert info["image_index"]==1 and result["content"][1]["data"]=="b3JpZ2luYWw="
+
+def test_native_word_draft_rejects_unread_embedded_image(monkeypatch):
+    from fastapi import HTTPException
+    monkeypatch.setattr(n,"attached",lambda *a:(SimpleNamespace(total_units=1),SimpleNamespace(id="word")))
+    class DB:
+        def get(self,*args):return None
+    reads=[{"tool":"native_page","state":"done","result":{"file_id":"word","page":1,"image_total":1}}]
+    with pytest.raises(HTTPException,match="内嵌图片"):
+        n.draft_create(DB(),None,{"steps":reads},None,{"file_id":"word","title":"题目","pages":[{"page":1,"text":"题目"}],"items":[{"kind":"question"}]},"job")
+
+def test_native_attach_and_workspace_tools_registered():
+    names={t["name"]:t for t in n.tools()}
+    assert not names["native_workspace"]["write"]
+    assert names["native_attach"]["write"]
+    assert "replace_revision" in names["native_intake_review"]["parameters"]["properties"]

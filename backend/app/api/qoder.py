@@ -32,7 +32,7 @@ def request(method,path,body=None):
     try:
         connection.request(method,path,json.dumps(body,ensure_ascii=False).encode() if body is not None else None,{"Content-Type":"application/json"})
         response=connection.getresponse()
-        result=json.loads(response.read(524288))
+        result=json.loads(response.read(2_500_000 if path.startswith("/chat/") else 524288))
         if response.status!=200:
             raise HTTPException(response.status if response.status in (404,409,422,503,504) else 502, result.get("detail","Qoder调用失败"))
         return result

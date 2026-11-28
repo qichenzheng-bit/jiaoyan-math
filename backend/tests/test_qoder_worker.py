@@ -171,3 +171,18 @@ def test_vision_attachment_rejects_paths_and_invalid_media():
     assert worker.vision_attachment({"media_type":"image/png","base64":encoded})==(".png",raw)
     for value in ({"path":"/etc/passwd"},{"media_type":"image/png","base64":"!"},{"media_type":"text/plain","base64":encoded},{"media_type":"image/jpeg","base64":encoded}):
         with pytest.raises(ValueError):worker.vision_attachment(value)
+
+def test_native_skill_bundle(tmp_path):
+    worker.install_native_skills(tmp_path)
+    for name,content in worker.NATIVE_SKILLS.items():
+        assert (tmp_path/".qoder-cn"/"skills"/name/"SKILL.md").read_text(encoding="utf-8")==content+"\n"
+    assert len(worker.NATIVE_SKILLS)>=4
+
+def test_native_sdk_has_visible_mcp_tools_and_safe_subagent():
+    import ast
+    ast.parse(worker.SDK_AGENT_SCRIPT)
+    assert "tools=[*builtins,*names]" in worker.SDK_AGENT_SCRIPT
+    assert "allowed_tools=[*builtins,*names]" in worker.SDK_AGENT_SCRIPT
+    assert "maxResultSizeChars" in worker.SDK_AGENT_SCRIPT
+    assert "tools=read_names" in worker.SDK_AGENT_SCRIPT
+    assert "setting_sources=[\"project\"]" in worker.SDK_AGENT_SCRIPT
