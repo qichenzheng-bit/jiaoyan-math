@@ -364,7 +364,7 @@ def add_prompt_routes(router, root=None):
     @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):
         authorize(request)
-        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready(),'knowledge_video_schema':_knowledge_schema(),'resolved_supplements':True
+        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready(),'knowledge_video_schema':_knowledge_schema(),'resolved_supplements':True}
 
     @router.post('/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):
