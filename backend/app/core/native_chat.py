@@ -89,6 +89,8 @@ def finish(db,m,state):
 
 def pending(db,m,state):
     if now()-state["at"]>900:
+        try:qoder.request("POST","/chat/"+state["job"]+"/cancel",{})
+        except HTTPException:pass
         m.state="failed";m.detail="原生Agent排队超时";finish(db,m,state);return
     try:
         qoder.request("POST","/agent/start",{"id":state["job"],"workspace":state["workspace"],"owner":state["native_actor"],
@@ -140,6 +142,17 @@ def invoke(db,m,state,call):
     ai_chat.store(db,m,state);db.commit()
     return result
 
+def recover(db,m,state):
+    # Chat tools are read-only. Resume once, preserving the actual current prompt;
+    # the previous reply may have been interrupted before the SDK saved it.
+    if state.get("restart",0)>=1:return False
+    resume=state.get("native_session") or state.get("resume")
+    state.update(job=str(uuid4()),phase="pending",at=now(),attempts=0,
+        restart=state.get("restart",0)+1,resume=resume)
+    m.content="";m.detail="执行服务重启，正在恢复聊天"
+    ai_chat.store(db,m,state)
+    return True
+
 def sync(db,m,state):
     if state.get("phase")=="pending":return pending(db,m,state)
     if state.get("phase")!="model":return
@@ -150,7 +163,7 @@ def sync(db,m,state):
     try:reply=qoder.request("GET","/chat/"+state["job"])
     except HTTPException as e:
         if e.status_code==404 and now()-state["at"]>20:
-            m.state="failed";m.detail="原生Agent任务已丢失";finish(db,m,state)
+            if not recover(db,m,state):m.state="failed";m.detail="原生Agent任务已丢失";finish(db,m,state)
         return
     if reply.get("native_session"):state["native_session"]=reply["native_session"]
     for key in ("native_memory","native_memory_flush","native_mirror_error"):
@@ -171,6 +184,7 @@ def sync(db,m,state):
         else:ai_chat.store(db,m,state)
         return
     if status in ("done","failed","stopped"):
+        if status=="failed" and reply.get("failure_reason")=="worker_restart" and recover(db,m,state):return
         m.state=status;m.detail=str(reply.get("detail",""))[:400] if status!="done" else ""
         if state.get("native_mirror_error"):m.detail+="；会话镜像写入异常"
         if state.get("native_memory_flush")=="failed":m.detail+="；记忆保存未确认"

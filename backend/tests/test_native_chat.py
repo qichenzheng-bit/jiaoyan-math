@@ -47,3 +47,13 @@ def test_native_chat_pending_does_not_use_legacy_query(monkeypatch):
     method,path,body=request.call_args.args
     assert (method,path)==("POST","/agent/start") and body["resume"]=="old"
     assert body["prompt"]=="继续" and state["phase"]=="model"
+
+
+def test_native_chat_restores_once_after_worker_restart(monkeypatch):
+    db=Mock();m=SimpleNamespace(content="partial",detail="")
+    state={"job":"old-job","native_session":"old-session","prompt":"当前请求","phase":"model"}
+    monkeypatch.setattr(n.ai_chat,"store",Mock())
+    assert n.recover(db,m,state)
+    assert state["resume"]=="old-session" and state["prompt"]=="当前请求"
+    assert state["job"]!="old-job" and not m.content
+    assert not n.recover(db,m,state)

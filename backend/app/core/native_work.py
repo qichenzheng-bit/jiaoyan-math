@@ -578,9 +578,33 @@ def poll_video_jobs(db,s,r,user):
             r.update(state="failed" if failed else "done",detail="存在失败的视频任务，请查看真实引擎记录" if failed else "原视频引擎已确认本轮视频任务完成；等待人工验收")
     wa.save(db,s,r);db.commit()
 
+def uncertain_write(r):
+    writes={t["name"] for t in tools() if t["write"]}
+    return any(x.get("state")=="running" and x.get("tool") in writes for x in r.get("steps",[]))
+
+def resume_read_only(db,s,r):
+    """Recover one interrupted read-only run, never replay an uncertain mutation.
+    For a completed write the existing business result remains available for
+    explicit review/retry, rather than allowing an automatic duplicate create.
+    """
+    writes={t["name"] for t in tools() if t["write"]}
+    if r.get("native_restart",0)>=1 or any(x.get("tool") in writes for x in r.get("steps",[])):
+        return False
+    resume=r.get("native_session") or r.get("native_resume")
+    prompt=r["instruction"]
+    additional=r.get("amendments",[])
+    if additional:prompt+="\n最新追加要求（后者优先）：\n"+"\n".join(x["text"] for x in additional)
+    if resume:prompt="服务重启，请继续下面的工作；此前只读操作可重新查询，勿假定已创建成果。\n"+prompt
+    r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,
+        native_restart=r.get("native_restart",0)+1,native_resume=resume,
+        native_amendment_count=len(additional),native_interrupt_requested=False,native_answer="",
+        native_prompt=user_prompt(db,s,prompt,additional[-1].get("selected_id") if additional else None),
+        stage_start=len(r.get("steps",[])),detail="执行服务重启，正在恢复原生会话")
+    return True
+
 def retry(db,s,r,user):
     from app.api import work_agent as wa
-    if any(x["state"]=="running" and next((t["write"] for t in tools() if t["name"]==x["tool"]),True) for x in r.get("steps",[])):
+    if uncertain_write(r) or any(x["state"]=="running" and not any(t["name"]==x["tool"] for t in tools()) for x in r.get("steps",[])):
         raise HTTPException(409,"上次写入结果不明确，请先核对业务成果")
     if video_waiting(r):
         r.update(state="running",phase="native_video_wait",phase_at=now(),detail="恢复原视频任务状态，不重复生成")
@@ -616,7 +640,9 @@ def tick(db,s,r,user):
             "session_id":r["model_job"],"resume":r.get("native_resume"),"model":r["model"],
             "effort":r["effort"],"prompt":r["native_prompt"],"system":r["native_system"],"tools":tools()})
         except HTTPException as e:
-            if e.status_code==409 and "已有模型任务" in str(e.detail):return
+            if e.status_code==409 and "已有模型任务" in str(e.detail):
+                if r.get("detail")!="原生Agent正在排队":r["detail"]="原生Agent正在排队";wa.save(db,s,r);db.commit()
+                return
             if e.status_code in (503,504):
                 # An ambiguous start may already have been accepted: retry the same ID.
                 r["attempts"]=r.get("attempts",0)+1
@@ -626,7 +652,9 @@ def tick(db,s,r,user):
         wa.save(db,s,r);db.commit();return
     try:reply=qoder.request("GET","/chat/"+r["model_job"])
     except HTTPException as e:
-        if e.status_code==404 and now()-r["phase_at"]>20:fail(db,s,r,"原生Agent任务已丢失")
+        if e.status_code==404 and now()-r["phase_at"]>20:
+            if resume_read_only(db,s,r):wa.save(db,s,r);db.commit()
+            else:fail(db,s,r,"原生Agent任务已丢失；请核对已写入成果，避免重复操作")
         return
     if reply.get("native_session"):r["native_session"]=reply["native_session"]
     for key in ("native_memory","native_memory_flush","native_mirror_error"):
@@ -666,6 +694,8 @@ def tick(db,s,r,user):
         r.update(phase="native_video_wait",phase_at=now(),detail="Agent已释放模型；等待原视频引擎实际结果")
         wa.save(db,s,r);db.commit();return
     if reply.get("state")!="done":
+        if reply.get("failure_reason")=="worker_restart" and resume_read_only(db,s,r):
+            wa.save(db,s,r);db.commit();return
         if reply.get("native_interrupted") and pending_amendments(r):
             next_amended_turn(db,s,r);wa.save(db,s,r);db.commit();return
         fail(db,s,r,reply.get("detail") or "原生Agent未完成");return

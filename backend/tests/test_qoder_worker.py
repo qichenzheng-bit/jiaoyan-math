@@ -329,3 +329,15 @@ def test_model_admission_fairness_expiry_and_cancellation(monkeypatch):
     assert not worker.model_admission("cancelled",True,37)
     assert worker.chat_state("cancelled",True)[1]["state"]=="stopped"
     assert not worker.MODEL_WAITERS
+
+
+def test_native_restart_snapshot_keeps_session_identity(tmp_path,monkeypatch):
+    from uuid import uuid4
+    monkeypatch.setattr(worker,"SNAPSHOT_DIR",tmp_path)
+    ident,sid=str(uuid4()),str(uuid4())
+    worker.save_snapshot({"id":ident,"state":"running","answer":"","detail":"","native_session":sid,
+        "pending":{"args":{"secret":"never stored"}}})
+    result=worker.load_snapshot(ident)
+    assert result["state"]=="failed" and result["failure_reason"]=="worker_restart"
+    assert result["native_session"]==sid and "pending" not in result and "pending_tool" not in result
+    assert "never stored" not in (tmp_path/(ident+".json")).read_text()

@@ -41,6 +41,11 @@ def trace(db,m):
 def stop_job(db,m):
     state=load(db,m)
     if state and state.get("phase")=="pending":
+        # A start response may have been lost: release either a queued ID or
+        # an accepted model call before discarding the application task.
+        try:qoder.request("POST","/chat/"+state["job"]+"/cancel",{})
+        except HTTPException as exc:
+            if exc.status_code!=404:raise
         m.state="stopped"
         if state.get("native"):
             from app.core import native_chat
@@ -73,6 +78,8 @@ def pending(db,m,state):
         from app.core import native_chat
         return native_chat.pending(db,m,state)
     if now()-state["at"]>900:
+        try:qoder.request("POST","/chat/"+state["job"]+"/cancel",{})
+        except HTTPException:pass
         m.state="failed";m.detail="模型排队超时";finish(db,m,state);return
     try:
         qoder.request("POST","/chat/start",{"id":state["job"],"model":m.model,"prompt":state["next_prompt"],"queue_wait":True,**state["effort"]})

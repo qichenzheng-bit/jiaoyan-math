@@ -281,7 +281,7 @@ def cancel(ident:str,body:Confirm,db:Session=Depends(get_db),user:User=Depends(c
     from app.api import workspaces as w
     s=w.workspace(db,ident,True);r=current(s)
     if not r or r["id"]!=body.plan_id or r["state"] not in ("running","ready","clarify","confirmed","dispatched"):raise HTTPException(409,"计划已变化")
-    if r["state"]=="running" and (not r.get("auto") or r.get("phase")=="model"):
+    if r["state"]=="running" and (not r.get("auto") or r.get("phase") in ("pending","model")):
         try:qoder.request("POST","/chat/"+r.get("model_job",r["id"])+"/cancel",{})
         except HTTPException as e:
             if e.status_code!=404:raise

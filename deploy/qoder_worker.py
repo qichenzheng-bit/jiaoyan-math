@@ -508,7 +508,7 @@ def status():
         prune_model_waiters()
         available = bool(executable())
         return {"available": available, "detail": "CLI 已安装" if available else "未检测到 qoderclicn",
-                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 21, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
+                "verified_at": verified_at, "login": dict(login), "auth_ui": True, "model_discovery": True, "worker_version": 22, "waiting_count":len(MODEL_WAITERS), "native_video":native_video_enabled() and native_sdk_info["ready"], "native_agent":native_sdk_info["ready"], "native_sdk":dict(native_sdk_info), "vision_attachment": True, "usage_discovery":True, "retained_auth":retained_auth,"user_disconnected":user_disconnected, "video_inference": True, "busy": bool(chat_active or login_process is not None), "chat_available": available and not user_disconnected, "durable_results": True}
 
 def invoke(model, prompt):
     global verified_at,retained_auth
@@ -578,7 +578,7 @@ def chat_snapshot(job,live=False):
     if job.get("native_session"):result["native_session"]=job["native_session"]
     if job.get("video"):result["video_inference_mode"]="native_sdk" if job.get("native_video") else "legacy_cli"
     elif job.get("video_inference_mode"):result["video_inference_mode"]=job["video_inference_mode"]
-    for key in ("native_memory","native_memory_flush","native_mirror_error","native_interrupted"):
+    for key in ("native_memory","native_memory_flush","native_mirror_error","native_interrupted","failure_reason"):
         if key in job:result[key]=job[key]
     if live and job.get("pending"):result["pending_tool"]=job["pending"]
     return result
@@ -616,7 +616,7 @@ def load_snapshot(ident):
         if value.get("id") != ident or time.time()-value.get("saved_at",0)>SNAPSHOT_TTL:
             return None
         if value.get("state") == "running":
-            value.update(state="failed",detail="执行服务已重启；保留已写入的结果")
+            value.update(state="failed",failure_reason="worker_restart",detail="执行服务已重启；保留已写入的结果")
         return chat_snapshot(value)
     except (OSError,ValueError,TypeError,KeyError):
         return None
@@ -1077,7 +1077,11 @@ def agent_run(job,cfg):
                             sid=event.get("session_id")
                             if valid_native_id(sid):
                                 remember_native_run(cwd,sid)
-                                job["native_session"]=sid
+                                if job.get("native_session")!=sid:
+                                    job["native_session"]=sid
+                                    # Persist session identity before any later tool call; never persist raw tool payloads.
+                                    try:save_snapshot(job)
+                                    except OSError:job["native_mirror_error"]=True
                             if kind=="result":
                                 success=event.get("success") is True
                                 if event.get("answer"):job["answer"]=str(event["answer"])[:48000]

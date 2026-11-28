@@ -153,3 +153,15 @@ def test_native_boundary_missing_requires_actual_pages(monkeypatch):
         def get(self,*a):return None
     with pytest.raises(n.HTTPException,match="边界"):
         n.draft_create(DB(),None,{"steps":[]},None,{"file_id":"f","title":"题","pages":[{"page":1,"text":"题干"}],"items":[{}],"incomplete_boundary":"第2题解析在下一页"},"j")
+
+
+def test_native_restart_recovers_only_read_only_turn(monkeypatch):
+    monkeypatch.setattr(n,"user_prompt",lambda db,s,prompt,selected=None:prompt)
+    record={"instruction":"读第2页","steps":[{"tool":"native_page","state":"done"}],"native_session":"old",
+        "amendments":[{"text":"再读第3页"}]}
+    assert n.resume_read_only(None,None,record)
+    assert record["native_resume"]=="old" and record["phase"]=="pending"
+    assert "读第2页" in record["native_prompt"] and "再读第3页" in record["native_prompt"]
+    assert not n.resume_read_only(None,None,record)
+    assert not n.resume_read_only(None,None,{"steps":[{"tool":"native_intake_review","state":"done"}]})
+    assert n.uncertain_write({"steps":[{"tool":"native_intake_review","state":"running"}]})
