@@ -1531,6 +1531,17 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
             resource=db.get(TeachingResource,result_doc["blocks"][0]["resource_id"])
             assert resource and resource.difficulty=="中等"
             assert db.get(IntakeJob,direct_id).provenance["direct_registration"]==receipt
+        # Empty sources can be removed without deleting the original draft or registered resources.
+        unused=client.post("/api/documents/setup",headers=origin,json={"title":"临时删除来源回归","source_type":"exam","subject":"数学分析","exam_type":"院校真题","year":"2026"})
+        assert unused.status_code==200,unused.text
+        unused_doc=unused.json()
+        unused_source=client.get("/api/resources/"+unused_doc["source_id"]).json()
+        removed_source=client.delete("/api/resources/"+unused_doc["source_id"]+"/source",headers=origin,params={"revision":unused_source["revision"]})
+        assert removed_source.status_code==200,removed_source.text
+        assert client.get("/api/resources/"+unused_doc["source_id"]).status_code==404
+        assert client.get("/api/documents/"+unused_doc["id"]).json()["source_id"] is None
+        registered_source=client.get("/api/resources/"+receipt["source_id"]).json()
+        assert client.delete("/api/resources/"+receipt["source_id"]+"/source",headers=origin,params={"revision":registered_source["revision"]}).status_code==409
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs

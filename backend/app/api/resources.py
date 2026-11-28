@@ -649,6 +649,47 @@ def archive(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
 def restore(id:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
     admin_lock(db,user);return set_archived(db,existing(db,id,True),False,user)
 
+
+@router.delete("/{id}/source",dependencies=[Depends(require_origin)])
+def delete_source(id:str,revision:int=Query(ge=1),db:Session=Depends(get_db),user:User=Depends(current_user)):
+    """Delete an unused source and detach only unregistered intake drafts."""
+    from app.models import DocumentRegistration, DocumentAiEdit
+    from app.api import documents as docs
+    admin_lock(db,user);r=existing(db,id,True)
+    if r.kind!="source":raise HTTPException(422,"此入口仅用于删除来源资料")
+    if r.revision!=revision:raise HTTPException(409,"来源版本已变化，请刷新")
+    if db.scalar(select(ResourceSourceLink.resource_id).where(ResourceSourceLink.source_id==id).limit(1)) or db.scalar(select(TeachingResource.id).where(TeachingResource.source_id==id).limit(1)):
+        raise HTTPException(409,"此来源已关联正式入库资源，请先在关联题目或知识单元中解除来源；不会删除题库内容")
+    drafts=list(db.scalars(select(TeachingDocument).where(TeachingDocument.source_id==id).with_for_update()))
+    for d in drafts:
+        if d.kind!="intake" or any(b.get("kind")=="reference" for b in d.blocks) or db.scalar(select(DocumentRegistration.id).where(DocumentRegistration.document_id==d.id).limit(1)):
+            raise HTTPException(409,"此来源已被正式文档或入库记录引用，不能直接删除")
+        if db.scalar(select(DocumentAiEdit.id).where(DocumentAiEdit.document_id==d.id,DocumentAiEdit.state.in_(("running","review"))).limit(1)):
+            raise HTTPException(409,"请先完成该草稿的AI编辑")
+        docs.ensure_no_active_run(db,d)
+    draft_ids={d.id for d in drafts}
+    refs=set(db.scalars(select(DocumentResourceReference.document_id).where(DocumentResourceReference.resource_id==id)))
+    if refs-draft_ids:raise HTTPException(409,"此来源仍被其他文档引用")
+    jobs=list(db.scalars(select(IntakeJob).where(IntakeJob.source_id==id).with_for_update()))
+    if any(j.state=="running" or (j.document_id and j.document_id not in draft_ids) for j in jobs):
+        raise HTTPException(409,"此来源仍被执行中的工作或正式文档使用，请先停止工作")
+    for d in drafts:
+        d.source_id=None;d.revision+=1;d.updated_at=now()
+        setting=db.get(Setting,docs.manual_review_key(d))
+        if setting:db.delete(setting)
+    for j in jobs:
+        j.source_id=None;j.revision+=1;j.updated_at=now()
+    db.flush()
+    db.execute(delete(DocumentResourceReference).where(DocumentResourceReference.resource_id==id))
+    db.execute(delete(SourceVersion).where(SourceVersion.source_id==id))
+    db.execute(delete(SourceCatalogDetail).where(SourceCatalogDetail.source_id==id))
+    db.execute(delete(FileReference).where(FileReference.owner_type=="resource",FileReference.owner_id==id))
+    db.execute(delete(Setting).where(Setting.key=="source.file.versions."+id))
+    # Keep the audit event, but remove obsolete source-specific version history.
+    db.execute(delete(Setting).where(Setting.key.startswith("bank.history."+id+".")))
+    db.flush();db.delete(r);audit(db,"resource.source.delete",user.id);db.commit()
+    return {"deleted":True,"id":id,"detached_drafts":len(drafts)}
+
 @router.get("/{id}/methods")
 def methods(id:str,db:Session=Depends(get_db)):
     row=existing(db,id)
