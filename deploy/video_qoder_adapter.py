@@ -111,8 +111,12 @@ def capture_job_add(original, root=None):
                     if ident:prior=_job_record(db,ident)
             if prior.get('rules'):
                 scoped=prompt_bundle.resolve_pinned_scope(prior['rules'],actual_type)
-                snapshot['rules']={**scoped,'inherited_supplement':prior.get('text','') or prior['rules'].get('inherited_supplement','')}
-                snapshot['text']=prior.get('text','') or prior['rules'].get('inherited_supplement','')
+                inherited=prior.get('text','') or prior['rules'].get('inherited_supplement','')
+                resolved=prior.get('resolved_supplements') or {}
+                if actual_type in resolved:inherited=resolved[actual_type]
+                if resolved:snapshot['resolved_supplements']=resolved
+                snapshot['rules']={**scoped,'inherited_supplement':inherited}
+                snapshot['text']=inherited
                 if prior.get('source_context'):snapshot['source_context']=prior['source_context']
             else:
                 if knowledge_envelope(lesson.reference_solution) is not None:
@@ -305,6 +309,7 @@ def add_prompt_routes(router, root=None):
         revision:int=Field(ge=0)
         source_context:dict|None=None
         figures:list[dict]|None=None
+        resolved_supplements:dict[str,str]|None=None
 
     def authorize(request:Request):
         expected=os.environ.get('WEIGUANG_API_TOKEN','')
@@ -359,13 +364,18 @@ def add_prompt_routes(router, root=None):
     @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):
         authorize(request)
-        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready(),'knowledge_video_schema':_knowledge_schema()}
+        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready(),'knowledge_video_schema':_knowledge_schema(),'resolved_supplements':True
 
     @router.post('/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):
         authorize(request)
         if '\x00' in body.text or len(body.text.encode())>PROMPT_LIMIT:
             raise HTTPException(422,'VIDEO_PROMPT_TOO_LONG')
+        if body.resolved_supplements is not None:
+            if (set(body.resolved_supplements)!={"with_proof","without_proof"} or
+                any("\x00" in value or len(value)>16000 or len(value.encode())>PROMPT_LIMIT for value in body.resolved_supplements.values()) or
+                (body.source_context or {}).get("business_type")!="knowledge" or (body.source_context or {}).get("teaching_type")!="auto"):
+                raise HTTPException(422,"VIDEO_RESOLVED_SUPPLEMENT_INVALID")
         if body.source_context is not None and (not _source_context_ready() or len(json.dumps(body.source_context,ensure_ascii=False).encode())>12000):
             raise HTTPException(422,'VIDEO_SOURCE_CONTEXT_UNSUPPORTED_OR_TOO_LARGE')
         if body.figures is not None:

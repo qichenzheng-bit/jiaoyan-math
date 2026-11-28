@@ -202,7 +202,10 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
                         if isinstance(user,User) else {"text":"","revision":0})
             specific=body.teaching_supplement.strip() if body else ""
             if specific:
-                supplement["text"]=(supplement["text"]+"\n【仅本次视频的明确教学要求】\n"+specific).strip()
+                suffix="\n【仅本次视频的明确教学要求】\n"+specific
+                supplement["text"]=(supplement["text"]+suffix).strip()
+                if "resolved_supplements" in supplement:
+                    supplement["resolved_supplements"]={k:(v+suffix).strip() for k,v in supplement["resolved_supplements"].items()}
             if len(supplement["text"])>16000 or len(supplement["text"].encode())>32000 or "\x00" in supplement["text"]:
                 raise HTTPException(422,"本次视频教学补充要求过长")
             saved_context=source_data.get("source_context") or {}
@@ -221,6 +224,8 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
                     elif e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
                     else:raise
                 if supplement["text"] and (not supported.get("supported") or supported.get("snapshot")!="job"):raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
+                if "resolved_supplements" in supplement and not supported.get("resolved_supplements"):
+                    supplement.pop("resolved_supplements")
                 if not supported.get("source_context"):context={}
                 if figure_ids and not supported.get("reference_figures"):raise HTTPException(503,"视频引擎尚不支持参考题图")
             prepare_model(db,body.effort if body else None,body.model if body else None)

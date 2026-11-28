@@ -105,3 +105,21 @@ def test_structured_source_context_is_separate_from_user_supplement(monkeypatch)
     monkeypatch.setattr(adapter,"job_prompt_data",lambda:{"text":"逐步讲解","revision":1,"source_context":context})
     assert adapter.job_source_context()==context
     assert adapter.job_supplement()=="逐步讲解"
+
+def test_auto_teaching_supplement_metadata_is_validated(monkeypatch):
+    from fastapi import APIRouter,FastAPI
+    from fastapi.testclient import TestClient
+    router=APIRouter()
+    @router.post("/lessons/{id}/generate")
+    def generate(id:str):return adapter._job_prompt.get()
+    app=FastAPI()
+    app.include_router(adapter.add_prompt_routes(router))
+    monkeypatch.setenv("WEIGUANG_API_TOKEN","test-only")
+    monkeypatch.setattr(adapter,"_source_context_ready",lambda:True)
+    body={"text":"条件规则","revision":1,"source_context":{"business_type":"knowledge","teaching_type":"auto"},
+          "resolved_supplements":{"with_proof":"证明专属","without_proof":"无证明专属"}}
+    with TestClient(app) as client:
+        headers={"X-API-Key":"test-only"}
+        url="/jiaoyan/lessons/test/generate"
+        assert client.post(url,json=body,headers=headers).json()["resolved_supplements"]==body["resolved_supplements"]
+        assert client.post(url,json={**body,"resolved_supplements":{"with_proof":"x"}},headers=headers).status_code==422

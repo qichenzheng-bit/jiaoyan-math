@@ -302,7 +302,7 @@ register("chapter_order", "按实际章节ID调整目录顺序", documents.order
 register("template_apply", "应用真实用户排版模板，需要当前排版revision", apply_template, ("scope","identity","body"),write=True)
 register("document_patch", "按真实文档块编号局部修改创作文档，不修改题库原件；需要当前版本", patch_document, ("id","body"), write=True)
 register("layout_update", "修改指定文档或来源排版配置，必须使用最新revision；不自动正式导出", settings.update_document_layout, ("scope","identity","body"), write=True)
-register("video_create", "根据题库原题和已有推荐解析创建视频项目", video.create, ("body",), write=True)
+register("video_create", "根据正式题库原题或知识库独立知识单元创建视频项目；知识单元仅使用已明确关联的题目，不以标签匹配代替关系", video.create, ("body",), write=True)
 register("video_generate", "提交指定视频的代码生成任务；原引擎生成校验成功后自动渲染，不重复提交渲染", video.produce, ("ident",), fixed={"action":"generate"}, write=True)
 register("video_retry","重试已失败或取消的指定视频任务；引擎决定是否复用代码",video.job_action,("ident","job_id"),fixed={"action":"retry"},write=True)
 register("video_render", "提交指定视频的渲染任务，不代表成片完成", video.produce, ("ident",), fixed={"action":"render"}, write=True)

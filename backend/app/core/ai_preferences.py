@@ -104,13 +104,20 @@ def video_supplement(db,user,*,business="question",teaching_type="auto"):
     for scope in common:
         text=collect(scope)
         if text:pieces.append("【适用范围："+scope+"】\n"+text)
+    base=list(pieces)
+    resolved={}
     if business=="knowledge":
         types=("with_proof","without_proof") if teaching_type=="auto" else (teaching_type,)
         for typ in types:
             scope="video_knowledge_"+typ
             text=collect(scope)
-            if text:pieces.append("【仅当实际教学类型为 "+typ+" 时适用，其他类型不得采用】\n"+text)
+            part="【仅当实际教学类型为 "+typ+" 时适用，其他类型不得采用】\n"+text if text else ""
+            if part:pieces.append(part)
+            resolved[typ]="\n".join([*base,*([part] if part else [])])
     text="\n".join(pieces)
     if len(text)>16000 or len(text.encode())>32000 or "\x00" in text:
         raise HTTPException(422,"视频教学补充要求过长，请精简配置")
-    return {"text":text,"revision":scope_rules["video"]}
+    result={"text":text,"revision":scope_rules["video"]}
+    if business=="knowledge" and teaching_type=="auto":
+        result["resolved_supplements"]=resolved
+    return result

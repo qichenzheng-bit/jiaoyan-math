@@ -11,7 +11,11 @@ def test_scoped_video_supplements(monkeypatch):
     question=prefs.video_supplement(None,user)["text"]
     proof=prefs.video_supplement(None,user,business="knowledge",teaching_type="with_proof")["text"]
     no_proof=prefs.video_supplement(None,user,business="knowledge",teaching_type="without_proof")["text"]
-    auto=prefs.video_supplement(None,user,business="knowledge")["text"]
+    auto_data=prefs.video_supplement(None,user,business="knowledge")
+    auto=auto_data["text"]
+    assert "含证明专属" in auto_data["resolved_supplements"]["with_proof"]
+    assert "无证明专属" not in auto_data["resolved_supplements"]["with_proof"]
+    assert "含证明专属" not in auto_data["resolved_supplements"]["without_proof"]
     assert "例题专属" in question and "知识单元专属" not in question
     assert "知识单元专属" in proof and "含证明专属" in proof and "无证明专属" not in proof
     assert "无证明专属" in no_proof and "含证明专属" not in no_proof
