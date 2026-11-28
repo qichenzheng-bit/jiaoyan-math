@@ -461,7 +461,7 @@ with sync_playwright() as p:
                     page.locator(".supplement-proposal .katex").first.wait_for()
                     expect(page.locator(".wg-review-editor .katex").first).to_be_visible()
                     assert page.get_by_role("button",name="确认生成录入文档").is_disabled()
-                    assert page.get_by_role("button",name="确认选中补充内容").is_enabled()
+                    expect(page.get_by_role("button",name="确认选中补充内容")).to_be_enabled()
                     expect(page.locator(".supplement-proposal").get_by_text("待审核 · AI生成内容")).to_be_visible()
                 if name=="18-intelligence":
                     assert page.locator("#mode-more-panel .reasoning-effort").count()==0

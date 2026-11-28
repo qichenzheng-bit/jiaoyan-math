@@ -40,3 +40,7 @@
 - 聊天和工作删除时先确认所属用户、停止任务，再通过专属会话登记清理原生本机 transcript、外置镜像和已登记任务快照；按官方项目目录约定及精确 UUID 匹配，遇到无法确认的路径拒绝清理，保留应用历史。共享长期记忆及旧加密备份不会随单次会话删除。旧试点会话若缺可信登记需管理员处理。
 - 新增纯文字审核草稿，继续保留附件原件读取流程，避免AI把转录猜测冒充原文。接入签到/额度/模型及录入状态只读查询。
 - 未执行生产删除、SDK实机调用或备份恢复。本机删除目录约定参考 https://docs.qoder.cn/cli/sessions 。
+
+### 实机升级前检查（2026-11-28）
+- 官方当前中文版/英文版 Memory 专页仍明确标注自动记忆配置仅 TypeScript 支持；Python 原生会话恢复、外置存储是另一项能力。Python Worker 对可选 memory 字段和 flush_memory 只做能力探测，未发现时不启用；此前阶段四关于 Python 原生自动记忆已普遍支持的说法以此更正。原有明确教学偏好保留。参考 https://docs.qoder.cn/cli/sdk/memory 和 https://docs.qoder.cn/cli/sdk/references-python 。
+- 桌面审核测试用 Playwright 自动重试断言等待按钮启用，不取消业务断言。真实 SDK 升级必须在应用新版本发布之后执行；未联调前不启用 WG_NATIVE_AGENT、WG_NATIVE_CHAT、WG_NATIVE_VIDEO。

@@ -766,7 +766,7 @@ SDK_SESSION_STORE_SCRIPT = "import asyncio\nimport hashlib\nimport json\nimport 
 SDK_AGENT_SCRIPT = SDK_SESSION_STORE_SCRIPT + r"""
 import asyncio, json, sys, inspect
 from uuid import uuid4
-from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage, AgentDefinition, AssistantMessage, TextBlock
+from qodercn_agent_sdk import QoderAgentOptions, QoderSDKClient, qodercli_auth, tool, create_sdk_mcp_server, ResultMessage, SystemMessage, AgentDefinition, AssistantMessage, TextBlock, SDKMirrorErrorMessage
 from mcp.types import ToolAnnotations
 
 def emit(value):
@@ -826,7 +826,7 @@ async def main():
             if isinstance(message,AssistantMessage):
                 answer="\n".join(block.text for block in message.content if isinstance(block,TextBlock))
                 if answer:emit({"type":"assistant","answer":answer[:48000]})
-            if isinstance(message,SystemMessage) and message.subtype=="mirror_error":
+            if isinstance(message,SDKMirrorErrorMessage):
                 emit({"type":"mirror_error"})
             if isinstance(message,ResultMessage):
                 final={"type":"result","success":message.subtype=="success","answer":message.result or "",
