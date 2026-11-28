@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily native session snapshot before encrypted business backup
+
+[Timer]
+OnCalendar=*-*-* 23:40:00 Asia/Shanghai
+Persistent=true
+Unit=jiaoyan-native-backup.service
+
+[Install]
+WantedBy=timers.target

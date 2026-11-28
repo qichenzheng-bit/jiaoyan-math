@@ -147,3 +147,32 @@ def test_native_backup_verifies_private_mirror_and_rejects_paths(tmp_path):
         entry=tarfile.TarInfo("../credential");entry.size=1;tar.addfile(entry,io.BytesIO(b"x"))
     with pytest.raises(ValueError,match="unexpected"):verify.inspect_archive(bad,tmp_path/"badstage")
     assert not verify.allowed(".jiaoyan-native-workspaces/"+sid+"/.qoder-cn/settings.json",False)
+
+
+def test_native_snapshot_path_is_exact():
+    assert backup.logical_allowed(backup.NATIVE_ARCHIVE)
+    assert not backup.logical_allowed("ai/native-state/credentials")
+    assert not backup.logical_allowed("ai/native-state/../secret")
+
+def test_native_online_snapshot_excludes_smoke_and_login(tmp_path):
+    import sqlite3
+    from uuid import uuid4
+    spec=importlib.util.spec_from_file_location("native_capture",Path(__file__).resolve().parents[2]/"deploy"/"snapshot-native-state.py")
+    capture=importlib.util.module_from_spec(spec);spec.loader.exec_module(capture)
+    home=tmp_path/"home";work=home/".jiaoyan-native-workspaces";sid=str(uuid4())
+    for owner,ident in [("1",sid),(capture.SMOKE_OWNER,str(uuid4()))]:
+        ws=work/ident;ws.mkdir(parents=True)
+        (ws/"owner").write_text(owner)
+        (ws/"sessions.json").write_text(json.dumps({"sessions":[ident],"jobs":[]}))
+        db=sqlite3.connect(ws/"session-mirror.sqlite3")
+        db.execute("CREATE TABLE entries(payload TEXT)")
+        db.execute("INSERT INTO entries VALUES ('{}')");db.commit();db.close()
+        (ws/"unrelated-token").write_text("do not copy")
+    (home/".qoder-cn").mkdir()
+    (home/".qoder-cn"/"auth").write_text("not copied")
+    stage=tmp_path/"stage";stage.mkdir()
+    capture.collect(home,stage)
+    result=stage/work.name/sid
+    assert result.is_dir() and (result/"session-mirror.sqlite3").exists()
+    assert len(list((stage/work.name).iterdir()))==1
+    assert not (result/"unrelated-token").exists() and not (stage/".qoder-cn").exists()

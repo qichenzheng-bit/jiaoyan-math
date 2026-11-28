@@ -171,7 +171,8 @@ def git_env(key, hosts):
 def logical_allowed(name):
     return (name in FIXED or name in SCHEMAS or
             re.fullmatch(r"files/(originals|assets)/[0-9a-f-]{36}", name) is not None or
-            re.fullmatch(r"production/video-engine/(index\.json|database\.dump|settings\.json|files/[0-9a-f]{64})",name) is not None)
+            re.fullmatch(r"production/video-engine/(index\.json|database\.dump|settings\.json|files/[0-9a-f]{64})",name) is not None or
+            name == NATIVE_ARCHIVE)
 
 
 WORK_EXPORTS={"ai/work/sessions.csv","ai/work/materials.csv","ai/work/batches.csv"}
@@ -302,6 +303,25 @@ def capture(work, publish):
 
 VIDEO_PREFIX="production/video-engine/"
 VIDEO_BASE=Path("/var/lib/jiaoyan-video-backup")
+NATIVE_BASE=Path("/var/lib/jiaoyan-native-backup")
+NATIVE_ARCHIVE="ai/native-state/mirror.tar.gz.age"
+
+def native_capture(work,recipient):
+    """Copy only an already-encrypted, atomically published root-owned archive."""
+    source=NATIVE_BASE/"current.age"
+    meta=NATIVE_BASE/"recipient"
+    if not source.is_file() or not meta.is_file():return None
+    if source.is_symlink() or meta.is_symlink() or NATIVE_BASE.is_symlink():raise ValueError("unsafe native backup path")
+    if meta.read_text(encoding="ascii").strip()!=recipient:return None
+    dest=work/"native-mirror.age"
+    with source.open("rb") as src:
+        stat=os.fstat(src.fileno())
+        age_seconds=datetime.now(timezone.utc).timestamp()-stat.st_mtime
+        if stat.st_uid!=0 or stat.st_mode&0o022 or not 0<=age_seconds<=36*3600:return None
+        if not 0<stat.st_size<=4*1024**3:raise ValueError("invalid native ciphertext size")
+        with dest.open("wb") as out:shutil.copyfileobj(src,out,1024*1024)
+    if dest.stat().st_size!=stat.st_size:raise ValueError("native snapshot changed during copy")
+    return dest
 
 def video_entries():
     """Read a complete immutable snapshot under the publisher's shared lock."""
@@ -435,6 +455,16 @@ def backup():
                 if name.startswith(VIDEO_PREFIX):
                     entries[name]=entry
                     if name in old:index[name]=old[name]
+        native_state="not_configured" if not NATIVE_BASE.exists() else "stale"
+        native=native_capture(work,recipient)
+        if native is not None:
+            publish(NATIVE_ARCHIVE,native)
+            native_state="included"
+        elif NATIVE_ARCHIVE in previous:
+            # Retain a previous encrypted snapshot on temporary capture failure.
+            entries[NATIVE_ARCHIVE]=previous[NATIVE_ARCHIVE]
+            if NATIVE_ARCHIVE in old:index[NATIVE_ARCHIVE]=old[NATIVE_ARCHIVE]
+            native_state="previous_retained"
         changed = entries != previous
         if changed:
             keep = {p["path"] for e in entries.values() for p in e["parts"]}
@@ -454,10 +484,10 @@ def backup():
         cipher_bytes=sum(safe_path(repo,p["path"]).stat().st_size for e in entries.values() for p in e["parts"])
         return {"state": "success" if changed else "unchanged", "at": now(), "commit": head,
                 "entries": len(entries), "scope": "teaching database and registered files",
-                "video_state":video_state,"snapshot_cipher_bytes":cipher_bytes}
+                "video_state":video_state,"native_state":native_state,"snapshot_cipher_bytes":cipher_bytes}
 
 
-def restore(repo, identity, target, destination, video_destination=None):
+def restore(repo, identity, target, destination, video_destination=None, native_destination=None):
     """Restore into an explicitly named, empty rehearsal database and new file directory only."""
     import psycopg
     if not re.fullmatch(r"jiaoyan_restore_[a-z0-9_]{1,35}", target):
@@ -470,6 +500,9 @@ def restore(repo, identity, target, destination, video_destination=None):
     video_names={n for n in manifest["entries"] if n.startswith(VIDEO_PREFIX)}
     if video_names and (video_destination is None or video_destination.exists() or not video_destination.is_absolute()):
         raise ValueError("video snapshot requires a separate unused absolute --video-files directory")
+    native_present=NATIVE_ARCHIVE in manifest["entries"]
+    if native_present and (native_destination is None or native_destination.exists() or not native_destination.is_absolute()):
+        raise ValueError("native mirror requires a separate unused absolute --native-files directory")
     env = {k:v for k,v in os.environ.items() if not k.startswith("PG")}
     env.update(PGHOST="/var/run/postgresql", PGDATABASE=target, PGCONNECT_TIMEOUT="10")
     info = "host=/var/run/postgresql dbname=" + target + " connect_timeout=10"
@@ -496,6 +529,14 @@ def restore(repo, identity, target, destination, video_destination=None):
                 shutil.copyfileobj(src, out, 1024 * 1024)
             compressed.unlink()
             enc.unlink()
+        if native_present:
+            # Verify the inner age envelope before changing the rehearsal DB.
+            run(["age","-d","-i",str(identity),"-o",str(work/"native-verified.tar.gz"),str(work/NATIVE_ARCHIVE)])
+            import importlib.util
+            spec=importlib.util.spec_from_file_location("native_verify",Path(__file__).with_name("verify-native-backup.py"))
+            verifier=importlib.util.module_from_spec(spec);spec.loader.exec_module(verifier)
+            staged=work/"native-verified";staged.mkdir(mode=0o700)
+            verifier.inspect_archive(work/"native-verified.tar.gz",staged)
         run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", str(work / SCHEMAS[0])], env=env)
         with psycopg.connect(info) as conn:
             with conn.cursor() as cur:
@@ -521,7 +562,7 @@ def restore(repo, identity, target, destination, video_destination=None):
                     if p.stat().st_size != size or digest(p) != sha:
                         raise ValueError("restored attachment checksum mismatch")
                     expected.add(name)
-                if expected != {n for n in manifest["entries"] if n not in FIXED and n not in SCHEMAS and n not in video_names}:
+                if expected != {n for n in manifest["entries"] if n not in FIXED and n not in SCHEMAS and n not in video_names and n!=NATIVE_ARCHIVE}:
                     raise ValueError("attachment inventory mismatch")
         if video_names:
             src=work/VIDEO_PREFIX
@@ -558,6 +599,10 @@ def restore(repo, identity, target, destination, video_destination=None):
             # Temporary directory may be on a different filesystem.
             shutil.copyfile(work / name, out)
             out.chmod(0o600)
+        if native_present:
+            native_destination.mkdir(mode=0o700)
+            shutil.copyfile(work/NATIVE_ARCHIVE,native_destination/"mirror.tar.gz.age")
+            (native_destination/"mirror.tar.gz.age").chmod(0o600)
     print("Rehearsal restored. Create a new administrator; never switch production automatically.")
 
 
@@ -572,9 +617,10 @@ def main():
     r.add_argument("--database", required=True)
     r.add_argument("--files", type=Path, required=True)
     r.add_argument("--video-files", type=Path)
+    r.add_argument("--native-files", type=Path)
     args = parser.parse_args()
     if args.action == "restore":
-        restore(args.repo, args.identity, args.database, args.files,args.video_files)
+        restore(args.repo, args.identity, args.database, args.files,args.video_files,args.native_files)
         return
     STATE.mkdir(mode=0o700, exist_ok=True)
     if STATE.is_symlink() or STATE.stat().st_mode & 0o077:

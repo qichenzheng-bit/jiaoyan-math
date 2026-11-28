@@ -1,0 +1,13 @@
+[Unit]
+Description=Capture encrypted app-scoped Qoder native session mirrors
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/opt/jiaoyan-qoder/publish-native-snapshot.sh
+UMask=0077
+TimeoutStartSec=600
+Nice=10
+Restart=on-failure
+RestartSec=300
