@@ -176,7 +176,19 @@ def test_native_skill_bundle(tmp_path):
     worker.install_native_skills(tmp_path)
     for name,content in worker.NATIVE_SKILLS.items():
         assert (tmp_path/".qoder-cn"/"skills"/name/"SKILL.md").read_text(encoding="utf-8")==content+"\n"
-    assert len(worker.NATIVE_SKILLS)>=4
+    expected={"math-solving","math-intake","math-review","math-knowledge","math-teaching","math-presentation","video-workflow"}
+    assert set(worker.NATIVE_SKILLS)==expected
+    root=Path(__file__).resolve().parents[2]/"skills"
+    assert {p.parent.name for p in root.glob("*/SKILL.md")}==expected
+    for name,content in worker.NATIVE_SKILLS.items():
+        assert (root/name/"SKILL.md").read_text(encoding="utf-8")==content+"\n"
+        assert content.startswith("---\nname: "+name+"\ndescription: ")
+        assert len(content.split("---",2))==3
+    assert 'skills=cfg["skills"]' in worker.SDK_AGENT_SCRIPT
+    assert 'list(NATIVE_SKILLS)' in Path(worker.__file__).read_text(encoding="utf-8")
+    assert '"skills":[]' in worker.SDK_VIDEO_SCRIPT and '"tools":[]' in worker.SDK_VIDEO_SCRIPT
+    worker.install_native_skills(tmp_path)
+    assert all((tmp_path/".qoder-cn"/"skills"/name/"SKILL.md").is_file() for name in expected)
 
 def test_native_sdk_has_visible_mcp_tools_and_safe_subagent():
     import ast
