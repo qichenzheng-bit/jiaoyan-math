@@ -2,7 +2,7 @@ import {useEffect,useLayoutEffect,useRef} from 'react'
 import {Link,useBlocker,useLocation,useNavigate,useResolvedPath,type LinkProps} from 'react-router-dom'
 import {confirmAction} from './WorkspaceConfirm'
 
-type Guard={busy:boolean;dirty:boolean;message:string;preserveOnModeSwitch?:boolean;allow?:(path:string)=>boolean}
+type Guard={busy:boolean;dirty:boolean;message:string;preserveOnModeSwitch?:boolean;saveBeforeLeave?:()=>Promise<void>;allow?:(path:string)=>boolean}
 const guards=new Map<symbol,Guard>()
 function affected(path:string){return [...guards.values()].filter(g=>!g.allow?.(path))}
 function needsGuard(path:string,preserveDraft=false){return affected(path).some(g=>g.busy||g.dirty&&!(preserveDraft&&g.preserveOnModeSwitch))}
@@ -13,11 +13,11 @@ export async function guardNavigation(path:string,preserveDraft=false):Promise<b
  const dirty=active.find(g=>g.dirty&&!(preserveDraft&&g.preserveOnModeSwitch))
  if(!dirty)return true
  pending=true
- try{return await confirmAction(dirty.message,'离开当前页面','离开')}finally{pending=false}
+ try{if(dirty.saveBeforeLeave){try{await dirty.saveBeforeLeave();return true}catch{return false}}return await confirmAction(dirty.message,'离开当前页面','离开')}finally{pending=false}
 }
 export function useWorkspaceGuard(guard:Guard){
  const key=useRef(Symbol('workspace-guard'))
- useLayoutEffect(()=>{const id=key.current;guards.set(id,guard);return()=>{guards.delete(id)}},[guard.busy,guard.dirty,guard.message,guard.allow,guard.preserveOnModeSwitch])
+ useLayoutEffect(()=>{const id=key.current;guards.set(id,guard);return()=>{guards.delete(id)}},[guard.busy,guard.dirty,guard.message,guard.allow,guard.preserveOnModeSwitch,guard.saveBeforeLeave])
  useEffect(()=>{if(!guard.dirty&&!guard.busy)return;const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[guard.busy,guard.dirty])
 }
 // Browser Back/Forward has no Link click; block only POP transitions here.
