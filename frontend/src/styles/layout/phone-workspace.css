@@ -291,3 +291,20 @@
  .shell.mode-home .composer-plus svg{width:18px;height:18px}
  .persistent-work .agent-conversation-head{display:none}
 }
+
+@media(max-width:760px){
+ .compact-review-v2 .compact-review-scroll{touch-action:pan-y pinch-zoom}
+ .compact-review-v2 .compact-review-scroll:has(.compact-review-original:not([hidden])){touch-action:pan-x pan-y pinch-zoom}
+ .compact-review-v2 .inline-math-token{touch-action:pan-y pinch-zoom}
+ .compact-review-v2.compact-review-editing .inline-math-source{font-size:16px;min-width:0;width:100%;max-width:100%;box-sizing:border-box}
+ .compact-review-v2.compact-review-editing:has(.inline-math-editor:focus-within) .compact-review-header select,
+ .compact-review-v2.compact-review-editing:has(.inline-math-editor:focus-within) .compact-review-header .wg-segment,
+ .compact-review-v2.compact-review-editing:has(.inline-math-editor:focus-within) .compact-review-footer{display:none}
+ .compact-review-v2.compact-review-editing:has(.inline-math-editor:focus-within) .compact-review-header{gap:3px}
+ .persistent-work .phone-work-running-title{display:flex;align-items:center;gap:9px}
+ .persistent-work .phone-work-spinner{display:inline-block;width:15px;height:15px;min-width:15px;border:1.5px solid var(--line);border-top-color:var(--accent);border-right-color:var(--accent);border-radius:50%;animation:phone-work-spin .85s linear infinite;flex:none!important;box-sizing:border-box}
+ .persistent-work .phone-work-spinner.small{width:13px;height:13px;min-width:13px}
+ .persistent-work .phone-agent-trace summary{min-height:34px}
+ @keyframes phone-work-spin{to{transform:rotate(360deg)}}
+ @media(prefers-reduced-motion:reduce){.persistent-work .phone-work-spinner{animation:none}}
+}
