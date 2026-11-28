@@ -971,7 +971,11 @@ with sync_playwright() as p:
                 preview.get_by_role("button",name="放大 PDF").click()
                 expect(preview.get_by_role("button",name="150%")).to_be_visible()
                 preview.get_by_role("button",name="关闭预览").click()
-            page.get_by_role("button",name="资料与识别").first.click()
+            if GROUP=="mobile":
+                page.get_by_role("button",name="更多选项",exact=True).click()
+                page.get_by_role("button",name="查看资料与识别",exact=True).click()
+            else:
+                page.get_by_role("button",name="资料与识别").first.click()
             expect(page.locator(".agent-manual")).to_be_visible()
             expect(page.locator(".agent-workspace-body")).to_have_attribute("data-panel-open","true")
             expect(page.locator(".agent-workspace-panel")).to_be_visible()
