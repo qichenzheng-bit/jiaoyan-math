@@ -1330,6 +1330,17 @@ with sync_playwright() as p:
                 page.get_by_role("button",name="通过并继续",exact=True).click()
                 expect(page.get_by_text("本批审核完成",exact=True)).to_be_visible()
                 assert compact_row["items"][0]["primary_knowledge_tag"]=="连续函数"
+                expect(page.get_by_role("heading",name="整体预览",exact=True)).to_be_visible()
+                page.get_by_role("button",name="新建来源",exact=True).click()
+                page.route("**/api/intelligence/jobs/compact-single/direct-register",lambda route:route.fulfill(json={"document_id":"registered-doc","source_id":"source-test","source_title":"测试来源","total":1,"counts":{"question_create":1,"question_reuse":0}}))
+                try:
+                    with page.expect_request(lambda req:req.url.endswith("/direct-register") and req.method=="POST") as registration:
+                        page.get_by_role("button",name="确认入库（1条）",exact=True).click()
+                    assert registration.value.post_data_json["revision"]==compact_row["revision"]
+                    expect(page.get_by_role("heading",name="入库成功",exact=True)).to_be_visible()
+                finally:
+                    page.unroute("**/api/intelligence/jobs/compact-single/direct-register")
+
             finally:
                 page.unroute("**/api/intelligence/jobs/compact-single",compact_fixture)
             print('UI case: compact phone composition and production navigation',flush=True)

@@ -1508,6 +1508,29 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
             assert created["blocks"][0]["resource_id"]==seed["id"]
             assert created["blocks"][0]["score"]==10
             assert ai_tools.execute("document_read",{"id":created["id"]},db,u)["id"]==created["id"]
+        # The phone final action saves actual bank data and the source in one transaction.
+        from app.models import IntakeJob, TeachingResource
+        from app.api.intelligence import parse_answer
+        direct_items=parse_answer(json.dumps([{"kind":"question","title":"直接入库验证题","subject":"数学分析","question_type":"综合题","difficulty":"中等","content":"求函数 $f(x)=17x^7+23x^5+41x^2+79$ 的导数","answer":"$119x^6+115x^4+82x$","solution":"按幂函数求导公式逐项求导。","knowledge_tags":["求导","幂函数"],"primary_knowledge_tag":"求导","dedup_reason":"独立回归用例"}],ensure_ascii=False))
+        direct_id=str(uuid4())
+        with session_factory()() as db:
+            db.add(IntakeJob(id=direct_id,title="直接入库回归试卷",subject="数学分析",model="Auto",state="review",detail="",input_text="回归用例",items=direct_items,provenance={"single_review":True,"auto_enrichment":True,"reviewed_uids":[direct_items[0]["uid"]]},revision=1,created_at=now(),updated_at=now()))
+            db.commit()
+        direct_url="/api/intelligence/jobs/"+direct_id+"/direct-register"
+        payload={"revision":1,"title":"直接入库回归试卷","source_type":"exam","year":"2026","exam_type":"院校真题"}
+        direct_result=client.post(direct_url,headers=origin,json=payload)
+        assert direct_result.status_code==200,direct_result.text
+        receipt=direct_result.json()
+        assert receipt["total"]==1 and receipt["counts"]["question_create"]==1
+        repeated=client.post(direct_url,headers=origin,json=payload)
+        assert repeated.status_code==200 and repeated.json()==receipt
+        result_doc=client.get("/api/documents/"+receipt["document_id"]).json()
+        assert result_doc["blocks"][0]["kind"]=="reference"
+        assert result_doc["blocks"][0]["resource_id"]
+        with session_factory()() as db:
+            resource=db.get(TeachingResource,result_doc["blocks"][0]["resource_id"])
+            assert resource and resource.difficulty=="中等"
+            assert db.get(IntakeJob,direct_id).provenance["direct_registration"]==receipt
         prefs = {"display_name":"微光数学测试","theme":"dark"}
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
