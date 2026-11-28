@@ -8,7 +8,8 @@
       "泰勒",
       "等价无穷小"
     ],
-    "status": "inherited_unverified"
+    "status": "inherited_unverified",
+    "scope": "question"
   },
   {
     "id": "A02",
@@ -19,7 +20,8 @@
       "分部积分",
       "积分计算"
     ],
-    "status": "new_complete_draft_unverified"
+    "status": "new_complete_draft_unverified",
+    "scope": "question"
   },
   {
     "id": "A03",
@@ -32,7 +34,8 @@
       "函数图像",
       "二重积分"
     ],
-    "status": "inherited_unverified"
+    "status": "inherited_unverified",
+    "scope": "question"
   },
   {
     "id": "A04",
@@ -44,7 +47,8 @@
       "初等行变换",
       "逆矩阵"
     ],
-    "status": "inherited_unverified"
+    "status": "inherited_unverified",
+    "scope": "question"
   },
   {
     "id": "A05",
@@ -56,7 +60,8 @@
       "齐次方程",
       "零空间"
     ],
-    "status": "new_complete_draft_unverified"
+    "status": "new_complete_draft_unverified",
+    "scope": "question"
   },
   {
     "id": "A06",
@@ -67,7 +72,8 @@
       "选择题",
       "随机变量"
     ],
-    "status": "inherited_unverified"
+    "status": "inherited_unverified",
+    "scope": "question"
   },
   {
     "id": "A07",
@@ -79,7 +85,8 @@
       "样本均值",
       "统计量"
     ],
-    "status": "new_complete_draft_unverified"
+    "status": "new_complete_draft_unverified",
+    "scope": "question"
   },
   {
     "id": "A08",
@@ -92,7 +99,8 @@
       "量词",
       "收敛"
     ],
-    "status": "new_complete_draft_unverified"
+    "status": "new_complete_draft_unverified",
+    "scope": "question"
   },
   {
     "id": "A09",
@@ -105,7 +113,8 @@
       "直和",
       "证明"
     ],
-    "status": "new_complete_draft_unverified"
+    "status": "new_complete_draft_unverified",
+    "scope": "question"
   },
   {
     "id": "A10",
@@ -116,7 +125,8 @@
       "证明",
       "综合题"
     ],
-    "status": "inherited_unverified"
+    "status": "inherited_unverified",
+    "scope": "question"
   },
   {
     "id": "B01",
@@ -129,7 +139,8 @@
       "综合题",
       "思维引导"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B02",
@@ -141,7 +152,8 @@
       "小问",
       "证明"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B03",
@@ -153,7 +165,8 @@
       "思路",
       "综合"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B04",
@@ -164,7 +177,8 @@
       "分类",
       "分段函数"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B05",
@@ -176,7 +190,8 @@
       "推导",
       "计算"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B06",
@@ -188,7 +203,8 @@
       "积分",
       "推导"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B07",
@@ -200,7 +216,8 @@
       "并行",
       "三重积分"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B08",
@@ -212,7 +229,8 @@
       "逆矩阵",
       "行变换"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B09",
@@ -224,7 +242,8 @@
       "矩阵",
       "符号"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B10",
@@ -236,7 +255,8 @@
       "几何",
       "坐标"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B11",
@@ -248,7 +268,8 @@
       "积分区域",
       "几何"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B12",
@@ -260,7 +281,8 @@
       "外常内变",
       "扫描"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B13",
@@ -272,7 +294,8 @@
       "连续推导",
       "复杂计算"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B14",
@@ -284,7 +307,8 @@
       "综合",
       "多小问"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B15",
@@ -295,7 +319,8 @@
       "综合题",
       "证明"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B16",
@@ -306,7 +331,8 @@
       "选项",
       "单选"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B17",
@@ -318,7 +344,8 @@
       "结论",
       "选择题"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B18",
@@ -330,7 +357,8 @@
       "变式",
       "易错"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "question"
   },
   {
     "id": "B19",
@@ -342,7 +370,8 @@
       "曲面",
       "三维"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "B20",
@@ -354,7 +383,8 @@
       "高等代数",
       "量词"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C01",
@@ -364,7 +394,8 @@
       "代码",
       "场景"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C02",
@@ -375,7 +406,8 @@
       "字幕",
       "读题"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C03",
@@ -387,7 +419,8 @@
       "矩阵",
       "积分"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C04",
@@ -398,7 +431,8 @@
       "公式",
       "题干"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C05",
@@ -409,7 +443,8 @@
       "布局",
       "长公式"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C06",
@@ -421,7 +456,8 @@
       "布局",
       "字幕"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C07",
@@ -432,7 +468,8 @@
       "布局",
       "检查"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C08",
@@ -444,7 +481,8 @@
       "扫描",
       "曲线"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C09",
@@ -456,7 +494,8 @@
       "ln",
       "多音字"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C10",
@@ -467,7 +506,8 @@
       "跨幕",
       "图像"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C11",
@@ -479,7 +519,8 @@
       "积分",
       "图像"
     ],
-    "status": "reference_snippet_unverified"
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
   },
   {
     "id": "C12",
@@ -491,6 +532,287 @@
       "卡片",
       "辅助组件"
     ],
+    "status": "reference_snippet_unverified",
+    "scope": "shared"
+  },
+  {
+    "id": "D01",
+    "path": "knowledge/with_proof/D01.md",
+    "keywords": [
+      "拉格朗日",
+      "中值定理",
+      "辅助函数",
+      "罗尔"
+    ],
+    "kind": "complete",
+    "scope": "with_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "D02",
+    "path": "knowledge/with_proof/D02.md",
+    "keywords": [
+      "分部积分",
+      "积分公式",
+      "乘积求导"
+    ],
+    "kind": "complete",
+    "scope": "with_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "D03",
+    "path": "knowledge/with_proof/D03.md",
+    "keywords": [
+      "矩阵可逆",
+      "齐次方程",
+      "行列式",
+      "满秩"
+    ],
+    "kind": "complete",
+    "scope": "with_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "D04",
+    "path": "knowledge/with_proof/D04.md",
+    "keywords": [
+      "全概率",
+      "条件概率",
+      "完备事件组"
+    ],
+    "kind": "complete",
+    "scope": "with_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "D05",
+    "path": "knowledge/with_proof/D05.md",
+    "keywords": [
+      "数列极限",
+      "唯一性",
+      "反证法",
+      "量词"
+    ],
+    "kind": "complete",
+    "scope": "with_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "D06",
+    "path": "knowledge/with_proof/D06.md",
+    "keywords": [
+      "秩零化度",
+      "线性映射",
+      "核",
+      "像",
+      "高等代数"
+    ],
+    "kind": "complete",
+    "scope": "with_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "E01",
+    "path": "knowledge/without_proof/E01.md",
+    "keywords": [
+      "无穷小量",
+      "函数极限",
+      "定义"
+    ],
+    "kind": "complete",
+    "scope": "without_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "E02",
+    "path": "knowledge/without_proof/E02.md",
+    "keywords": [
+      "等价无穷小",
+      "替换",
+      "极限"
+    ],
+    "kind": "complete",
+    "scope": "without_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "E03",
+    "path": "knowledge/without_proof/E03.md",
+    "keywords": [
+      "行列式",
+      "交换行",
+      "倍加",
+      "矩阵"
+    ],
+    "kind": "complete",
+    "scope": "without_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "E04",
+    "path": "knowledge/without_proof/E04.md",
+    "keywords": [
+      "正态分布",
+      "概率密度",
+      "标准化",
+      "随机变量"
+    ],
+    "kind": "complete",
+    "scope": "without_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "E05",
+    "path": "knowledge/without_proof/E05.md",
+    "keywords": [
+      "一致连续",
+      "连续",
+      "量词",
+      "数学分析"
+    ],
+    "kind": "complete",
+    "scope": "without_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "E06",
+    "path": "knowledge/without_proof/E06.md",
+    "keywords": [
+      "线性相关",
+      "线性无关",
+      "向量组",
+      "高等代数"
+    ],
+    "kind": "complete",
+    "scope": "without_proof",
+    "status": "new_complete_draft_unverified"
+  },
+  {
+    "id": "F01",
+    "path": "knowledge/teaching/F01.md",
+    "keywords": [
+      "自然引入",
+      "定义",
+      "知识单元"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F02",
+    "path": "knowledge/teaching/F02.md",
+    "keywords": [
+      "定理",
+      "条件",
+      "中值"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F03",
+    "path": "knowledge/teaching/F03.md",
+    "keywords": [
+      "定义",
+      "量词",
+      "极限",
+      "一致连续"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F04",
+    "path": "knowledge/teaching/F04.md",
+    "keywords": [
+      "反例",
+      "条件",
+      "罗尔",
+      "辨析"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F05",
+    "path": "knowledge/teaching/F05.md",
+    "keywords": [
+      "辅助函数",
+      "证明",
+      "中值定理"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F06",
+    "path": "knowledge/teaching/F06.md",
+    "keywords": [
+      "高等代数",
+      "线性映射",
+      "基",
+      "证明"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F07",
+    "path": "knowledge/teaching/F07.md",
+    "keywords": [
+      "分类",
+      "绝对值",
+      "分段",
+      "性质"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F08",
+    "path": "knowledge/teaching/F08.md",
+    "keywords": [
+      "向量",
+      "线性相关",
+      "抽象",
+      "核"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F09",
+    "path": "knowledge/teaching/F09.md",
+    "keywords": [
+      "应用",
+      "关联题",
+      "例题",
+      "分部积分"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "F10",
+    "path": "knowledge/teaching/F10.md",
+    "keywords": [
+      "总结",
+      "证明",
+      "方法",
+      "易错"
+    ],
+    "kind": "teaching",
+    "scope": "knowledge",
     "status": "reference_snippet_unverified"
   }
 ]
