@@ -98,3 +98,8 @@ def test_coverage_checks_explicit_exam_labels_and_unreadable_stems():
     with pytest.raises(ValueError,match="遗漏题号"):validate_question_coverage("第1题：极限\n第2题：积分",items)
     with pytest.raises(ValueError,match="未识别"):validate_question_coverage("普通题目",[{**items[0],"content":"【无法辨认】"}])
     validate_question_coverage("第1题：极限\n解：\n1. 代入",items)
+
+
+def test_coverage_accepts_explicit_dotted_title():
+    from app.api.intelligence import validate_question_coverage
+    validate_question_coverage("习题29.1 求极限",[{"kind":"question","title":"29.1 求极限","content":"求极限"}])

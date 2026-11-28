@@ -302,3 +302,10 @@ def test_native_interrupt_only_at_safe_tool_boundary(monkeypatch):
     proc.send_signal.assert_called_once_with(worker.signal.SIGUSR1)
     assert worker.agent_interrupt(ident)[0]==200
     assert proc.send_signal.call_count==1
+
+
+def test_native_interrupt_pipe_read_is_cancellable():
+    import ast
+    ast.parse(worker.SDK_AGENT_SCRIPT)
+    assert "await reader.readline()" in worker.SDK_AGENT_SCRIPT
+    assert "asyncio.to_thread(sys.stdin.readline)" not in worker.SDK_AGENT_SCRIPT

@@ -464,9 +464,14 @@ def retry(db,s,r,user):
     if video_waiting(r):
         r.update(state="running",phase="native_video_wait",phase_at=now(),detail="恢复原视频任务状态，不重复生成")
         wa.save(db,s,r);db.commit();return wa.public(r)
+    resume=r.get("native_session") or r.get("native_resume")
+    # Recover the latest original/amended user intent, not merely a generic
+    # "continue" if the SDK did not persist the last failed turn.
+    instruction=r["instruction"]+"\n"+"\n".join(x["text"] for x in r.get("amendments",[]))
+    if resume:instruction="继续未完成的工作，核对实际成果，不重复创建。\n用户原始及追加要求：\n"+instruction
     r.update(state="running",phase="pending",phase_at=now(),model_job=str(uuid4()),attempts=0,native_interrupt_requested=False,detail="恢复原生Agent会话",
-        native_resume=r.get("native_session") or r.get("native_resume"),
-        native_prompt=user_prompt(db,s,"继续未完成的工作，核对实际成果，不要重复创建。") if r.get("native_session") else user_prompt(db,s,r["instruction"]))
+        native_resume=resume,native_amendment_count=len(r.get("amendments",[])),native_answer="",
+        native_prompt=user_prompt(db,s,instruction,r.get("amendments",[{}])[-1].get("selected_id") if r.get("amendments") else None))
     wa.save(db,s,r);audit(db,"work.native.retry",user.id);db.commit()
     return wa.public(r)
 
@@ -480,7 +485,12 @@ def tick(db,s,r,user):
         fail(db,s,r,"原生Agent执行超时，保留已完成成果");return
     if r["phase"]=="pending":
         if pending_amendments(r) and not r.get("attempts"):
-            next_amended_turn(db,s,r);wa.save(db,s,r);db.commit()
+            # This pending message has not been delivered, even if it resumes
+            # a prior native session. Keep that entire unsent user request.
+            additional=pending_amendments(r)
+            r["native_prompt"]+="\n【最新追加要求，后者优先】\n"+user_prompt(db,s,"\n".join(x["text"] for x in additional),additional[-1].get("selected_id"))
+            r["native_amendment_count"]=len(r.get("amendments",[]))
+            wa.save(db,s,r);db.commit()
         try:qoder.request("POST","/agent/start",{"id":r["model_job"],"workspace":s.id,"owner":user.id,
             "session_id":r["model_job"],"resume":r.get("native_resume"),"model":r["model"],
             "effort":r["effort"],"prompt":r["native_prompt"],"system":r["native_system"],"tools":tools()})

@@ -127,8 +127,8 @@ def validate_question_coverage(text,items):
         title=str(item.get("title","")).strip()
         explicit=re.match(r"^(?:习题\s*|第\s*)?(\d+(?:\.\d+)*)(?:\s*题)?(?:$|[\s：:、.．])",number)
         if explicit:found.add(explicit.group(1))
-        header=re.match(r"^(?:习题\s*(\d+(?:\.\d+)+)\b|第\s*(\d+)\s*题)",title)
-        if header:found.add(header.group(1) or header.group(2))
+        header=re.match(r"^(?:习题\s*(\d+(?:\.\d+)+)\b|第\s*(\d+)\s*题|(\d+(?:\.\d+)+)(?:\s|$|[：:、]))",title)
+        if header:found.add(header.group(1) or header.group(2) or header.group(3))
     missing=expected-found
     if missing:raise ValueError("遗漏题号："+", ".join(sorted(missing)))
 

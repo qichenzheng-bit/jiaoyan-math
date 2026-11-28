@@ -780,6 +780,10 @@ def emit(value):
 
 async def main():
     cfg=json.loads(sys.stdin.readline())
+    # Nonblocking pipe reads are cancellable; do not strand an executor thread
+    # waiting on stdin if an MCP call and an interrupt race.
+    reader=asyncio.StreamReader(limit=13*1024*1024)
+    transport,_=await asyncio.get_running_loop().connect_read_pipe(lambda:asyncio.StreamReaderProtocol(reader),sys.stdin.buffer)
     serial=asyncio.Lock()
     interrupt_requested=False
     def define(spec):
@@ -788,7 +792,7 @@ async def main():
                 if interrupt_requested:return {"is_error":True,"content":[{"type":"text","text":"当前轮已被用户新指令中断，未执行工具。"}]}
                 ident=str(uuid4())
                 emit({"type":"call","id":ident,"name":spec["name"],"args":args})
-                line=await asyncio.to_thread(sys.stdin.readline)
+                line=await reader.readline()
                 if not line:raise RuntimeError("host disconnected")
                 result=json.loads(line)
                 if result.get("id")!=ident:raise RuntimeError("host result mismatch")
@@ -838,34 +842,39 @@ async def main():
             loop.add_signal_handler(signal.SIGUSR1,request_interrupt)
         await client.query(cfg["prompt"])
         if callable(getattr(client,"interrupt",None)):emit({"type":"interrupt_ready"})
-        async for message in client.receive_response():
-            event=getattr(message,"event",None)
-            if isinstance(event,dict):
-                if event.get("type")=="message_start":emit({"type":"stream_start"})
-                elif event.get("type")=="content_block_delta" and event.get("delta",{}).get("type")=="text_delta":
-                    emit({"type":"stream_delta","text":event["delta"].get("text","")})
-            if isinstance(message,SystemMessage) and message.subtype=="init":
-                emit({"type":"session","session_id":message.data.get("session_id") or cfg.get("resume") or cfg["session_id"]})
-            if isinstance(message,AssistantMessage):
-                answer="\n".join(block.text for block in message.content if isinstance(block,TextBlock))
-                if answer:emit({"type":"assistant","answer":answer[:48000]})
-            if isinstance(message,SDKMirrorErrorMessage):
-                emit({"type":"mirror_error"})
-            if isinstance(message,ResultMessage):
-                final={"type":"result","success":message.subtype=="success","answer":message.result or "",
-                      "session_id":message.session_id}
-                break
+        try:
+            async for message in client.receive_response():
+                event=getattr(message,"event",None)
+                if isinstance(event,dict):
+                    if event.get("type")=="message_start":emit({"type":"stream_start"})
+                    elif event.get("type")=="content_block_delta" and event.get("delta",{}).get("type")=="text_delta":
+                        emit({"type":"stream_delta","text":event["delta"].get("text","")})
+                if isinstance(message,SystemMessage) and message.subtype=="init":
+                    emit({"type":"session","session_id":message.data.get("session_id") or cfg.get("resume") or cfg["session_id"]})
+                if isinstance(message,AssistantMessage):
+                    answer="\n".join(block.text for block in message.content if isinstance(block,TextBlock))
+                    if answer:emit({"type":"assistant","answer":answer[:48000]})
+                if isinstance(message,SDKMirrorErrorMessage):
+                    emit({"type":"mirror_error"})
+                if isinstance(message,ResultMessage):
+                    final={"type":"result","success":message.subtype=="success","answer":message.result or "",
+                          "session_id":message.session_id}
+                    break
+        except Exception:
+            if not interrupt_requested:raise
+            # The SDK may end an interrupted stream with an error instead of Result.
+            # Only a confirmed native interrupt permits recovery of the next turn.
+            if not interrupt_task:raise
         if interrupt_task:
-            try:
-                await interrupt_task
-                emit({"type":"interrupted"})
-            except Exception:pass
+            await interrupt_task
+            emit({"type":"interrupted"})
         if memory_info.get("enabled") and final and final["success"] and not interrupt_requested:
             try:
                 await client.flush_memory()
                 emit({"type":"memory_flush","state":"flushed"})
             except Exception:
                 emit({"type":"memory_flush","state":"failed"})
+    transport.close()
     # Emit final only after the SDK has closed/drained transcript writes.
     emit(final or {"type":"result","success":False,"answer":""})
 
