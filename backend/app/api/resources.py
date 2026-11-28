@@ -481,7 +481,7 @@ def recorded_merge_plan(db,body,lock=False):
     target=body.target.strip()
     names=sorted(set(n.strip() for n in body.names if n.strip() and n.strip()!=target))
     if not subject or not names or not target or any(len(n)>60 for n in names):
-        raise HTTPException(422,"请选择同学科的知识点并填写有效目标名称")
+        raise HTTPException(422,"请选择同学科的知识标签并填写有效目标名称")
     stmt=select(TeachingResource).where(TeachingResource.kind.in_(("question","knowledge")),
         TeachingResource.archived==False,TeachingResource.subject==subject,
         or_(*(cast(TeachingResource.tags,JSONB).contains([n]) for n in names))).order_by(TeachingResource.id).limit(2001)

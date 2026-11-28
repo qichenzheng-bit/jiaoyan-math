@@ -317,7 +317,7 @@ def statistics_export(body:StatisticsReport,db:Session=Depends(get_db)):
     writer.writerow(["统计口径","仅已入库题目；零记录不等于未考查；原件总题数未知"])
     writer.writerow(["统计维度",{"year":"年份","institution":"院校或机构","exam_type":"考试类型"}[body.dimension]])
     writer.writerow(["统计范围",csv_cell(json.dumps(body.model_dump(exclude={"limit","offset"}),ensure_ascii=False))])
-    writer.writerow(["分组","来源数","人工确认完成的来源","独立题目数","题目来源关联数","有知识点的题目数","知识点数","指定知识点题目数","指定知识点来源关联数"])
+    writer.writerow(["分组","来源数","人工确认完成的来源","独立题目数","题目来源关联数","有知识标签的题目数","知识标签数","指定知识标签题目数","指定知识标签来源关联数"])
     for r in data["items"]:
         writer.writerow([csv_cell(r["group_name"] or "未确认"),r["source_count"],r["confirmed_complete_sources"],
                          r["question_count"],r["source_question_count"],r["questions_with_knowledge"],r["knowledge_count"],
@@ -402,7 +402,7 @@ def distribution(body:DistributionRequest,db:Session=Depends(get_db)):
     cte,params=statistics_scope(body)
     name=body.knowledge_name.strip()
     if body.dimension=="cooccurrence" and not name:
-        raise HTTPException(422,"请选择知识点")
+        raise HTTPException(422,"请选择知识标签")
     params.update(focus_name=name,focus_subject=body.knowledge_subject)
     focus="""
     , focus AS (

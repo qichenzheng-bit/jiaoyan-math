@@ -2,7 +2,7 @@ export type Module={path:string;name:string;desc:string;icon:string;group:string
 export const modules:Module[]=[
  {path:'/',name:'聊天',desc:'数学答疑与教研工作入口',icon:'home',group:'overview',ready:true},
  {path:'/videos',name:'视频制作',desc:'生成、渲染、微调和归档',icon:'media',group:'production',ready:true},
- {path:'/knowledge-library',name:'知识库',desc:'知识点、公式与方法',icon:'book',group:'resources',ready:true},
+ {path:'/knowledge-library',name:'知识库',desc:'知识单元、公式与方法',icon:'book',group:'resources',ready:true},
  {path:'/chat',name:'AI 助手',desc:'数学答疑、资料检索和智能录入',icon:'chat',group:'overview',ready:true},
  {path:'/original-library',name:'原始资料库',desc:'管理上传的原件、处理进度与回收区',icon:'files',group:'resources',ready:true},
  {path:'/intake',name:'资料录入',desc:'统一手动录入、AI 工作及历史资料',icon:'intake',group:'resources',ready:true},

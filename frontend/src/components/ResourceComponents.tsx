@@ -14,7 +14,7 @@ export function ResourceExcerpt({resource}:{resource:ResourceDisplay}){
 }
 export function ResourceSections({resource,showKnowledge=false,sectionClass='',stemLabel}:{resource:ResourceDisplay;showKnowledge?:boolean;sectionClass?:string;stemLabel?:string}){
  const question=resource.kind==='question'||!!resource.question_type
- const fields:[string,string|undefined][]=[...(!question?([['参考答案',resource.answer],['参考解析',resource.solution],['思路点拨',resource.analysis]] as [string,string|undefined][]):[]),['证明',resource.proof],...(showKnowledge?[['录入知识点',resource.tags?.join('、')] as [string,string|undefined],['关联知识标签',resource.knowledge_points?.map(p=>p.name).join('、')] as [string,string|undefined]]:[])]
+ const fields:[string,string|undefined][]=[...(!question?([['参考答案',resource.answer],['参考解析',resource.solution],['思路点拨',resource.analysis]] as [string,string|undefined][]):[]),['证明',resource.proof],...(showKnowledge?[['知识标签',resource.tags?.join('、')] as [string,string|undefined],['关联知识标签',resource.knowledge_points?.map(p=>p.name).join('、')] as [string,string|undefined]]:[])]
  return <div className="resource-content-sections" key={resource.id}>
   {stemLabel?<details className={sectionClass} open><summary>{stemLabel}</summary><div><MathText content={resource.content||resource.title}/></div></details>:<MathText content={resource.content||resource.title}/>}
   {question&&<AnswerSolutionView value={resource} collapsible defaultExpanded={false}/>}

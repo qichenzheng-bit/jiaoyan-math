@@ -151,7 +151,7 @@ def detail(ident: str, db: Session = Depends(get_db), user: User = Depends(curre
 
 
 def snapshot_questions(snapshot):
-    """Recorded knowledge names and graph tags are distinct. Never read the live bank for a historical work."""
+    """Recorded tag names (legacy knowledge_points field) and graph tag links are distinct. Neither is a knowledge unit. Never read the live bank for a historical work."""
     result = []
     chapter = ""
     for b in snapshot.get("doc", {}).get("blocks", []):

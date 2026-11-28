@@ -257,9 +257,9 @@ register("question_search", "题库精准筛选；返回真实记录及分页信
          ("subject","q","chapter","question_type","difficulty","source_id","source_ids","knowledge_id","knowledge_ids","year_from","year_to","method_name","limit","offset"),
          fixed={"kind":"question","archived":False,"compact":True,"bank_summary":True})
 register("formula_search", "按LaTeX公式结构检索真实候选题；不是数学等价性证明",formula_search,("body",))
-register("knowledge_search", "检索录入的知识点，不是知识标签", resources.listing,
+register("knowledge_search", "检索录入的知识单元，不是知识标签或视频知识点", resources.listing,
          ("subject","q","chapter","unit_type","limit","offset"), fixed={"kind":"knowledge","archived":False})
-register("resource_read", "读取真实题目或知识点及答案解析", resources.read, ("id",))
+register("resource_read", "读取真实题目或知识单元及对应答案解析或证明", resources.read, ("id",))
 register("related_questions", "根据真实题干、解法与标签查询相关题目候选，不代表重复题", documents.related_questions, ("body",))
 register("resource_methods", "读取已有解法", resources.methods, ("id",))
 register("resource_sources", "读取题目来源", resources.list_sources, ("id",))
@@ -268,7 +268,7 @@ register("tag_neighbors", "读取知识标签关联", knowledge.tag_neighbors, (
 register("source_search", "检索来源记录", resources.listing, ("q","subject","exam_type","source_type","catalog_institution","catalog_year","limit","offset"), fixed={"kind":"source","archived":False})
 register("source_read", "读取来源信息", source_catalog.read, ("id",))
 register("source_questions", "读取指定来源的题目", bank_work.source_questions, ("id","offset","limit"))
-register("source_statistics", "按来源、年份、院校等统计实际已录入知识点", source_catalog.statistics, ("body",))
+register("source_statistics", "按来源、年份、院校等统计题目实际附带的知识标签", source_catalog.statistics, ("body",))
 register("original_search", "查询原始资料库与识别进度", workspaces.library, ("q","limit","offset"), fixed={"archived":False})
 register("original_read", "读取单页原图（AI视觉）或文本段；多页/试卷录入必须使用recognize流程", read_original, ("body",))
 register("history_search", "按关键词查询历史聊天及工作记录", history_search, ("body",))
@@ -293,7 +293,7 @@ register("cover_search", "读取已保存的封面作品目录",studio.listing,(
 register("checkin_state", "查询实际签到状态", qiandao.status)
 register("model_catalog", "查询模型及推理强度", qoder.models)
 register("model_usage", "查询模型实际额度", qoder.usage)
-register("selection_create", "从已存在题目或知识点创建试卷、讲义或教材草稿；不改原资源", create_selection,
+register("selection_create", "从已存在题目或知识单元创建试卷、讲义或教材草稿；不改原资源", create_selection,
          ("body",), write=True)
 register("book_create", "创建教材或章节式讲义草稿", documents.create_book, ("body",), write=True)
 register("chapter_create", "在指定教材中新增章节", documents.create_chapter, ("id","body"), write=True)

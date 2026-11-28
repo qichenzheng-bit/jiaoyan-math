@@ -122,11 +122,11 @@ def tools():
     rows.extend([
         detail_tool(),
         {"name":"native_batch_context","description":"读取当前附件已有批次真实转录、已整理题目及审核状态，支持分段读取；继续识别前用于核对跨页衔接、避免重复题，亦可读取已核对的参考资料。只读，不改变原件或进度。","parameters":BatchContext.model_json_schema(),"write":False},
-        {"name":"native_text_review","description":"将用户直接提供的文字或明确要求创作的题目整理为待人工审核草稿。只能用于纯文字任务；不得代替附件原件读取，不冒充原始文献，不正式入库。items含题干、答案解析、知识标签等结构化内容。","parameters":TextDraft.model_json_schema(),"write":True},
+        {"name":"native_text_review","description":"将用户直接提供的文字或明确要求创作的题目整理为待人工审核草稿。只能用于纯文字任务；不得代替附件原件读取，不冒充原始文献，不正式入库。items含题目或知识单元的结构化内容；知识单元正文与原文证明分开，无证明留空；知识标签为附加分类标注。","parameters":TextDraft.model_json_schema(),"write":True},
         {"name":"native_workspace","description":"读取当前会话全部原始资料、实际页数或段数、既有批次、审核任务ID和进度。可用于继续或重新识别。","parameters":{"type":"object","properties":{},"additionalProperties":False},"write":False},
         {"name":"native_attach","description":"将用户指定的资料库真实文件ID关联到当前工作会话。连续图片可明确合并为PDF。不会删除原件。","parameters":AttachmentRequest.model_json_schema(),"write":True},
         {"name":"native_page","description":"读取当前工作会话附件的原始图片、PDF物理页、Word段落或文本。Word先读取段落正文及图片数量，再用image_index逐张读取原图。图像作为原始视觉内容返回，不另起AI调用。","parameters":Page.model_json_schema(),"write":False},
-        {"name":"native_intake_review","description":"将已读齐的连续原文页及完整题目创建为待人工审核的录入草稿；不正式入库；重做未审核旧批次时需旧任务ID和revision，保留原版本。pages为逐页忠实转录，items为题目或知识点，题目应含kind/title/content/answer/solution/subject/original_question_number/knowledge_tags/primary_knowledge_tag及可选source_pages。多资料匹配须填写reference_pages及reference_fields（item_index从0开始），参考值必须为真实连续原文；AI生成的答案解析用generated_fields标记。跨批次先查native_batch_context；未完成边界题不可伪装完整，用户授权的范围内可扩大未审核旧批次，但每批最多10页。","parameters":Draft.model_json_schema(),"write":True},
+        {"name":"native_intake_review","description":"将已读齐的连续原文页及完整题目创建为待人工审核的录入草稿；不正式入库；重做未审核旧批次时需旧任务ID和revision，保留原版本。pages为逐页忠实转录，items为题目或知识单元；知识单元应含kind=knowledge/title/unit_type/subject/chapter/content/proof/knowledge_tags，正文完整保留原文条件和结论，proof仅保存真实原文证明或推导，无证明留空，不生成证明，跨页未读完不得提交为完整知识单元；知识标签仅为分类标注，视频讲授内容才叫知识点。题目应含kind/title/content/answer/solution/subject/original_question_number/knowledge_tags/primary_knowledge_tag及可选source_pages。多资料匹配须填写reference_pages及reference_fields（item_index从0开始），参考值必须为真实连续原文；AI生成的答案解析用generated_fields标记。跨批次先查native_batch_context；未完成边界题不可伪装完整，用户授权的范围内可扩大未审核旧批次，但每批最多10页。","parameters":Draft.model_json_schema(),"write":True},
     ])
     return rows
 

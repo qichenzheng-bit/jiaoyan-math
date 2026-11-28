@@ -263,7 +263,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
      <label>页眉<input maxLength={200} value={layout.header} onChange={e=>patch({header:e.target.value})}/></label>
      <label>页脚<input maxLength={200} value={layout.footer} onChange={e=>patch({footer:e.target.value})}/></label>
      <small>支持文档名称、科目、当前章名、当前页码、总页数占位符。</small>
-     {doc.kind!=='paper'&&<label className="layout-check"><input type="checkbox" checked={layout.knowledgeIndex} onChange={e=>patch({knowledgeIndex:e.target.checked})}/>生成知识点索引（只索引正式知识点）</label>}
+     {doc.kind!=='paper'&&<label className="layout-check"><input type="checkbox" checked={layout.knowledgeIndex} onChange={e=>patch({knowledgeIndex:e.target.checked})}/>生成知识单元索引（只索引正式知识单元）</label>}
      <label className="layout-check"><input type="checkbox" checked={layout.toc} onChange={e=>patch({toc:e.target.checked})}/>生成目录</label>
      {layout.toc&&<label>目录层级<select value={layout.tocDepth} onChange={e=>patch({tocDepth:Number(e.target.value) as Layout['tocDepth']})}>{[1,2,3,4,5,6].map(n=><option key={n}>{n}</option>)}</select></label>}
      <label className="layout-check"><input type="checkbox" checked={layout.chapterNewPage} onChange={e=>patch({chapterNewPage:e.target.checked})}/>章标题另起一页</label>
@@ -287,7 +287,7 @@ export default function DocumentPrint({source=false}:{source?:boolean}){
  </div>
 }
 
-const roleNames:Record<Role,string>={normal:'',knowledge:'知识点',definition:'定义',theorem:'定理',lemma:'引理',corollary:'推论',proof:'证明',example:'例',exercise:'练习',method:'方法',warning:'易错点',summary:'小结'}
+const roleNames:Record<Role,string>={normal:'',knowledge:'知识单元',definition:'定义',theorem:'定理',lemma:'引理',corollary:'推论',proof:'证明',example:'例',exercise:'练习',method:'方法',warning:'易错点',summary:'小结'}
 function effective(b:Block):Content{
  const v={...(b.snapshot??b)}
  for(const field of b.local_fields??[])v[field]=b[field]

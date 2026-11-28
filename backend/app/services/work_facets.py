@@ -1,4 +1,4 @@
-"""Search metadata captured from a validated export snapshot, not live detail queries."""
+"""Search metadata captured from a validated export snapshot, not live detail queries. Legacy knowledge_points stores recorded tag names, not knowledge units or video teaching points."""
 from sqlalchemy import select
 from app.models import TeachingResource, ResourceSourceLink, SourceCatalogDetail
 
