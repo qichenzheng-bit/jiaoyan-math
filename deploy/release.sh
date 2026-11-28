@@ -96,6 +96,13 @@ if [[ -n "$before" ]]; then
   fi
 fi
 systemctl --user stop jiaoyan.service
+# The main service is stopped before checking engine jobs; no new jobs can be
+# submitted through the application during the bounded upgrade window.
+if ! "$release/venv/bin/python" "$release/deploy/auto-video-overlay.py" "$release"; then
+  echo "Video overlay not upgraded; previous application release remains active."
+  if [[ -n "$old" ]]; then systemctl --user start jiaoyan.service; fi
+  exit 1
+fi
 migrated=false
 if (cd "$release/backend" && "$release/venv/bin/python" -m alembic upgrade head); then
   migrated=true
