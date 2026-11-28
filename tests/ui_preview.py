@@ -1013,6 +1013,25 @@ with sync_playwright() as p:
                 finally:
                     page.unroute("**/api/workspaces/agent-work-demo/agent",single_review_agent)
 
+            if GROUP=="mobile":
+                def native_work_preview(route):
+                    route.fulfill(json={"id":"native-phone","instruction":"识别资料","model":"Auto","effort":"medium","state":"running","auto":True,"native":True,"detail":"正在执行","native_answer":"## 识别结果\n\n| 题号 | 页码 |\n| --- | --- |\n| 29.1 | 1 |","steps":[{"id":"page-1","tool":"native_page","state":"done","detail":"内部工具说明","result":{"file_id":"agent-pdf","page":1}},{"id":"page-2","tool":"native_page","state":"done","detail":"内部工具说明","result":{"file_id":"agent-pdf","page":2}}]})
+                page.route("**/api/workspaces/agent-work-demo/agent",native_work_preview)
+                try:
+                    visit(page,"/work?workspace=agent-work-demo",".phone-agent-trace")
+                    expect(page.locator(".rich-reply table")).to_be_visible()
+                    expect(page.get_by_role("button",name="停止工作",exact=True)).to_have_count(1)
+                    expect(page.get_by_role("button",name="发送给 AI",exact=True)).to_have_count(0)
+                    expect(page.locator(".phone-agent-trace")).not_to_have_attribute("open","")
+                    page.locator(".phone-agent-trace>summary").click()
+                    expect(page.get_by_text("读取原图或正文 × 2",exact=True)).to_be_visible()
+                    expect(page.get_by_text("内部工具说明",exact=True)).to_have_count(0)
+                    page.get_by_label("继续识别指令").fill("保留原文")
+                    expect(page.get_by_role("button",name="发送给 AI",exact=True)).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+                finally:
+                    page.unroute("**/api/workspaces/agent-work-demo/agent",native_work_preview)
+
             visit(page,"/work?job=review-agent-match&review=1&fromWorkspace=agent-work-demo",".agent-reference-match")
             expect(page.locator(".agent-reference-match")).to_contain_text("匹配字段：答案")
             expect(page.get_by_label("计划参考批次")).to_have_value("reference-batch")

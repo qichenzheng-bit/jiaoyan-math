@@ -47,3 +47,13 @@ def test_fill_blanks_and_no_guessed_split():
 
 def test_legacy_text_and_structure_conflict_is_not_silent():
     with pytest.raises(ValidationError):Block(uid="x",kind="question",title="题",content="原题",question_data={"stem":"其他题"})
+
+
+def test_formula_number_reference_in_solution_keeps_original_text():
+    content="已知函数\n(1) 证明\n(2) 求值"
+    answer="(1) 成立\n(2) 1"
+    solution="(1) 证明：如下\n(1)式可知结论成立。\n(2) 解：由上式得到1"
+    data=derive(content,answer,solution,"综合题")
+    assert len(data.subquestions)==2
+    assert "(1)式可知" in data.subquestions[0].methods[0].body
+    assert data.subquestions[1].answer=="1"

@@ -127,6 +127,7 @@ def tick():
                     fail(db,s,dict(r),exc.detail)
         except Exception:
             log.exception("AI work scheduler tick failed")
+    return bool(ids)
 
 
 def chat_tick():
@@ -149,8 +150,10 @@ async def work_loop():
     if os.environ.get("WG_AI_WORK_SCHEDULER")=="0":return
     await asyncio.sleep(3)
     while True:
+        active=False
         try:
             await asyncio.to_thread(chat_tick)
-            await asyncio.to_thread(tick)
+            active=await asyncio.to_thread(tick)
         except Exception:log.warning("AI work scheduler temporarily unavailable")
-        await asyncio.sleep(2)
+        # Shorter hand-off between real tool calls while work is active; idle polling is unchanged.
+        await asyncio.sleep(0.5 if active else 2)

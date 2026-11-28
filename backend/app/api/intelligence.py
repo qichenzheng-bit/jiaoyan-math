@@ -69,7 +69,7 @@ def catalog_hint(db,subject="",budget=10000):
         names.append(row);used+=size
     return "\n【已有知识标签候选（仅供准确匹配，不强制复用）】\n"+"\n".join(names)+"\n若存在同科目、含义完全相同的标签，优先输出其正式名称；否则生成准确新标签。" if names else ""
 
-def tag_draft(db,item):
+def tag_draft(db,item,cache=None):
     """Resolve names/unique aliases within the subject; do not create catalog rows."""
     from app.api.knowledge import norm
     subject=normalize_subject(item.get("subject") or "")
@@ -78,12 +78,18 @@ def tag_draft(db,item):
         name=raw.strip()
         if not name or len(name)>60:continue
         key=norm(name)
-        point=db.scalar(select(KnowledgePointCatalog).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.name_key==key)) if subject else None
-        if point and point.status!="active":point=None
-        elif not point and subject:
-            candidates=list(db.scalars(select(KnowledgePointCatalog).join(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.status=="active",KnowledgeAlias.normalized==key).limit(2)))
-            if len(candidates)==1:point=candidates[0]
-        name=point.name if point else name
+        lookup=(subject,key)
+        if cache is not None and lookup in cache:
+            canonical=cache[lookup]
+        else:
+            point=db.scalar(select(KnowledgePointCatalog).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.name_key==key)) if subject else None
+            if point and point.status!="active":point=None
+            elif not point and subject:
+                candidates=list(db.scalars(select(KnowledgePointCatalog).join(KnowledgeAlias,KnowledgeAlias.knowledge_id==KnowledgePointCatalog.id).where(KnowledgePointCatalog.subject==subject,KnowledgePointCatalog.status=="active",KnowledgeAlias.normalized==key).limit(2)))
+                if len(candidates)==1:point=candidates[0]
+            canonical=point.name if point else None
+            if cache is not None:cache[lookup]=canonical
+        name=canonical or name
         mapping[key]=name
         if name not in names:names.append(name)
     main=mapping.get(norm(item.get("primary_knowledge_tag") or "")) or (names[0] if names else "")

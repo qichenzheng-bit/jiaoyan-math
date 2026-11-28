@@ -209,3 +209,21 @@ def test_corrected_draft_recovers_only_same_rejected_source_batch():
     assert rejected["state"]=="recovered" and rejected["resolved_by"]=="new"
     assert different["state"]==uncertain["state"]=="failed"
     n.complete_turn({"steps":[rejected,success]},"完成")
+
+
+def test_tag_draft_cache_reuses_exact_subject_lookup(monkeypatch):
+    from app.api import intelligence as ai
+    from types import SimpleNamespace
+    class DB:
+        calls=0
+        def scalar(self,stmt):
+            self.calls+=1
+            return SimpleNamespace(status="active",name="极限")
+    db=DB()
+    item={"kind":"question","subject":"高等数学","knowledge_tags":["极限"],"primary_knowledge_tag":"极限"}
+    cache={}
+    assert ai.tag_draft(db,item,cache)["knowledge_tags"]==["极限"]
+    assert ai.tag_draft(db,item,cache)["knowledge_tags"]==["极限"]
+    assert db.calls==1
+    ai.tag_draft(db,{**item,"subject":"数学分析"},cache)
+    assert db.calls==2

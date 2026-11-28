@@ -9,6 +9,8 @@ from app.core.solution_methods import parse_methods, format_methods
 CHOICE={"选择题","单选题","多选题"}
 OPTION=re.compile(r"^([A-Z])[.、)]\s+(.*)$")
 SUB=re.compile(r"^[（(]([1-9][0-9]*)[）)]\s*(.*)$")
+# In answer/solution text, a reference to an existing numbered formula is not a new subquestion.
+SUB_RESULT=re.compile(r"^[（(]([1-9][0-9]*)[）)](?!\s*(?:式|中的|中可|所示|所述|可知|可得|得出|成立|的结论|的结果))\s*(.*)$")
 BLANK=r"$\underline{\qquad}$"
 TEXT_FIELDS=("content","answer","solution")
 
@@ -126,7 +128,7 @@ def derive(content,answer,solution,question_type=""):
                 return QuestionData(stem=content,blanks=[Blank(number=i,answer=parsed[1].get(str(i),"") if parsed else "") for i in range(1,count+1)],methods=methods(solution),legacy_digest=mark)
             warnings.append("多空答案对应关系不明确，保留原文待核对")
         return fallback()
-    stem=split_marked(content,SUB);ans=split_marked(answer,SUB);sol=split_marked(solution,SUB)
+    stem=split_marked(content,SUB);ans=split_marked(answer,SUB_RESULT);sol=split_marked(solution,SUB_RESULT)
     if stem and stem[2]:
         keys=stem[2]
         if len(keys)<=30 and keys==[str(i) for i in range(1,len(keys)+1)] and ans and sol and not ans[0].strip() and not sol[0].strip() and set(ans[2]+sol[2])<=set(keys):
