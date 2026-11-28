@@ -170,10 +170,8 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db), user:User
     if row.work_id:
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
-    from app.core.ai_preferences import video_supplement
-    extra=video_supplement(db,user)["text"] if isinstance(user,User) else ""
-    instruction=body.instruction+("\n\n【教学补充要求；当前微调指令优先】\n"+extra if extra else "")
-    if len(instruction)>12000:raise HTTPException(422,"微调要求及教学补充内容过长")
+    # Preserve exact edit scope. The engine inherits the original lesson supplement separately.
+    instruction=body.instruction
     with production_model_lock:
         prepare_model(db,body.effort,body.model)
         return engine.call("POST", f"/videos/{rid}/edits", {"instruction":instruction+"\n\n固定约束：不得修改视频分辨率、帧率、基础渲染配置、语音音色或语速；仅修改指令涉及的教学内容。", "images":[]})

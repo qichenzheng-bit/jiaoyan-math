@@ -9,6 +9,8 @@ LIMIT = 120000
 # Reserve adapter supplement budget (32 KB) and bridge framing.
 RESERVE = 34000
 SEP = "\n\n---\n\n"
+# Adapter binds this to the immutable DB snapshot for the current job.
+JOB_RULES_PROVIDER = lambda: {}
 
 def shared_specs():
     return SEP.join((PROMPTS_DIR / "shared" / name).read_text(encoding="utf-8").strip() for name in SHARED)
@@ -52,14 +54,22 @@ def choose_examples(meta, problem, solution, system, user):
         selected.append({"id": rec["id"], "sha256": hashlib.sha256(content.encode()).hexdigest()})
     return system, selected
 
-def snapshot(source, user, output_dir):
+def capture_rules(meta, problem, solution, user):
+    """Read all necessary rule text once, before the job is committed."""
     shared = shared_specs()
     fixed = entry("manim_teacher.md") + SEP + shared
-    system, selected = choose_examples(source.question_meta, source.problem, source.reference_solution, fixed, user)
-    repair = entry("manim_repair.md") + SEP + shared
-    data = {"version":"v1", "shared_sha256":hashlib.sha256(shared.encode()).hexdigest(),
-            "source_sha256":source.source_sha256, "examples":selected, "system":system,
-            "repair_system":repair, "user_json":user}
+    system, selected = choose_examples(meta, problem, solution, fixed, user)
+    return {"version":"v1", "shared_sha256":hashlib.sha256(shared.encode()).hexdigest(),
+            "examples":selected, "system":system,
+            "repair_system":entry("manim_repair.md") + SEP + shared,
+            "editor_system":entry("manim_editor.md") + SEP + shared}
+
+def snapshot(source, user, output_dir):
+    pinned = JOB_RULES_PROVIDER() or capture_rules(
+        source.question_meta, source.problem, source.reference_solution, user)
+    system = pinned["system"]
+    ensure_budget(system, user)
+    data = {**pinned, "source_sha256":source.source_sha256, "user_json":user}
     target = Path(output_dir) / "prompt_snapshot.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -70,3 +80,14 @@ def repair_system(output_dir, user):
     system = json.loads(target.read_text(encoding="utf-8"))["repair_system"]
     ensure_budget(system, user)
     return system
+
+
+def editor_rules():
+    pinned = JOB_RULES_PROVIDER()
+    if pinned:
+        system = pinned["editor_system"]
+        inherited = pinned.get("inherited_supplement", "")
+        if inherited:
+            system += SEP + "原课已采用的用户教学要求（只用于维持未涉及内容；当前明确微调指令优先，不据此扩大修改范围）：\n" + inherited
+        return system
+    return entry("manim_editor.md") + SEP + shared_specs()

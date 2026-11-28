@@ -64,3 +64,12 @@ def test_opening_does_not_depend_on_exam_provenance():
     assert "不强制开场白" in text
     example = (bundle.PROMPTS_DIR / "examples/teaching/B01_opening.md").read_text()
     assert "郑州大学" not in example
+
+
+def test_job_snapshot_does_not_reread_changed_prompt(monkeypatch,tmp_path):
+    source=SimpleNamespace(question_meta={},problem="题",reference_solution="解析",source_sha256="b"*64)
+    pinned=bundle.capture_rules({},source.problem,source.reference_solution,"题源")
+    monkeypatch.setattr(bundle,"JOB_RULES_PROVIDER",lambda:pinned)
+    monkeypatch.setattr(bundle,"shared_specs",lambda: (_ for _ in ()).throw(AssertionError("reread")))
+    assert bundle.snapshot(source,"题源",tmp_path)==pinned["system"]
+    assert bundle.editor_rules()==pinned["editor_system"]

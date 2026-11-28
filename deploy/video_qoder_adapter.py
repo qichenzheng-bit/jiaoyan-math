@@ -45,6 +45,7 @@ def job_source_context():
 
 def job_supplement():
         value=job_prompt_data()
+        if value.get('kind')=='edit':return ''
         text=value.get('text','') if isinstance(value,dict) else ''
         if not isinstance(text,str) or '\x00' in text or len(text.encode())>PROMPT_LIMIT:
             raise RuntimeError('VIDEO_PROMPT_SNAPSHOT_INVALID')
@@ -56,11 +57,47 @@ def append_supplement(prompt,text):
     return prompt+'\n\n【用户教学补充要求；固定教学规范、题源数学条件、渲染校验及安全限制优先】\n'+text+'\n【补充结束】'
 
 
-def capture_job_add(original):
+def _job_record(db, ident):
+    from sqlalchemy import select
+    from weiguang_backend.core.models import ClientSetting
+    row = db.scalar(select(ClientSetting).where(ClientSetting.key=='jiaoyan:video:prompt:'+ident, ClientSetting.account_id==''))
+    return json.loads(row.value) if row is not None else {}
+
+
+def job_rules():
+    return job_prompt_data().get('rules') or {}
+
+
+def capture_job_add(original, root=None):
     def wrapped(db,lesson,kind,*args,**kwargs):
-        snapshot=_job_prompt.get()
-        if snapshot is None or kind!='generate':return original(db,lesson,kind,*args,**kwargs)
+        if kind not in ('generate','edit'):
+            return original(db,lesson,kind,*args,**kwargs)
         from weiguang_backend.core.models import ClientSetting
+        from weiguang_backend.pipeline import prompt_bundle
+        from weiguang_backend.pipeline.source_assets import lesson_question_meta, prepare_lesson_source
+        snapshot=dict(_job_prompt.get() or {})
+        snapshot['kind']=kind
+        if kind=='generate':
+            meta=lesson_question_meta(lesson)
+            if snapshot.get('source_context'):meta['source_context']=snapshot['source_context']
+            source=prepare_lesson_source(lesson.problem,lesson.reference_solution,lesson.answer or '',meta=meta)
+            user=source.prompt_payload(fps=60)+' '*4096
+            snapshot['rules']=prompt_bundle.capture_rules(source.question_meta,source.problem,source.reference_solution,user)
+        else:
+            prior={}
+            if root is not None:
+                from weiguang_backend.api.storage import resolve_lesson_root
+                from weiguang_backend.api.source_guard import active_scene_folder
+                from animation_engine.code.scene_contract import SceneContract
+                path=active_scene_folder(lesson,resolve_lesson_root(root,lesson.id))/'scene_contract.json'
+                if path.is_file():
+                    ident=SceneContract.read(path).meta.get('prompt_job_id')
+                    if ident:prior=_job_record(db,ident)
+            if prior.get('rules'):
+                snapshot['rules']={**prior['rules'],'inherited_supplement':prior.get('text','')}
+            else:
+                shared=prompt_bundle.shared_specs()
+                snapshot['rules']={'editor_system':prompt_bundle.entry('manim_editor.md')+prompt_bundle.SEP+shared}
         commit=kwargs.pop('commit',True)
         job=original(db,lesson,kind,*args,commit=False,**kwargs)
         db.add(ClientSetting(key='jiaoyan:video:prompt:'+job.id,account_id='',value=json.dumps(snapshot,ensure_ascii=False)))
@@ -240,8 +277,13 @@ def add_prompt_routes(router):
 def create_app():
     global _session_factory,_initializing
     from weiguang_backend.api import routers
-    from weiguang_backend.api.routers import production
+    from weiguang_backend.api.routers import production, edits
     production.job_add=capture_job_add(production.job_add)
+    original_edit_builder=routers.build_edits_router
+    def build_with_edit_snapshot(ctx,exports):
+        edits.job_add=capture_job_add(edits.job_add,ctx.root)
+        return original_edit_builder(ctx,exports)
+    routers.build_edits_router=build_with_edit_snapshot
     original_builder=routers.build_production_router
     def build_with_prompt_routes(ctx,exports):
         return add_prompt_routes(original_builder(ctx,exports))
@@ -252,7 +294,8 @@ def create_app():
     cli_probe.chat_cli_stream = chat_cli_stream
     model_selection.CLI_PROTOCOLS = ("qoder_cli",)
     model_runtime.CLI_PROTOCOLS = ("qoder_cli",)
-    from weiguang_backend.pipeline import source_assets
+    from weiguang_backend.pipeline import source_assets, prompt_bundle
+    prompt_bundle.JOB_RULES_PROVIDER=job_rules
     if hasattr(source_assets,'SOURCE_CONTEXT_PROVIDER'):
         source_assets.SOURCE_CONTEXT_PROVIDER=job_source_context
     from weiguang_backend.main import create_app as upstream
