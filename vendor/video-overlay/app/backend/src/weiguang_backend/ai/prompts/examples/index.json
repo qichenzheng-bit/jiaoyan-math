@@ -11,6 +11,19 @@
     "status": "inherited_unverified"
   },
   {
+    "id": "A03",
+    "path": "complete/A03_graph.md",
+    "kind": "complete",
+    "keywords": [
+      "积分区域",
+      "面积",
+      "数形结合",
+      "函数图像",
+      "二重积分"
+    ],
+    "status": "inherited_unverified"
+  },
+  {
     "id": "A04",
     "path": "complete/A04_matrix.md",
     "kind": "complete",
@@ -30,19 +43,6 @@
       "概率",
       "选择题",
       "随机变量"
-    ],
-    "status": "inherited_unverified"
-  },
-  {
-    "id": "A03",
-    "path": "complete/A03_graph.md",
-    "kind": "complete",
-    "keywords": [
-      "积分区域",
-      "面积",
-      "数形结合",
-      "函数图像",
-      "二重积分"
     ],
     "status": "inherited_unverified"
   },
@@ -71,6 +71,41 @@
     "status": "reference_snippet_unverified"
   },
   {
+    "id": "B02",
+    "path": "teaching/B02_reading.md",
+    "kind": "teaching",
+    "keywords": [
+      "长题干",
+      "选择题",
+      "小问",
+      "证明"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B03",
+    "path": "teaching/B03_guidance.md",
+    "kind": "teaching",
+    "keywords": [
+      "极限",
+      "证明",
+      "思路",
+      "综合"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B04",
+    "path": "teaching/B04_knowledge_classification.md",
+    "kind": "teaching",
+    "keywords": [
+      "绝对值",
+      "分类",
+      "分段函数"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
     "id": "B05",
     "path": "teaching/B05_aligned.md",
     "kind": "teaching",
@@ -79,6 +114,66 @@
       "积分",
       "推导",
       "计算"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B06",
+    "path": "teaching/B06_long_formula.md",
+    "kind": "teaching",
+    "keywords": [
+      "长公式",
+      "泰勒",
+      "积分",
+      "推导"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B07",
+    "path": "teaching/B07_parallel_integrals.md",
+    "kind": "teaching",
+    "keywords": [
+      "分项积分",
+      "多个积分",
+      "并行",
+      "三重积分"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B08",
+    "path": "teaching/B08_matrix.md",
+    "kind": "teaching",
+    "keywords": [
+      "矩阵",
+      "行列式",
+      "逆矩阵",
+      "行变换"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B09",
+    "path": "teaching/B09_error_compare.md",
+    "kind": "teaching",
+    "keywords": [
+      "等价无穷小",
+      "易错",
+      "矩阵",
+      "符号"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B10",
+    "path": "teaching/B10_plot.md",
+    "kind": "teaching",
+    "keywords": [
+      "函数图像",
+      "曲线",
+      "几何",
+      "坐标"
     ],
     "status": "reference_snippet_unverified"
   },
@@ -95,6 +190,133 @@
     "status": "reference_snippet_unverified"
   },
   {
+    "id": "B12",
+    "path": "teaching/B12_integral_scan.md",
+    "kind": "teaching",
+    "keywords": [
+      "二重积分",
+      "积分区域",
+      "外常内变",
+      "扫描"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B13",
+    "path": "teaching/B13_erase.md",
+    "kind": "teaching",
+    "keywords": [
+      "切幕",
+      "长题",
+      "连续推导",
+      "复杂计算"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B14",
+    "path": "teaching/B14_graph_continuity.md",
+    "kind": "teaching",
+    "keywords": [
+      "跨幕",
+      "图像",
+      "综合",
+      "多小问"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B15",
+    "path": "teaching/B15_subquestions.md",
+    "kind": "teaching",
+    "keywords": [
+      "小问",
+      "综合题",
+      "证明"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B16",
+    "path": "teaching/B16_choices.md",
+    "kind": "teaching",
+    "keywords": [
+      "选择题",
+      "选项",
+      "单选"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B17",
+    "path": "teaching/B17_answer.md",
+    "kind": "teaching",
+    "keywords": [
+      "计算",
+      "答案",
+      "结论",
+      "选择题"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B18",
+    "path": "teaching/B18_summary.md",
+    "kind": "teaching",
+    "keywords": [
+      "总结",
+      "方法",
+      "变式",
+      "易错"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B19",
+    "path": "teaching/B19_spatial_projection.md",
+    "kind": "teaching",
+    "keywords": [
+      "三重积分",
+      "空间",
+      "曲面",
+      "三维"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "B20",
+    "path": "teaching/B20_proof.md",
+    "kind": "teaching",
+    "keywords": [
+      "证明",
+      "数学分析",
+      "高等代数",
+      "量词"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C01",
+    "path": "technical/C01_scene.md",
+    "kind": "technical",
+    "keywords": [
+      "代码",
+      "场景"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C02",
+    "path": "technical/C02_cue.md",
+    "kind": "technical",
+    "keywords": [
+      "口播",
+      "字幕",
+      "读题"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
     "id": "C03",
     "path": "technical/C03_timing.md",
     "kind": "technical",
@@ -107,6 +329,51 @@
     "status": "reference_snippet_unverified"
   },
   {
+    "id": "C04",
+    "path": "technical/C04_mixed.md",
+    "kind": "technical",
+    "keywords": [
+      "中文",
+      "公式",
+      "题干"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C05",
+    "path": "technical/C05_alignment.md",
+    "kind": "technical",
+    "keywords": [
+      "对齐",
+      "布局",
+      "长公式"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C06",
+    "path": "technical/C06_safe_region.md",
+    "kind": "technical",
+    "keywords": [
+      "水印",
+      "题干",
+      "布局",
+      "字幕"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C07",
+    "path": "technical/C07_layout.md",
+    "kind": "technical",
+    "keywords": [
+      "重叠",
+      "布局",
+      "检查"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
     "id": "C08",
     "path": "technical/C08_layout_watch.md",
     "kind": "technical",
@@ -115,6 +382,53 @@
       "动态",
       "扫描",
       "曲线"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C09",
+    "path": "technical/C09_speech.md",
+    "kind": "technical",
+    "keywords": [
+      "读音",
+      "数学字幕",
+      "ln",
+      "多音字"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C10",
+    "path": "technical/C10_scene_restore.md",
+    "kind": "technical",
+    "keywords": [
+      "多小问",
+      "跨幕",
+      "图像"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C11",
+    "path": "technical/C11_native_plot.md",
+    "kind": "technical",
+    "keywords": [
+      "函数",
+      "曲线",
+      "积分",
+      "图像"
+    ],
+    "status": "reference_snippet_unverified"
+  },
+  {
+    "id": "C12",
+    "path": "technical/C12_helper_api.md",
+    "kind": "technical",
+    "keywords": [
+      "矩阵",
+      "坐标系",
+      "卡片",
+      "辅助组件"
     ],
     "status": "reference_snippet_unverified"
   }
