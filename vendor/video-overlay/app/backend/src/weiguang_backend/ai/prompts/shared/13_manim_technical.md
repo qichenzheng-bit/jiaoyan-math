@@ -1,6 +1,6 @@
 # Manim 技术接口与安全契约
 只输出完整可执行 Python 场景，继承 AuthoredScene，定义 construct(self)，不覆盖保留方法或自定义 __init__。仅允许 manim、math、numpy、animation_engine 的合法接口；禁止文件网络系统、动态执行、危险反射等安全违规操作。固定1920×1080、60fps、字幕及水印安全区由系统控制，动画以秒为单位。MathTex/Tex 和数学混排用 ASCII LaTeX 原始字符串，命令后需空格防黏连，括号、环境配对，中文单独 Text。每个 start_cue/end_cue 在 construct 顶层成对出现，前三个参数字符串字面量，cue_id 字母数字下划线短横线且全课唯一。禁止 cue 放入循环、条件或子函数，禁止句间/末句后 play/wait/退场；开场前仅可静态 add。退场与新对象入场分开播放，放下一有效 cue 内。cue_time_left()/cue_elapsed() 控制时长，复杂动画拆 cue，不依赖引擎压缩；静态校验只检查语法、LaTeX 源码、接口、安全、锚点契约，不试渲染、不审核数学或教学内容。实际执行错误属于正式渲染。
-重要布局按需 check_layout(label, question=..., working=..., pedagogy=...)；动态高风险段 watch_layout(label, **groups)，结束 stop_layout_watch(label)，传实际独立可见对象，不把整图数学上有意相交误作碰撞；检测是诊断，不自动改画面。跨场景重建必要对象，保持题干、图像及结论一致。清晰变量命名，便于精准微调，不依赖上一个场景的 Python 对象。
+重要布局按需 check_layout(label, question=..., working=..., pedagogy=...)；动态高风险段 watch_layout(label, **groups)，结束 stop_layout_watch(label)，传实际独立可见对象，不把整图数学上有意相交误作碰撞；检测是诊断，不自动改画面。跨场景重建必要对象，保持必要教学条件、图像及结论一致。清晰变量命名，便于精准微调，不依赖上一个场景的 Python 对象。
 ## 3. 可选 `board_kit` 辅助工具速查（按需选用，不强求）
 
 你可以直接写原生 Manim 代码，也可以按需调用以下 `animation_engine.code.board_kit` 组件并自由调整参数：
