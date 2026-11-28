@@ -21,6 +21,12 @@ from app.services.inline_images import image_ids,validate_images,protect_resourc
 from app.api import resources as bank, qoder
 
 router=APIRouter(prefix="/documents",tags=["documents"],dependencies=[Depends(current_user)])
+class KnowledgeTeachingDraft(BaseModel):
+    conditions:str=Field(default="",max_length=16000)
+    applications:str=Field(default="",max_length=16000)
+    methods:str=Field(default="",max_length=16000)
+    mistakes:str=Field(default="",max_length=16000)
+
 class Block(BaseModel):
     uid:str=Field(min_length=1,max_length=36,pattern=r"^[A-Za-z0-9_-]+$")
     kind:Literal["heading","text","question","knowledge","reference","image","pagebreak"]
@@ -31,6 +37,7 @@ class Block(BaseModel):
     solution:str=Field(default="",max_length=50000)
     analysis:str=Field(default="",max_length=50000)
     proof:str=Field(default="",max_length=50000)
+    teaching_detail:KnowledgeTeachingDraft|None=None
     chapter:str=Field(default="",max_length=120)
     subject:str|None=Field(default=None,max_length=40)
     knowledge_tags:list[str]=Field(default_factory=list,max_length=20)
@@ -154,12 +161,17 @@ def validate(db,body,previous,*,allow_reference_edits=False,within_chapter=False
                 has_chapter=True
             elif block.kind=="heading" and block.heading_level==2 and not has_chapter:
                 raise HTTPException(422,"教材的小节必须放在所属章节之后")
-    total=sum(len(b.content)+len(b.solution)+len(b.answer)+len(b.proof)+len(b.analysis) for b in body.blocks)
+    total=sum(len(b.content)+len(b.solution)+len(b.answer)+len(b.proof)+len(b.analysis)+sum(len(v) for v in b.teaching_detail.model_dump().values() if v) if b.teaching_detail else len(b.content)+len(b.solution)+len(b.answer)+len(b.proof)+len(b.analysis) for b in body.blocks)
     if total>500000:raise HTTPException(422,"文档过长，请拆分")
     old={b["uid"]:b for b in previous}
     result=[]
     for b in body.blocks:
         data=b.model_dump()
+        if b.teaching_detail is not None:
+            if b.kind!="knowledge":raise HTTPException(422,"教学补充仅用于知识单元")
+            # Supplement fields may contain LaTeX but must not introduce untracked image references.
+            for value in data["teaching_detail"].values():
+                if "[[img:" in value or "![" in value:raise HTTPException(422,"教学补充中的附图请保留在知识单元正文或证明")
         if b.source_page_end and b.source_page_start and b.source_page_end<b.source_page_start:raise HTTPException(422,"结束页不能小于起始页")
         if b.reuse_mode=="append" and (b.kind!="question" or not b.reuse_resource_id):raise HTTPException(422,"追加解法必须指定原题")
         if b.edit_reference_revision is not None:
@@ -1191,6 +1203,10 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
             if r.archived or r.kind!=b["kind"] or original_revisions.setdefault(r.id,r.revision)!=expected:
                 raise HTTPException(409,"选择的题库题目已变化，请重新查重")
             before=bank.view(r)
+            if r.kind=="knowledge" and b.get("teaching_detail"):
+                existing_detail=bank.unit_detail_state(db,r.id)
+                if any(value.strip() and value!=existing_detail.get(key,"") for key,value in b["teaching_detail"].items()):
+                    raise HTTPException(409,"复用不会覆盖已有知识单元的教学补充；请先另存或在知识库明确修改")
             appended=b.get("reuse_mode")=="append"
             changed=merge_question_methods(r,b,item_subject) if appended else False
             if changed:evaluate[r.id]=r
@@ -1223,6 +1239,8 @@ def write_registration(id:str,body:Draft,db:Session,user:User,*,selected=None,kn
             attach_review_knowledge(db,r,knowledge_ids,primary_knowledge_id)
             audit(db,"resource.create",user.id)
             action="create"
+            if r.kind=="knowledge" and b.get("teaching_detail"):
+                bank.save_initial_unit_detail(db,r,b["teaching_detail"])
             if r.kind=="question":evaluate[r.id]=r
         db.flush();protect_resource_images(db,r)
         if b["kind"]=="question":batch_resources.append((b["content"],r))

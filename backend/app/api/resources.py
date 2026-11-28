@@ -537,6 +537,12 @@ def unit_detail_state(db,id):
     row=db.get(Setting,unit_detail_key(id))
     return json.loads(row.value) if row else {**{k:"" for k in DETAIL_FIELDS},"example_ids":[]}
 
+def save_initial_unit_detail(db,row,detail):
+    """Persist reviewed source-derived details in the same registration transaction."""
+    state={**{key:detail.get(key,"") for key in DETAIL_FIELDS},"example_ids":[]}
+    if any(state[k].strip() for k in DETAIL_FIELDS):
+        db.add(Setting(key=unit_detail_key(row.id),value=json.dumps(state,ensure_ascii=False)))
+
 def unit_detail_view(db,row):
     state=unit_detail_state(db,row.id)
     ids=state["example_ids"]

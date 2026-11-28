@@ -87,7 +87,7 @@ def tag_draft(db,item):
         mapping[key]=name
         if name not in names:names.append(name)
     main=mapping.get(norm(item.get("primary_knowledge_tag") or "")) or (names[0] if names else "")
-    return {**item,"knowledge_tags":names,"primary_knowledge_tag":main,"analysis":""}
+    return {**item,"knowledge_tags":names,"primary_knowledge_tag":main,**({"analysis":""} if item.get("kind")=="question" else {})}
 
 def validate_review_tags(item):
     if item.get("kind")!="question" or item.get("reuse_resource_id"):return
@@ -158,7 +158,7 @@ def sync(db,j):
                 validate_question_coverage(j.input_text,items)
                 j.items=items
                 if (j.provenance or {}).get("auto_enrichment"):
-                    j.items=[tag_draft(db,b) if b.get("kind")=="question" else b for b in j.items]
+                    j.items=[tag_draft(db,b) for b in j.items]
                 if hints:j.provenance={**(j.provenance or {}),"suggested_pages":hints}
                 j.state="review";j.detail="提取结果待人工核对，未入库"
             except (ValueError,TypeError) as exc:j.state="failed";j.detail=("提取完整性或结构校验失败："+str(exc)[:200]+"；请重新识别或重试")
@@ -345,9 +345,9 @@ def build_provenance(db,body):
 def launch(db,user,body,provenance,retry_of=None,work_batch=None):
     if not body.title.strip() or not body.text.strip():raise HTTPException(422,"标题和原文不能为空")
     if body.source_id:bank.active_source(db,body.source_id,True)
-    prompt="你是数学资料录入助手。知识点是原文实际教学内容（定义、公式、定理、证明等）；知识标签是分类名称，使用 knowledge_tags 字段，二者不可混淆。仅依据原文提取题目与知识点，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type,original_question_number（原文明确的题号，无法确认留空）。最多100项。题目优先使用 question_data 对象（version:1,stem,options:[{label,content}],correct_options:[字母],subquestions:[{number,content,answer,methods:[{name,body,recommended}]}],blanks:[{number,answer}],answer,methods:[{name,body,recommended}]）。使用结构时不要重复输出外层 content/answer/solution，服务端生成兼容文本；填空空位使用标准 LaTeX 下划线，无法可靠对应的原文仍可使用外层字段。小问各自有答案和解法，不设置公共答案解析。仅提取原文实际提供的答案、解析，缺失留空。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
+    prompt="你是数学资料录入助手。知识单元是原文独立的数学内容（定义、公式、定理、性质、推论、方法）；知识标签是分类名称，使用 knowledge_tags 字段；知识点专指视频教学内容，三者不可混淆。仅依据原文提取题目与知识点，不补造答案、证明或图形。保持数学含义、LaTeX、多种解法；标题、正文、答案、解析、证明、标签中的所有数学表达式均使用标准LaTeX定界符（行内单美元符号，独立双美元符号），JSON正确转义反斜线，禁止将公式转换成普通字符，连续页跨页题干合并。无法确认的字段留空或在analysis标记待核对。整套试卷可能包含多个科目，逐条独立识别subject（高等数学、线性代数、概率论与数理统计、数学分析、高等代数；无法确定则留空），科目提示不等于整卷的固定科目。仅输出JSON数组，每项kind(question或knowledge),subject,title,content,answer,solution,analysis,proof,chapter,question_type,unit_type,original_question_number（原文明确的题号，无法确认留空）。最多100项。题目优先使用 question_data 对象（version:1,stem,options:[{label,content}],correct_options:[字母],subquestions:[{number,content,answer,methods:[{name,body,recommended}]}],blanks:[{number,answer}],answer,methods:[{name,body,recommended}]）。使用结构时不要重复输出外层 content/answer/solution，服务端生成兼容文本；填空空位使用标准 LaTeX 下划线，无法可靠对应的原文仍可使用外层字段。小问各自有答案和解法，不设置公共答案解析。仅提取原文实际提供的答案、解析，缺失留空。\n科目提示（可为空）："+body.subject+"\n【原文】\n"+body.text+"\n【原文结束】"
     provenance={**provenance,"auto_enrichment":True}
-    prompt+="\n【自动辅助录入规则，优先于上文关于缺失答案解析的规定】忠实保留题干及原文已有答案、解析；仅对缺失的答案或解析自动求解补齐，不需要额外确认。每个小问分别处理，保留已有内容，不编造原文；确实无法可靠求解则留空。答案或解析有任何AI新增时，generated_fields数组分别加入answer或solution，原文提供的字段不得标记为生成。解析写完整可核对的推导，不单设analysis字段。每道题根据实际考点及推导生成2至5个具体、不重复、同科目的knowledge_tags，并在primary_knowledge_tag中填写其中最核心的一个标签的完全相同名称；不强行匹配无关标签。知识点条目仍忠实原文，不自动编造证明。输出仍是原定JSON数组，注意完整输出所有题目。原文的习题编号完整写入original_question_number（例如29.1），逐个对照所有编号，不得跳过；答案框中的推导属于解析，不能只提取最终答案；连续页开头无新题号的解答归入前一题。末页截断的原文解析须标记来源不完整，不得冒充原文完整。"
+    prompt+="\n【自动辅助录入规则，优先于上文关于缺失答案解析的规定】忠实保留题干及原文已有答案、解析；仅对缺失的答案或解析自动求解补齐，不需要额外确认。每个小问分别处理，保留已有内容，不编造原文；确实无法可靠求解则留空。答案或解析有任何AI新增时，generated_fields数组分别加入answer或solution，原文提供的字段不得标记为生成。解析写完整可核对的推导，不单设analysis字段。每道题根据实际考点及推导生成2至5个具体、不重复、同科目的knowledge_tags，并在primary_knowledge_tag中填写其中最核心的一个标签的完全相同名称；不强行匹配无关标签。知识单元仍忠实原文：proof 仅保存真实证明或推导，原文无证明则留空；原文已有的适用条件、应用、使用方法、易错点可分别录入 teaching_detail 对象的 conditions、applications、methods、mistakes 字段，未提供则留空；正文仍须完整，不自动创建关联题。知识单元建议2至5个准确标签并指定主标签。输出仍是原定JSON数组，注意完整输出所有题目。原文的习题编号完整写入original_question_number（例如29.1），逐个对照所有编号，不得跳过；答案框中的推导属于解析，不能只提取最终答案；连续页开头无新题号的解答归入前一题。末页截断的原文解析须标记来源不完整，不得冒充原文完整。"
     intent=provenance.get("intent","mixed")
     focus={"question":"优先提取题目及原文已有答案解析。","knowledge":"优先提取知识点及原文已有证明。","document":"按原文顺序整理整套资料中的题目和知识点。","mixed":"按原文实际内容识别题目和知识点。"}[intent]
     prompt+="\n【本次整理目标】"+focus
@@ -784,6 +784,8 @@ def supplement_start(id:str,body:SupplementStart,db:Session=Depends(get_db),user
     item=next((x for x in j.items if x["uid"]==body.item_uid),None)
     if not item or item.get("reuse_resource_id") or len(set(body.fields))!=len(body.fields) or not set(body.fields)<=set(allowed_revisions(item) if body.revise else allowed_supplements(item)):
         raise HTTPException(422,"请选择允许修改的条目字段")
+    if item.get("kind")=="knowledge" and "proof" in body.fields:
+        raise HTTPException(422,"录入证明仅可提取真实原文或由人工更正；请使用参考资料匹配或直接编辑，不生成新证明")
     if body.revise and not body.instruction.strip():
         raise HTTPException(422,"请明确说明修改要求")
     payload=json.dumps({k:item.get(k,"") for k in ("kind","title","content","answer","solution","analysis","proof","chapter")},ensure_ascii=False)

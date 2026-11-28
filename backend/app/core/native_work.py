@@ -126,7 +126,7 @@ def tools():
         {"name":"native_workspace","description":"读取当前会话全部原始资料、实际页数或段数、既有批次、审核任务ID和进度。可用于继续或重新识别。","parameters":{"type":"object","properties":{},"additionalProperties":False},"write":False},
         {"name":"native_attach","description":"将用户指定的资料库真实文件ID关联到当前工作会话。连续图片可明确合并为PDF。不会删除原件。","parameters":AttachmentRequest.model_json_schema(),"write":True},
         {"name":"native_page","description":"读取当前工作会话附件的原始图片、PDF物理页、Word段落或文本。Word先读取段落正文及图片数量，再用image_index逐张读取原图。图像作为原始视觉内容返回，不另起AI调用。","parameters":Page.model_json_schema(),"write":False},
-        {"name":"native_intake_review","description":"将已读齐的连续原文页及完整题目创建为待人工审核的录入草稿；不正式入库；重做未审核旧批次时需旧任务ID和revision，保留原版本。pages为逐页忠实转录，items为题目或知识单元；知识单元应含kind=knowledge/title/unit_type/subject/chapter/content/proof/knowledge_tags，正文完整保留原文条件和结论，proof仅保存真实原文证明或推导，无证明留空，不生成证明，跨页未读完不得提交为完整知识单元；知识标签仅为分类标注，视频讲授内容才叫知识点。题目应含kind/title/content/answer/solution/subject/original_question_number/knowledge_tags/primary_knowledge_tag及可选source_pages。多资料匹配须填写reference_pages及reference_fields（item_index从0开始），参考值必须为真实连续原文；AI生成的答案解析用generated_fields标记。跨批次先查native_batch_context；未完成边界题不可伪装完整，用户授权的范围内可扩大未审核旧批次，但每批最多10页。","parameters":Draft.model_json_schema(),"write":True},
+        {"name":"native_intake_review","description":"将已读齐的连续原文页及完整题目创建为待人工审核的录入草稿；不正式入库；重做未审核旧批次时需旧任务ID和revision，保留原版本。pages为逐页忠实转录，items为题目或知识单元；知识单元应含kind=knowledge/title/unit_type/subject/chapter/content/proof/knowledge_tags/primary_knowledge_tag，原文已有教学补充使用teaching_detail对象（conditions、applications、methods、mistakes），不存在则留空，不虚构原文，不自动关联例题，正文完整保留原文条件和结论，proof仅保存真实原文证明或推导，无证明留空，不生成证明，跨页未读完不得提交为完整知识单元；知识标签仅为分类标注，视频讲授内容才叫知识点。题目应含kind/title/content/answer/solution/subject/original_question_number/knowledge_tags/primary_knowledge_tag及可选source_pages。多资料匹配须填写reference_pages及reference_fields（item_index从0开始），参考值必须为真实连续原文；AI生成的答案解析用generated_fields标记。跨批次先查native_batch_context；未完成边界题不可伪装完整，用户授权的范围内可扩大未审核旧批次，但每批最多10页。","parameters":Draft.model_json_schema(),"write":True},
     ])
     return rows
 
@@ -363,7 +363,7 @@ def draft_create(db,s,r,user,args,call_id):
     hints={}
     items=ai.parse_answer(json.dumps(body.items,ensure_ascii=False),hints,(start,end) if f.media_type=="application/pdf" else None)
     ai.validate_question_coverage(text,items)
-    items=[ai.tag_draft(db,{**b,"subject":b.get("subject") or body.subject}) if b.get("kind")=="question" else b for b in items]
+    items=[ai.tag_draft(db,{**b,"subject":b.get("subject") or body.subject}) for b in items]
     validate_draft_items(items)
     external,reference_ids=reference_provenance(db,s,r,body,items,f.id)
     source_id=body.source_id or (old.source_id if old else None)
@@ -407,7 +407,7 @@ def create_text_draft(db,s,r,user,args,call_id):
     if existing:return {"id":existing.id,"state":existing.state,"title":existing.title,"item_count":len(existing.items)}
     items=ai.parse_answer(json.dumps(body.items,ensure_ascii=False))
     ai.validate_question_coverage(body.text,items)
-    items=[ai.tag_draft(db,{**b,"subject":b.get("subject") or body.subject}) if b.get("kind")=="question" else b for b in items]
+    items=[ai.tag_draft(db,{**b,"subject":b.get("subject") or body.subject}) for b in items]
     validate_draft_items(items)
     if body.source_id:ai.bank.active_source(db,body.source_id,True)
     provenance={"kind":"chat_draft","intent":"mixed","workspace_id":s.id,
