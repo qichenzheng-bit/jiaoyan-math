@@ -121,3 +121,29 @@ def test_large_backup_staging_keeps_main_atomic(tmp_path):
     assert git("ls-remote","origin","refs/heads/main").split()[0]==head
     assert not git("ls-remote","origin","refs/heads/wg-backup-stage-*").strip()
     assert git("show","HEAD:"+backup.MANIFEST).strip()==b'{"test":true}'
+
+
+def test_native_backup_verifies_private_mirror_and_rejects_paths(tmp_path):
+    import io
+    import sqlite3
+    import tarfile
+    from uuid import uuid4
+    spec=importlib.util.spec_from_file_location("native_verify",Path(__file__).resolve().parents[2]/"deploy"/"verify-native-backup.py")
+    verify=importlib.util.module_from_spec(spec);spec.loader.exec_module(verify)
+    sid=str(uuid4());root=tmp_path/"source";ws=root/".jiaoyan-native-workspaces"/sid
+    ws.mkdir(parents=True)
+    (ws/"owner").write_text("1")
+    (ws/"sessions.json").write_text(json.dumps({"sessions":[sid],"jobs":[]}))
+    db=sqlite3.connect(ws/"session-mirror.sqlite3")
+    db.execute("CREATE TABLE entries(payload TEXT)")
+    db.execute("INSERT INTO entries VALUES ('{}')");db.commit();db.close()
+    archive=tmp_path/"valid.tar.gz"
+    with tarfile.open(archive,"w:gz") as tar:tar.add(root/".jiaoyan-native-workspaces",arcname=".jiaoyan-native-workspaces")
+    stage=tmp_path/"stage";stage.mkdir()
+    result=verify.inspect_archive(archive,stage)
+    assert result["mirrors"]==1 and result["transcript_entries"]==1
+    bad=tmp_path/"bad.tar.gz"
+    with tarfile.open(bad,"w:gz") as tar:
+        entry=tarfile.TarInfo("../credential");entry.size=1;tar.addfile(entry,io.BytesIO(b"x"))
+    with pytest.raises(ValueError,match="unexpected"):verify.inspect_archive(bad,tmp_path/"badstage")
+    assert not verify.allowed(".jiaoyan-native-workspaces/"+sid+"/.qoder-cn/settings.json",False)
