@@ -77,6 +77,7 @@ def capture_job_add(original, root=None):
         from weiguang_backend.pipeline.source_assets import lesson_question_meta, prepare_lesson_source
         snapshot=dict(_job_prompt.get() or {})
         snapshot['kind']=kind
+        figures=snapshot.pop('figures',None)
         if kind=='generate':
             meta=lesson_question_meta(lesson)
             if snapshot.get('source_context'):meta['source_context']=snapshot['source_context']
@@ -100,6 +101,12 @@ def capture_job_add(original, root=None):
                 snapshot['rules']={'editor_system':prompt_bundle.entry('manim_editor.md')+prompt_bundle.SEP+shared}
         commit=kwargs.pop('commit',True)
         job=original(db,lesson,kind,*args,commit=False,**kwargs)
+        if kind=='generate' and figures:
+            from weiguang_backend.api.storage import resolve_lesson_root
+            from weiguang_backend.pipeline.video_figures_bridge import decode,store
+            refs=store(resolve_lesson_root(root,lesson.id),decode(figures))
+            lesson.image_refs=json.dumps(refs,ensure_ascii=False)
+            snapshot['figure_sha256']=[ref['sha256'] for ref in refs]
         db.add(ClientSetting(key='jiaoyan:video:prompt:'+job.id,account_id='',value=json.dumps(snapshot,ensure_ascii=False)))
         if commit:
             db.commit();db.refresh(job)
@@ -160,8 +167,13 @@ def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt=
     def done(status, **extra):
         return {"type":"done","status":status,"latency_ms":int((time.monotonic()-started)*1000),**extra}
     try:
-        if kind != "qoder_cli" or speed != "default" or images or resume:
+        if kind != "qoder_cli" or speed != "default" or resume:
             raise RuntimeError("QODER_VIDEO_UNSUPPORTED_OPTIONS")
+        attachment=None
+        if images:
+            from weiguang_backend.pipeline.video_figures_bridge import cli_attachment
+            attachment=cli_attachment(images)
+            prompt+="\n\n参考图附件中的 Figure N 对应题源中的参考附图N；单张图为参考附图1。不得编造图中未提供的条件。"
         prompt=append_supplement(prompt,job_supplement())
         if not prompt or "\x00" in prompt or len(prompt.encode("utf-8")) > 120000:
             raise RuntimeError("QODER_VIDEO_PROMPT_TOO_LONG_OR_EMPTY")
@@ -177,7 +189,7 @@ def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt=
             requested = True
             code, data = request("POST","/video/start",{
                 "id":ident,"model":model,"prompt":prompt,"system":system_prompt_file,
-                "effort":effort,"timeout":remaining})
+                "effort":effort,"timeout":remaining,**({"attachment":attachment} if attachment else {})})
             if code != 409 or "已有模型任务" not in str(data.get("detail","")):
                 break
             time.sleep(1)
@@ -239,6 +251,15 @@ def _source_context_ready():
         return False
 
 
+def _reference_figures_ready():
+    try:
+        from weiguang_backend.pipeline import video_figures_bridge
+        code,status=request('GET','/status')
+        return code==200 and bool(status.get('video_reference_attachment'))
+    except (ImportError,OSError,RuntimeError,ValueError,http.client.HTTPException):
+        return False
+
+
 def add_prompt_routes(router):
     from fastapi import HTTPException, Request
     from pydantic import BaseModel, ConfigDict, Field
@@ -250,6 +271,7 @@ def add_prompt_routes(router):
         text:str=Field(default='',max_length=16000)
         revision:int=Field(ge=0)
         source_context:dict|None=None
+        figures:list[dict]|None=None
 
     def authorize(request:Request):
         expected=os.environ.get('WEIGUANG_API_TOKEN','')
@@ -259,7 +281,7 @@ def add_prompt_routes(router):
     @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):
         authorize(request)
-        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready()}
+        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready()}
 
     @router.post('/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):
@@ -268,6 +290,11 @@ def add_prompt_routes(router):
             raise HTTPException(422,'VIDEO_PROMPT_TOO_LONG')
         if body.source_context is not None and (not _source_context_ready() or len(json.dumps(body.source_context,ensure_ascii=False).encode())>12000):
             raise HTTPException(422,'VIDEO_SOURCE_CONTEXT_UNSUPPORTED_OR_TOO_LARGE')
+        if body.figures is not None:
+            if not _reference_figures_ready():raise HTTPException(503,'VIDEO_REFERENCE_FIGURES_UNAVAILABLE')
+            from weiguang_backend.pipeline.video_figures_bridge import decode
+            try:decode(body.figures)
+            except (ValueError,TypeError):raise HTTPException(422,'VIDEO_REFERENCE_FIGURES_INVALID') from None
         token=_job_prompt.set(body.model_dump(exclude_none=True))
         try:return original(id)
         finally:_job_prompt.reset(token)
@@ -278,7 +305,6 @@ def create_app():
     global _session_factory,_initializing
     from weiguang_backend.api import routers
     from weiguang_backend.api.routers import production, edits
-    production.job_add=capture_job_add(production.job_add)
     original_edit_builder=routers.build_edits_router
     def build_with_edit_snapshot(ctx,exports):
         edits.job_add=capture_job_add(edits.job_add,ctx.root)
@@ -286,6 +312,7 @@ def create_app():
     routers.build_edits_router=build_with_edit_snapshot
     original_builder=routers.build_production_router
     def build_with_prompt_routes(ctx,exports):
+        production.job_add=capture_job_add(production.job_add,ctx.root)
         return add_prompt_routes(original_builder(ctx,exports))
     routers.build_production_router=build_with_prompt_routes
     from weiguang_backend.ai import cli_login, cli_probe, model_selection, model_runtime

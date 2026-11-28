@@ -78,6 +78,10 @@ def run(ctx, state) -> None:
             ),
         )
 
+    import re
+    markers={int(n) for text in (source.problem,source.reference_solution,source.answer) for n in re.findall(r'\[参考附图(\d+)\]',text)}
+    if markers and (not reference_images or max(markers)>len(reference_images)):
+        raise RuntimeError('VIDEO_REFERENCE_FIGURES_MISSING')
     cursor.update(base=2, ceiling=10, chars=0, label="检查输入")
 
     # Generate to an isolated candidate directory. The previously published
