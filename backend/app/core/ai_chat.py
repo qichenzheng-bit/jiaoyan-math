@@ -41,7 +41,12 @@ def trace(db,m):
 def stop_job(db,m):
     state=load(db,m)
     if state and state.get("phase")=="pending":
-        m.state="stopped";finish(db,m,state);return None
+        m.state="stopped"
+        if state.get("native"):
+            from app.core import native_chat
+            native_chat.finish(db,m,state)
+        else:finish(db,m,state)
+        return None
     return state["job"] if state else m.id
 
 def finish(db,m,state):
@@ -64,6 +69,9 @@ def add_refs(db,m,value):
     m.resource_refs=refs[:10]
 
 def pending(db,m,state):
+    if state.get("native"):
+        from app.core import native_chat
+        return native_chat.pending(db,m,state)
     if now()-state["at"]>900:
         m.state="failed";m.detail="模型排队超时";finish(db,m,state);return
     try:
@@ -77,6 +85,9 @@ def pending(db,m,state):
     state.update(phase="model",at=now(),attempts=0);store(db,m,state)
 
 def sync(db,m,state):
+    if state.get("native"):
+        from app.core import native_chat
+        return native_chat.sync(db,m,state)
     from app.core.ai_tools import TOOLS,execute,bounded_result
     from app.api.chat import split_intake_intent
     if state.get("phase")=="pending":pending(db,m,state);return

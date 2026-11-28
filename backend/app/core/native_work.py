@@ -113,7 +113,9 @@ def attached(db,s,file_id):
 
 def page_read(db,s,args):
     p=Page.model_validate(args);m,f=attached(db,s,p.file_id)
-    total=m.total_units or w.unit_count(f)
+    return read_file_page(f,m.total_units or w.unit_count(f),p)
+
+def read_file_page(f,total,p):
     if total is not None and p.page>total:raise HTTPException(422,"原始页码超出范围")
     if p.image_index is not None and f.media_type!=material_import.DOCX:
         raise HTTPException(422,"image_index仅用于Word内嵌图片")

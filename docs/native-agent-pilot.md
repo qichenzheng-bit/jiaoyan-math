@@ -8,3 +8,11 @@
 - 关闭试点只需去掉 WG_NATIVE_AGENT=1。已有业务草稿保留；当前原生运行任务先停止或结束。
 
 - Worker 15 需要新版 Python SDK 的 AgentDefinition、AssistantMessage、TextBlock 及 MCP ToolAnnotations。官方文档： https://docs.qoder.cn/cli/sdk/references-python 、https://docs.qoder.cn/cli/sdk/mcp 、https://docs.qoder.cn/cli/sdk/skills 。
+
+## 阶段三：聊天模式
+
+- 新增独立试点开关 `WG_NATIVE_CHAT=1`，聊天和工作共用 Worker 原生 SDK、Skills、MCP 及原件读取能力；聊天只读，实际业务写入仍在工作模式。
+- 每条原生助手消息持久保存原生会话ID及操作者关联；后续同一聊天使用 resume，只在初次迁移或分支时补入尚未进入原生会话的历史。
+- 用户提供的原始附件可直接读取，禁止聊天原件工具读取未关联的文件。
+- 旧聊天历史、停止、分支和转工作入口兼容；原生会话本地存储的删除同步、备份与实机恢复验证尚未完成，因此试点保持关闭。
+- Python SDK 长期自动记忆仍不支持配置，保留现有用户偏好及教学规范。
