@@ -14,7 +14,7 @@ from animation_engine.code.scene_contract import SceneContract
 from animation_engine.errors import EngineError
 from animation_engine.speech.cue_extract import extract_scenes
 from .scene_codegen import build_contract, extract_blocks, system_prompt
-from .prompt_bundle import JOB_RULES_PROVIDER, entry, shared_specs, SEP, ensure_budget
+from .prompt_bundle import entry, shared_specs, SEP
 from . import prompt_bundle
 from .scene_model_call import invoke_scene_model
 from .scene_output import SceneCodeRejected, read_scene_sources, write_scenes
@@ -26,7 +26,7 @@ _REPAIRABLE_PREFIXES = (
     "SCENE_RENDER_FAILED", "SCENE_ACTION_AFTER_LAST_CUE",
     "SCENE_ACTION_OVERRUN_AUDIO",
     "SCENE_FRAME_COUNT_MISMATCH", "SCENE_TIMELINE_EMPTY",
-    "CAPTION_MATH_NEEDS_REVIEWED_BREAK", "CAPTION_LINE_TOO_LONG",
+    "CAPTION_MATH_NEEDS_REVIEWED_BREAK", "CAPTION_LINE_TOO_LONG", "CAPTION_SAFE_REGION_TOO_SMALL",
 )
 
 

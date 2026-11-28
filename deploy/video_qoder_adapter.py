@@ -71,7 +71,13 @@ def _job_record(db, ident):
 
 
 def job_rules():
-    return job_prompt_data().get('rules') or {}
+    data=job_prompt_data()
+    rules=dict(data.get('rules') or {})
+    if data.get('kind')=='edit' and rules.get('inherited_supplement'):
+        supplement='\n\n原课教学补充要求（当前明确指令优先）：\n'+rules['inherited_supplement']
+        for key in ('system','repair_system'):
+            if key in rules:rules[key]+=supplement
+    return rules
 
 
 def capture_job_add(original, root=None):
@@ -103,6 +109,7 @@ def capture_job_add(original, root=None):
             if prior.get('rules'):
                 snapshot['rules']={**prior['rules'],'inherited_supplement':prior.get('text','') or prior['rules'].get('inherited_supplement','')}
                 snapshot['text']=prior.get('text','') or prior['rules'].get('inherited_supplement','')
+                if prior.get('source_context'):snapshot['source_context']=prior['source_context']
             else:
                 shared=prompt_bundle.shared_specs()
                 snapshot['rules']={'editor_system':prompt_bundle.entry('manim_editor.md')+prompt_bundle.SEP+shared,

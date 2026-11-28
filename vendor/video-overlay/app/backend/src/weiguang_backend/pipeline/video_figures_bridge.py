@@ -48,7 +48,7 @@ def store(root,figures):
     refs=[]
     for i,(media,raw) in enumerate(figures,1):
         digest=hashlib.sha256(raw).hexdigest()
-        path=folder/(digest+FORMATS[media][1])
+        path=folder/(f"{i:02d}-"+digest+FORMATS[media][1])
         if not path.exists():
             path.write_bytes(raw)
         elif hashlib.sha256(path.read_bytes()).hexdigest()!=digest:

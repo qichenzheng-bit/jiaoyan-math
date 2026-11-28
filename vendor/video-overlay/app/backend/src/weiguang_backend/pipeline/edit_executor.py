@@ -270,6 +270,8 @@ def assert_only_tts_text_changed(previous: dict[str, str],
     - 去掉 tts_text 后结构不同 → 说明改了别的东西，拒绝；
     - 连 tts_text 都没变（只改注释/格式）→ 要求模型重新给有效改动。
     """
+    if set(updated) - set(previous):
+        raise EditOutputError("EDIT_VOICE_ONLY_NEW_SCENE")
     if tuple(previous) != tuple(updated):
         raise EditOutputError("EDIT_VOICE_ONLY_SCENE_SET_CHANGED")
     changed_tts = False

@@ -160,8 +160,9 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
                 try:
                     supported=engine.call("GET","/jiaoyan/prompt-capability")
                 except HTTPException as e:
-                    if e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
-                    raise
+                    if e.status_code in (404,405) and not supplement["text"] and not figure_ids:supported={}
+                    elif e.status_code in (404,405):raise HTTPException(503,"视频提示词适配器尚未升级；已保存配置，未提交生成任务") from None
+                    else:raise
                 if supplement["text"] and (not supported.get("supported") or supported.get("snapshot")!="job"):raise HTTPException(503,"视频引擎不支持按任务固定提示词，请升级适配器")
                 if not supported.get("source_context"):context={}
                 if figure_ids and not supported.get("reference_figures"):raise HTTPException(503,"视频引擎尚不支持参考题图")
