@@ -1,10 +1,9 @@
-"""Opt-in Qoder native chat. The SDK owns conversation and tool orchestration.
+"""Qoder native chat. The SDK owns conversation and tool orchestration.
 
 The application stores the visible messages, verified resource references, and
 session IDs. MCP tools in chat are read-only; an intake suggestion is not a write.
 """
 import json
-import os
 from uuid import uuid4
 from typing import Literal
 from fastapi import HTTPException
@@ -26,9 +25,6 @@ SYSTEM=("你是微光数学教研助手，以自然语言理解用户并自主�
 class SuggestWork(BaseModel):
     model_config=ConfigDict(extra="forbid")
     intent:Literal["question","knowledge","document","mixed"]
-
-def enabled():
-    return os.environ.get("WG_NATIVE_CHAT")=="1"
 
 def tools():
     rows=[t for t in ai_tools.catalogue("chat") if t["name"] not in native_work.EXCLUDE]

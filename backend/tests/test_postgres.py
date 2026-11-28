@@ -707,10 +707,11 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
         from app.api import qoder as chat_qoder
         worker_calls=[]
         def fake_worker(method,path,body=None):
-            if path=="/status": return {"chat_available":True}
-            if path=="/chat/start":
+            if path=="/status": return {"chat_available":True,"native_agent":True}
+            if path=="/agent/start":
                 worker_calls.append(body)
                 return {"state":"running"}
+            if path=="/agent/delete-workspace":return {"deleted":True}
             return {"state":"done","answer":"2","detail":""}
         monkeypatch.setattr(chat_qoder,"request",fake_worker)
         session=client.post("/api/chat/sessions",headers=origin,json={})
@@ -836,91 +837,25 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
             initial_plan=client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至2页'}).json()
             assert initial_plan['candidates'][0]['file_id']==fid and initial_plan['candidates'][0]['start']==1 and initial_plan['candidates'][0]['end']==2
             assert client.get(wb+'/recognition-plan',params={'instruction':'work-pages.pdf 识别第1至11页'}).status_code==422
-            # F3.4.5: deterministic natural-language routing contract (stubbed model,
-            # not a claim about the accuracy of a live model).
-            from app.api import qoder
+            # Historic plan compatibility is tested from persisted business data, not a removed model parser.
+            from app.api import work_agent as wa
+            from app.models import WorkSession
+            from uuid import uuid4
             agent_url=wb+"/agent"
-            cases=[
-                ("work-pages.pdf 从第2页开始，只识别这一页，先不要整理或入库",
-                 {"action":"recognize","file_id":fid,"start":2,"count":1,"goal":"recognition"},"ready"),
-                ("昨天那本继续一页，核对之后整理，只匹配参考资料里的答案",
-                 {"action":"recognize","file_id":fid,"count":1,"goal":"review","reference_ids":[item["id"]],"match_fields":["answer"]},"ready"),
-                ("继续之前的教材",{"action":"clarify","explanation":"请确认本次页数"},"clarify"),
-                ("这两份资料都处理一下",{"action":"clarify","explanation":"请确认主资料及范围"},"clarify"),
-                ("不要识别，也不要入库，只问一下之前做了什么",{"action":"clarify","explanation":"本次不执行录入工作"},"clarify"),
-                ("把之前的原件删除",{"action":"delete","file_id":fid},"failed"),
-                ("直接入库，不需要人工审核",{"action":"recognize","file_id":fid,"count":1,"goal":"auto_register"},"failed"),
-                ("一次识别十一页",{"action":"recognize","file_id":fid,"count":11},"failed"),
-                ("从不存在的资料继续一页",{"action":"recognize","file_id":"unknown","count":1},"failed"),
-                ("整理这份并参考不存在的答案",{"action":"recognize","file_id":fid,"count":1,"goal":"review","reference_ids":["unknown"],"match_fields":["answer"]},"failed"),
-                ("只识别原文但自动匹配答案",{"action":"recognize","file_id":fid,"count":1,"reference_ids":[item["id"]],"match_fields":["answer"]},"failed"),
-            ]
-            before=client.get(wb).json()["materials"]
-            total_before=client.get("/api/resources?kind=question").json()["total"]
-            previous_id=None
-            for instruction,reply,expected in cases:
-                calls=[]
-                def contract_worker(method,path,body=None):
-                    if path=="/status":return {"chat_available":True}
-                    if path=="/chat/start":calls.append(body);return {"state":"running"}
-                    return {"state":"done","answer":json.dumps(reply,ensure_ascii=False)}
-                with monkeypatch.context() as ap:
-                    ap.setattr(qoder,"request",contract_worker)
-                    asked=client.post(agent_url,headers=origin,json={"instruction":instruction,"model":"Auto","effort":"default","selected_id":mat["id"],"auto":False})
-                    assert asked.status_code==200,(instruction,asked.text)
-                    ident=asked.json()["id"]
-                    assert asked.json()["state"]=="running" and len(calls)==1
-                    assert instruction in calls[0]["prompt"] and fid in calls[0]["prompt"]
-                    settled=client.get(agent_url).json()
-                    assert settled["state"]==expected,(instruction,settled)
-                    if previous_id:
-                        assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":previous_id}).status_code==409
-                    if expected=="ready":
-                        assert settled["plan"]["start"]==(reply.get("start") or 1)
-                        assert settled["plan"]["end"]==settled["plan"]["start"]
-                        assert settled["plan"]["goal"]==reply["goal"]
-                        assert settled["plan"]["match_fields"]==reply.get("match_fields",[])
-                    else:
-                        assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ident}).status_code==409
-                    assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ident}).status_code==409
-                    assert client.get(wb).json()["materials"]==before
-                    assert client.get("/api/resources?kind=question").json()["total"]==total_before
-                    if expected in ("ready","clarify"):
-                        cancelled=client.post(agent_url+"/cancel",headers=origin,json={"plan_id":ident})
-                        assert cancelled.status_code==200,cancelled.text
-                        assert cancelled.json()["state"]=="cancelled"
-                        assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ident}).status_code==409
-                    previous_id=ident
-            # Agent uses the selected real model; no recognition before explicit confirmation.
-            from app.api import qoder
-            agent_calls=[]
-            def agent_worker(method,path,body=None):
-                if path=="/status":return {"chat_available":True}
-                if path=="/chat/start":agent_calls.append(body);return {"state":"running"}
-                return {"state":"done","answer":json.dumps({"action":"recognize","file_id":fid,"start":None,"count":1,"goal":"review","reference_ids":[item["id"]],"match_fields":["answer"],"explanation":"继续教材下一页并匹配参考答案"},ensure_ascii=False)}
-            with monkeypatch.context() as ap:
-                ap.setattr(qoder,"request",agent_worker)
-                agent_url=wb+"/agent"
-                asked=client.post(agent_url,headers=origin,json={"instruction":"昨天那本接着弄一页，核对后整理审核并匹配参考答案","model":"Auto","effort":"default","selected_id":mat["id"],"auto":False})
-                assert asked.status_code==200,asked.text
-                assert asked.json()["state"]=="running" and len(agent_calls)==1 and fid in agent_calls[0]["prompt"]
-                ready=client.get(agent_url).json()
-                assert ready["state"]=="ready" and ready["plan"]["start"]==1 and ready["plan"]["end"]==1
-                assert client.get(wb).json()["materials"][0]["batches"]==[]
-                assert client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ready["id"]}).json()["state"]=="confirmed"
-                assert client.get(agent_url).json()["id"]==ready["id"]
-                assert client.get(wb).json()["materials"][0]["batches"]==[]
-                dispatched=client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]})
-                assert dispatched.status_code==200,dispatched.text
-                assert dispatched.json()["state"]=="dispatched"
-                bid=dispatched.json()["result"]["batch_id"]
-                assert next(m for m in client.get(wb).json()["materials"] if m["file"]["id"]==fid)["batches"][0]["id"]==bid
-                assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]}).json()["result"]["batch_id"]==bid
-                assert client.get(agent_url).json()["result"]["batch_id"]==bid
-                assert client.get(agent_url).json()["workflow"]["stage"]=="recognizing"
-                hist=client.get(agent_url+"/history").json()
-                assert hist[-1]["id"]==ready["id"] and hist[-1]["state"]=="dispatched" and "allowed_files" not in hist[-1]
-                assert client.post(agent_url+"/advance",headers=origin,json={"plan_id":ready["id"]}).status_code==409
+            with session_factory()() as legacy_db:
+                legacy=legacy_db.get(WorkSession,w["id"])
+                intent=wa.Intent(action="recognize",file_id=fid,count=1,goal="review",reference_ids=[item["id"]],match_fields=["answer"],explanation="历史资料匹配")
+                legacy_plan=wa.resolve(legacy_db,intent)
+                record={"id":str(uuid4()),"instruction":"历史资料匹配","model":"Auto","effort":"default","state":"ready","auto":False,"created_at":wa.now(),"actor_id":1,"intent":intent.model_dump(),"plan":legacy_plan,"steps":[],"detail":"历史计划"}
+                wa.save(legacy_db,legacy,record);legacy_db.commit()
+            # A persisted plan can still be dispatched explicitly through guarded business operations.
+            ready=record
+            confirmed=client.post(agent_url+"/confirm",headers=origin,json={"plan_id":ready["id"]})
+            assert confirmed.status_code==200,confirmed.text
+            dispatched=client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]})
+            assert dispatched.status_code==200,dispatched.text
+            bid=dispatched.json()["result"]["batch_id"]
+            assert client.post(agent_url+"/dispatch",headers=origin,json={"plan_id":ready["id"]}).json()["result"]["batch_id"]==bid
             for page in (1,2):
                 batch=client.post(wb+"/materials/"+mat["id"]+"/batches",headers=origin,json={"start":page,"end":page})
                 assert batch.status_code==200,batch.text
@@ -1539,17 +1474,18 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
                 db.execute(text("DELETE FROM teaching_documents WHERE id=:id"),{"id":load_book_id})
                 db.commit()
 
-        # The autonomous workflow uses real business APIs with deterministic model output.
+        # Native MCP orchestration uses real business APIs with deterministic worker events.
         from app.core import ai_work, ai_tools
         auto_ws=client.post("/api/workspaces",headers=origin,json={"title":"AI自动工作测试"}).json()
         auto_url="/api/workspaces/"+auto_ws["id"]+"/agent"
-        auto_calls=[]
-        answers=[{"action":"tool","tool":"question_search","args":{"limit":2}},
-                 {"action":"finish","explanation":"已查询实际题目"}]
+        auto_calls=[];replies=[]
+        call_id=str(uuid4())
         def auto_worker(method,path,body=None):
-            if path=="/status":return {"chat_available":True}
-            if path=="/chat/start":auto_calls.append(body);return {"state":"running"}
-            return {"state":"done","answer":json.dumps(answers[min(len(auto_calls)-1,1)],ensure_ascii=False)}
+            if path=="/status":return {"chat_available":True,"native_agent":True}
+            if path=="/agent/start":auto_calls.append(body);return {"state":"running"}
+            if path.endswith("/tool-result"):replies.append(body);return {"state":"running"}
+            if not replies:return {"state":"running","pending_tool":{"id":call_id,"name":"question_search","args":{"limit":2}}}
+            return {"state":"done","answer":"已查询实际题目"}
         with monkeypatch.context() as patch:
             patch.setattr(qoder,"request",auto_worker)
             requested=client.post(auto_url,headers=origin,json={"instruction":"检索题库","model":"Auto"})
@@ -1559,7 +1495,7 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
             assert actual["state"]=="done",actual
             assert actual["steps"][0]["tool"]=="question_search"
             assert actual["steps"][0]["result"]["total"]>=1
-            assert len(auto_calls)==2
+            assert len(auto_calls)==1 and len(replies)==1
         memory=client.put("/api/ai-settings/memory",headers=origin,json={"revision":0,"items":[{"id":"test","scope":"work","text":"公式采用LaTeX"}]})
         assert memory.status_code==200,memory.text
         assert client.get("/api/ai-settings/memory").json()["items"][0]["text"]=="公式采用LaTeX"
@@ -1576,7 +1512,9 @@ def test_migration_and_login(tmp_path, monkeypatch, capsys):
         assert client.put("/api/settings",headers=origin,json=prefs).status_code == 200
         assert client.get("/api/settings").json() == prefs
         # Permanent deletion removes the source message and chat without removing independent files.
-        removed=client.delete("/api/chat/sessions/"+chat_id,headers=origin)
+        with monkeypatch.context() as delete_patch:
+            delete_patch.setattr(qoder,"request",lambda method,path,body=None:{"deleted":True} if path=="/agent/delete-workspace" else {"state":"done"})
+            removed=client.delete("/api/chat/sessions/"+chat_id,headers=origin)
         assert removed.status_code==200,removed.text
         assert client.get("/api/chat/sessions/"+chat_id).status_code==404
         assert client.get("/api/intelligence/chat-source/"+user_message["id"]).status_code==404

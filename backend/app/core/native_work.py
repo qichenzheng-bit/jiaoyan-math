@@ -6,7 +6,6 @@ No nested inference calls while the native Agent occupies the single Qoder worke
 import base64
 import hashlib
 import json
-import os
 from uuid import uuid4
 from typing import Literal
 from fastapi import HTTPException
@@ -117,9 +116,6 @@ class TextDraft(BaseModel):
     text:str=Field(min_length=1,max_length=24000)
     items:list[dict]=Field(min_length=1,max_length=100)
 
-def enabled():
-    return os.environ.get("WG_NATIVE_AGENT")=="1"
-
 def tools():
     rows=[t for t in ai_tools.catalogue() if t["name"] not in EXCLUDE and (not t["write"] or t["name"] in SAFE_WRITES)]
     for spec in rows:
@@ -160,7 +156,7 @@ def begin(db,s,body,user):
     from app.api import work_agent as wa
     status=qoder.request("GET","/status")
     if not status.get("native_agent") or not status.get("chat_available"):
-        raise HTTPException(503,"原生Agent试点需要升级Qoder Worker并验证SDK")
+        raise HTTPException(503,"原生Agent需要升级Qoder Worker并验证SDK")
     if body.selected_id:w.material(db,s,body.selected_id)
     effort=qoder.assistant_effort(db,body.model,body.effort).get("effort","default")
     prior=next((r for r in reversed(s.agent_history or []) if r.get("native_session") and r.get("actor_id")==user.id),None)

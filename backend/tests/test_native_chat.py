@@ -11,12 +11,6 @@ def test_chat_only_read_only_native_tools():
     assert "native_intake_review" not in tools and "native_attach" not in tools
     assert "original_read" not in tools
 
-def test_native_chat_flag(monkeypatch):
-    monkeypatch.delenv("WG_NATIVE_CHAT",raising=False)
-    assert not n.enabled()
-    monkeypatch.setenv("WG_NATIVE_CHAT","1")
-    assert n.enabled()
-
 def test_resume_only_same_user_completed_native_session(monkeypatch):
     messages=[SimpleNamespace(id="a",position=2,role="assistant",state="done"),
               SimpleNamespace(id="b",position=4,role="assistant",state="done"),

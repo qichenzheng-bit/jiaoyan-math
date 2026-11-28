@@ -2,12 +2,6 @@ from types import SimpleNamespace
 import pytest
 from app.core import native_work as n
 
-def test_native_pilot_opt_in(monkeypatch):
-    monkeypatch.delenv("WG_NATIVE_AGENT",raising=False)
-    assert not n.enabled()
-    monkeypatch.setenv("WG_NATIVE_AGENT","1")
-    assert n.enabled()
-
 def test_native_tools_no_nested_model_or_unbounded_permissions():
     tools={t["name"]:t for t in n.tools()}
     assert {"native_page","native_intake_review","question_search","selection_create"}<=tools.keys()

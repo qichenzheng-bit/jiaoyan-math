@@ -30,32 +30,8 @@ def test_bounded_results_and_prompt():
     result=ai_tools.bounded_result({"total":100,"items":[{"id":str(i),"title":"题"*1000} for i in range(100)]})
     assert result["truncated"] and result["total"]==100 and result["items"][0]["id"]=="0"
     assert len(json.dumps(result,ensure_ascii=False))<=12000
-    r={"instruction":"分析真题","preference_snapshot":"偏好"*8000,"steps":[{"tool":"question_search","args":{},"state":"done","result":{"content":"题"*12000}}]*8}
-    assert len(ai_work.later_prompt(r).encode())<=100000
-    assert ai_work.json_reply('{"action":"finish"}')["action"]=="finish"
-    with pytest.raises(ValueError):ai_work.json_reply("[]")
-    assert "selection_create" not in ai_chat.protocol()
-
-def test_work_executes_actual_tool_without_confirmation(monkeypatch):
-    from app.api import work_agent as wa, qoder
-    user=SimpleNamespace(id=1)
-    s=SimpleNamespace(id="w",agent_history=[])
-    r={"id":"r","model":"Auto","effort":"default","model_job":"m","phase":"model","phase_at":ai_work.now(),"state":"running","instruction":"查询题目","steps":[]}
-    s.agent_history=[r]
-    def save(db,s,r):s.agent_history=[dict(r)]
-    monkeypatch.setattr(wa,"save",save)
-    monkeypatch.setattr(ai_work,"wa_session",lambda db,ident:s)
-    monkeypatch.setattr(ai_work,"audit",lambda *args:None)
-    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"tool","tool":"question_search","args":{}})})
-    run=Mock(return_value={"total":1,"items":[{"id":"real","title":"实际题目"}]})
-    monkeypatch.setattr(ai_tools,"execute",run)
-    db=Mock()
-    ai_work.run_model(db,s,r,user)
-    run.assert_called_once()
-    saved=s.agent_history[-1]
-    assert saved["steps"][0]["result"]["items"][0]["id"]=="real"
-    assert saved["steps"][0]["state"]=="done" and saved["phase"]=="pending"
-    assert saved["state"]=="running"
+    from app.core import native_chat
+    assert "selection_create" not in {t["name"] for t in native_chat.tools()}
 
 def test_preference_scope_and_history(monkeypatch):
     values={}
@@ -90,7 +66,7 @@ def test_amendment_retains_existing_results(monkeypatch):
     body=wa.Start(instruction="改为30题")
     result=ai_work.revise(Mock(),s,r,body,SimpleNamespace(id=1))
     assert result["steps"][0]["result"]["total"]==50
-    assert result["needs_replan"] and "改为30题" in ai_work.later_prompt(r)
+    assert result["amendments"][-1]["text"]=="改为30题"
 
 def test_child_tracking_uses_real_job_id():
     assert ai_work.child_task("video_generate",{"ident":"p"},{"id":"job","status":"queued"})=={"kind":"video","project":"p","id":"job"}
@@ -98,18 +74,12 @@ def test_child_tracking_uses_real_job_id():
     assert ai_work.child_task("question_search",{},{"id":"question"}) is None
     assert ai_work.child_task("intake_text",{},{"id":"intake","state":"running"})=={"kind":"intake","id":"intake"}
 
-def test_planning_does_not_count_as_business_result(monkeypatch):
+def test_retiring_legacy_work_keeps_business_receipts(monkeypatch):
     from app.api import work_agent as wa, qoder
     monkeypatch.setattr(wa,"save",lambda db,s,r:setattr(s,"agent_history",[dict(r)]))
-    s=SimpleNamespace(agent_history=[],id="w")
-    r={"id":"r","model":"Auto","effort":"default","model_job":"m","phase":"model","phase_at":ai_work.now(),"state":"running","instruction":"选题","steps":[]}
-    s.agent_history=[r]
-    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"plan","outline":["检索题库","生成试卷"],"expected_tools":["question_search","selection_create"]})})
-    ai_work.run_model(Mock(),s,r,SimpleNamespace(id=1))
-    planned=s.agent_history[-1]
-    assert planned["outline"]==["检索题库","生成试卷"] and planned["phase"]=="pending"
-    planned["phase"]="model"
-    monkeypatch.setattr(qoder,"request",lambda *args:{"state":"done","answer":json.dumps({"action":"finish","explanation":"完成"})})
-    ai_work.run_model(Mock(),s,planned,SimpleNamespace(id=1))
-    assert s.agent_history[-1]["state"]=="running"
-    assert s.agent_history[-1]["steps"][-1]["state"]=="failed"
+    cancel=Mock(return_value={"state":"stopped"});monkeypatch.setattr(qoder,"request",cancel)
+    record={"id":"r","state":"running","phase":"model","model_job":"old","steps":[{"state":"done","result":{"id":"saved"}}],"prompt":"old protocol"}
+    result=ai_work.retire_old(Mock(),SimpleNamespace(),record)
+    assert result["state"]=="failed" and result["steps"][0]["result"]["id"]=="saved"
+    assert "prompt" not in result
+    cancel.assert_called_once_with("POST","/chat/old/cancel",{})
