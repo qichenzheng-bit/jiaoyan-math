@@ -107,7 +107,7 @@ def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt=
                     system_prompt_file="", **kwargs):
     started = time.monotonic()
     ident = str(uuid4())
-    accepted = False
+    requested = False
     terminal = False
     def done(status, **extra):
         return {"type":"done","status":status,"latency_ms":int((time.monotonic()-started)*1000),**extra}
@@ -126,15 +126,15 @@ def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt=
             remaining = int(deadline-time.monotonic())
             if remaining < 1:
                 raise RuntimeError("QODER_VIDEO_QUEUE_TIMEOUT")
+            requested = True
             code, data = request("POST","/video/start",{
                 "id":ident,"model":model,"prompt":prompt,"system":system_prompt_file,
                 "effort":effort,"timeout":remaining})
-            if code != 409:
+            if code != 409 or "已有模型任务" not in str(data.get("detail","")):
                 break
             time.sleep(1)
         if code != 200:
             raise RuntimeError("QODER_VIDEO_REQUEST_REJECTED_"+str(code))
-        accepted = True
         prior = ""
         while True:
             if cancelled(chat_id):
@@ -168,7 +168,7 @@ def chat_cli_stream(kind, exe, model, effort="default", speed="default", prompt=
         error=str(exc) if isinstance(exc,RuntimeError) else "QODER_VIDEO_TRANSPORT_ERROR"
         yield done("failed",error=error)
     finally:
-        if not terminal:
+        if requested and not terminal:
             # A queued or ambiguously accepted job may already reserve an ID.
             try:
                 request("POST","/chat/"+ident+"/cancel",{})

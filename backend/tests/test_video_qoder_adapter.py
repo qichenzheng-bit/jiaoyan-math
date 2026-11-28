@@ -74,3 +74,27 @@ def test_prompt_route_requires_token_and_preserves_task_context(monkeypatch):
         assert seen==[("test",body)]
         assert adapter._job_prompt.get() is None
         assert client.get("/api/v1/jiaoyan/prompt-capability",headers={"X-API-Key":"test-only"}).json()["snapshot"]=="job"
+
+
+def test_disconnected_worker_does_not_loop_or_restart_model(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(adapter,"cancelled",lambda _:False)
+    def request(method,path,data=None):
+        calls.append(path)
+        return 409,{"detail":"已退出本系统 AI，请主动登录"}
+    monkeypatch.setattr(adapter,"request",request)
+    result=adapter.chat_cli("qoder_cli","","Auto",prompt="test")
+    assert result["status"]=="failed" and calls.count("/video/start")==1
+    assert calls[-1].endswith("/cancel")
+
+def test_video_queued_cancel_releases_same_id(monkeypatch):
+    calls=[]
+    check=iter([False,True])
+    monkeypatch.setattr(adapter,"cancelled",lambda _:next(check))
+    monkeypatch.setattr(adapter.time,"sleep",lambda _:None)
+    def request(method,path,data=None):
+        calls.append((path,data))
+        return 409,{"detail":"当前已有模型任务或授权，按队列等待"}
+    monkeypatch.setattr(adapter,"request",request)
+    assert adapter.chat_cli("qoder_cli","","Auto",prompt="test")["status"]=="cancelled"
+    assert calls[-1][0]=="/chat/"+calls[0][1]["id"]+"/cancel"

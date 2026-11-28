@@ -186,3 +186,49 @@ def test_native_chat_anchor_is_terminal_and_only_contains_identity():
     assert clean["native_session"]==sid and "prompt" not in clean and "steps" not in clean
     assert backup.native_chat_anchor(json.dumps({**state,"phase":"model"}),workspace) is None
     assert backup.native_chat_anchor(json.dumps(state),str(uuid4())) is None
+
+
+def test_history_cleanup_marker_is_preserved_in_backup():
+    from app.services.history_cleanup import KEY
+    assert KEY in backup.SAFE_SETTINGS
+
+def test_real_age_roundtrip_native_mirror(tmp_path):
+    """Actual encryption/decryption with an ephemeral CI key, never a production identity."""
+    import io
+    import os
+    import shutil
+    import sqlite3
+    import subprocess
+    import sys
+    import tarfile
+    from uuid import uuid4
+    if not shutil.which("age") or not shutil.which("age-keygen"):
+        if os.environ.get("WG_REQUIRE_AGE_TEST")=="1":pytest.fail("age is required for recovery rehearsal")
+        pytest.skip("age is not installed")
+    deploy=Path(__file__).resolve().parents[2]/"deploy"
+    spec=importlib.util.spec_from_file_location("capture_roundtrip",deploy/"snapshot-native-state.py")
+    capture=importlib.util.module_from_spec(spec);spec.loader.exec_module(capture)
+    sid=str(uuid4());home=tmp_path/"home";ws=home/".jiaoyan-native-workspaces"/sid;ws.mkdir(parents=True)
+    (ws/"owner").write_text("1")
+    (ws/"sessions.json").write_text(json.dumps({"sessions":[sid],"jobs":[]}))
+    db=sqlite3.connect(ws/"session-mirror.sqlite3")
+    db.execute("CREATE TABLE entries(payload TEXT)")
+    db.execute("INSERT INTO entries VALUES (?)",("synthetic-session",));db.commit();db.close()
+    stage=tmp_path/"stage";stage.mkdir()
+    capture.collect(home,stage)
+    archive=tmp_path/"mirror.tar.gz"
+    with tarfile.open(archive,"w:gz") as tar:
+        for p in stage.iterdir():tar.add(p,arcname=p.name)
+    identity=tmp_path/"identity"
+    subprocess.run(["age-keygen","-o",str(identity)],check=True,capture_output=True)
+    recipient=subprocess.check_output(["age-keygen","-y",str(identity)],text=True).strip()
+    cipher=tmp_path/"mirror.age"
+    subprocess.run(["age","-r",recipient,"-o",str(cipher),str(archive)],check=True)
+    assert b"synthetic-session" not in cipher.read_bytes()
+    result=subprocess.run([sys.executable,str(deploy/"verify-native-backup.py"),"--archive",str(cipher),"--identity",str(identity)],check=True,capture_output=True,text=True)
+    report=json.loads(result.stdout)
+    assert report["status"]=="ARCHIVE_VERIFIED" and report["mirrors"]==1 and report["transcript_entries"]==1
+    tampered=tmp_path/"tampered.age"
+    data=cipher.read_bytes();tampered.write_bytes(data[:-1]+bytes([data[-1]^1]))
+    invalid=subprocess.run([sys.executable,str(deploy/"verify-native-backup.py"),"--archive",str(tampered),"--identity",str(identity)],capture_output=True)
+    assert invalid.returncode!=0
