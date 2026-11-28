@@ -44,3 +44,30 @@ def payload(db,ids):
             raise HTTPException(409,"参考图已变化，请重试")
         figures.append({"media_type":item.media_type,"base64":base64.b64encode(raw).decode("ascii")})
     return figures
+
+
+def prepare_knowledge(data):
+    """Replace only real inline image tokens, in teaching-source order."""
+    import copy
+    result = copy.deepcopy(data)
+    ids = []
+    def replace(match):
+        ident = match.group(1)
+        if ident not in ids:
+            ids.append(ident)
+        return f"[参考附图{ids.index(ident)+1}]"
+    def normalize(value):
+        text = IMAGE_TOKEN.sub(replace, value or "")
+        if "[[img:" in text or "![" in text:
+            raise HTTPException(422, "知识单元或关联题包含无法传输的附图")
+        return text
+    for key in ("content", "proof"):
+        result[key] = normalize(result[key])
+    for key, value in result["teaching_detail"].items():
+        result["teaching_detail"][key] = normalize(value)
+    for q in result["related_questions"]:
+        for key in ("content", "answer", "solution"):
+            q[key] = normalize(q[key])
+    if len(ids) > MAX_FIGURES:
+        raise HTTPException(422, "单个知识单元视频最多传输8张参考图")
+    return result, ids

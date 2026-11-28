@@ -16,6 +16,24 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 SOURCE_SCHEMA = "v6-source-1"
+KNOWLEDGE_PREFIX = "JIAOYAN_KNOWLEDGE_V1\n"
+KNOWLEDGE_SCHEMA = "knowledge-video-source-v1"
+
+def knowledge_envelope(value):
+    if not isinstance(value, str) or not value.startswith(KNOWLEDGE_PREFIX):
+        return None
+    try:
+        data = json.loads(value[len(KNOWLEDGE_PREFIX):])
+    except (ValueError, TypeError) as exc:
+        raise SourceInputError("KNOWLEDGE_SOURCE_INVALID") from exc
+    if (not isinstance(data, dict) or data.get("schema") != KNOWLEDGE_SCHEMA
+        or data.get("business_type") != "knowledge"
+        or data.get("teaching_type") not in {"with_proof","without_proof","auto"}
+        or not isinstance(data.get("content"), str) or not data["content"].strip()
+        or not isinstance(data.get("related_questions"), list)
+        or data.get("association_count") != len(data["related_questions"])):
+        raise SourceInputError("KNOWLEDGE_SOURCE_INVALID")
+    return data
 MAX_PROBLEM = 20_000
 MAX_SOLUTION = 120_000
 MAX_ANSWER = 4_000
@@ -89,6 +107,10 @@ class LessonSource:
     opening_line: str = ""
 
     def prompt_payload(self, *, fps: int) -> str:
+        unit = knowledge_envelope(self.reference_solution)
+        if unit is not None:
+            return json.dumps({"business_type":"knowledge", "knowledge_unit":unit, "fps":fps,
+                               "question_meta":self.question_meta}, ensure_ascii=False, indent=2)
         return json.dumps({
             "problem": self.problem,
             "reference_solution": self.reference_solution,
@@ -190,8 +212,14 @@ def prepare_lesson_source(problem: str, reference_solution: str,
                           answer: str = "", *, meta: dict | None = None) -> LessonSource:
     # 题干里夹带的「（接上页）」类页脚先清掉：它们不是题目内容，
     # 一旦进提示词就会出现在视频口播与板书里。
+    unit = knowledge_envelope(reference_solution)
     problem = strip_page_furniture(problem)
-    reference_solution = strip_page_furniture(reference_solution)
+    if unit is None:
+        reference_solution = strip_page_furniture(reference_solution)
+    else:
+        # Envelope is immutable, so all generation/render/edit guards compute the same hash.
+        if problem != strip_page_furniture(unit["content"]):
+            raise SourceInputError("KNOWLEDGE_SOURCE_MISMATCH")
     # 存量题目没有答案，允许为空；有新录入时才作为可信结论进入提示词。
     answer = strip_page_furniture(answer)
     if not problem:
@@ -216,6 +244,9 @@ def prepare_lesson_source(problem: str, reference_solution: str,
     context = meta.get("source_context")
     if isinstance(context, dict) and context:
         question_meta["source_context"] = context
+    if unit is not None:
+        question_meta["source_context"] = {**question_meta.get("source_context", {}),
+            "business_type":"knowledge", "teaching_type":unit["teaching_type"]}
     raw_alts = meta.get("alternative_methods")
     if isinstance(raw_alts, list) and raw_alts:
         alts = [
@@ -349,6 +380,7 @@ __all__ = [
     "parse_markdown_image_alt",
     "parse_work_image_url",
     "prepare_lesson_source",
+    "knowledge_envelope",
     "replace_markdown_images_for_prompt",
     "source_anchors",
     "strip_page_furniture",

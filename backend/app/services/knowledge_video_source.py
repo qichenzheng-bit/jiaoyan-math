@@ -12,7 +12,8 @@ from app.models import TeachingResource
 SCHEMA = "knowledge-video-source-v1"
 DETAIL_FIELDS = ("conditions", "applications", "methods", "mistakes")
 # The final assembled prompt is also checked by the engine; never truncate source data.
-MAX_SOURCE_BYTES = 80000
+MAX_SOURCE_BYTES = 60000
+TRANSPORT_PREFIX = "JIAOYAN_KNOWLEDGE_V1\n"
 NO_PROOF = {"", "略", "证明略", "证明从略", "推导略", "无", "暂无", "待补充", "见教材"}
 
 
@@ -76,3 +77,18 @@ def capture(db, unit):
         TeachingResource.id.in_(ids), TeachingResource.kind == "question"
     ))) if ids else []
     return build_snapshot(unit, detail, rows)
+
+
+def transport(data):
+    """Legacy lesson storage envelope; never exposed as a reference solution to the teacher."""
+    from app.services import video_figures
+    normalized, ids = video_figures.prepare_knowledge(data)
+    envelope = TRANSPORT_PREFIX + json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    # Preserve exact source hash across generation, edit and old contract verification.
+    result = {"title": data["title"], "problem": normalized["content"], "reference_solution": envelope,
+              "answer": "", "analysis": "", "subject": data["subject"], "chapter": data["chapter"],
+              "exam_type": "", "question_type": "", "tags": data["knowledge_tags"], "fps": 60}
+    for key, size in {"title":180,"problem":20000,"reference_solution":120000,"subject":20,"chapter":120}.items():
+        if len(result[key]) > size:
+            raise HTTPException(422, "知识单元字段超过引擎限制：" + key)
+    return result, ids

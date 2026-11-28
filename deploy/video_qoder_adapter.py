@@ -276,6 +276,17 @@ def _reference_figures_ready():
         return False
 
 
+def _knowledge_schema():
+    try:
+        from weiguang_backend.pipeline.source_assets import KNOWLEDGE_SCHEMA, knowledge_envelope
+        from weiguang_backend.pipeline import prompt_bundle
+        if hasattr(prompt_bundle, "knowledge_rules") and callable(knowledge_envelope):
+            return KNOWLEDGE_SCHEMA
+    except ImportError:
+        pass
+    return None
+
+
 def add_prompt_routes(router):
     from fastapi import HTTPException, Request
     from pydantic import BaseModel, ConfigDict, Field
@@ -297,7 +308,7 @@ def add_prompt_routes(router):
     @router.get('/jiaoyan/prompt-capability')
     def prompt_capability(request:Request):
         authorize(request)
-        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready()}
+        return {'supported':True,'max_bytes':PROMPT_LIMIT,'snapshot':'job','source_context':_source_context_ready(),'reference_figures':_reference_figures_ready(),'knowledge_video_schema':_knowledge_schema()}
 
     @router.post('/jiaoyan/lessons/{id}/generate',status_code=202)
     def generate_with_supplement(id:str,body:Supplement,request:Request):

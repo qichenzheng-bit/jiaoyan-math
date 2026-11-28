@@ -10,7 +10,7 @@ from app.core.method_recommendation import video_solution
 from app.core.security import current_user, require_origin, audit, now
 from app.models import TeachingResource, VideoProject, StudioItem, User, StoredFile
 from app.api.resources import admin_lock, view as resource_view
-from app.services import work_facets, video_source_context, video_figures
+from app.services import work_facets, video_source_context, video_figures, knowledge_video_source
 from app.api.studio import save_version
 from app.services import video_engine as engine, storage
 from app.api import qoder
@@ -86,11 +86,26 @@ def snapshot(r):
     video_figures.prepare(result)  # Validate tokens without replacing the authoritative local snapshot.
     return result
 
+def require_knowledge_capability():
+    try:
+        capability = engine.call("GET", "/jiaoyan/prompt-capability")
+    except HTTPException as exc:
+        raise HTTPException(503, "知识单元视频引擎尚未就绪") from exc
+    if not isinstance(capability, dict) or capability.get("knowledge_video_schema") != knowledge_video_source.SCHEMA:
+        raise HTTPException(503, "知识单元视频引擎尚未升级，已保留旧例题功能")
+    return capability
+
+
 @router.get("/status")
 def status():
     try:
         engine.call("GET", "/lessons/stats")
-        return {"available": True, "source_revision": engine.SOURCE_REVISION, "detail": "引擎接口已连接；真实模型及渲染仍需验收"}
+        try:
+            require_knowledge_capability()
+            knowledge_ready = True
+        except HTTPException:
+            knowledge_ready = False
+        return {"available": True, "knowledge_available": knowledge_ready, "source_revision": engine.SOURCE_REVISION, "detail": "引擎接口已连接；真实模型及渲染仍需验收"}
     except HTTPException as exc:
         return {"available": False, "source_revision": engine.SOURCE_REVISION, "detail": str(exc.detail)}
 
@@ -103,13 +118,22 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
     engine.config()
     admin_lock(db, user)
     r = db.get(TeachingResource, body.resource_id)
-    if not r or r.archived or r.kind != "question":
-        raise HTTPException(404, "请选择有效题库题目")
+    if not r or r.archived or r.kind not in ("question", "knowledge"):
+        raise HTTPException(404, "请选择有效题库题目或知识单元")
+    if r.kind == "knowledge":
+        require_knowledge_capability()
+        data = knowledge_video_source.capture(db, r)
+    else:
+        data = snapshot(r)
     old = db.scalar(select(VideoProject).where(VideoProject.resource_id == r.id, VideoProject.resource_revision == r.revision))
     if old:
+        if r.kind == "knowledge" and old.source_snapshot.get("source_sha256") != data["source_sha256"]:
+            raise HTTPException(409, "已有项目的关联题或资料已变化，请先更新知识单元版本")
         return view(old)
-    data = snapshot(r)
-    engine_data,figure_ids=video_figures.prepare(data)
+    if r.kind == "knowledge":
+        engine_data,figure_ids=knowledge_video_source.transport(data)
+    else:
+        engine_data,figure_ids=video_figures.prepare(data)
     if figure_ids:
         supported=engine.call('GET','/jiaoyan/prompt-capability')
         if not supported.get('reference_figures'):raise HTTPException(503,'请先升级支持参考题图的视频引擎')
@@ -117,6 +141,8 @@ def create(body: Start, db: Session = Depends(get_db), user: User = Depends(curr
     # Save mapping before contacting the independent service; if response is lost, do not retry create blindly.
     facets = work_facets.capture(db, {"subject":r.subject,"blocks":[{"resource_id":r.id,"snapshot":resource_view(r)}]})
     context = video_source_context.capture(db, r)
+    if r.kind == "knowledge":
+        context.update(business_type="knowledge", teaching_type=data["teaching_type"])
     row = VideoProject(id=str(uuid4()), resource_id=r.id, resource_revision=r.revision, source_snapshot={**data, "source_context": context, "figure_ids":figure_ids}, work_facets=facets, created_at=now())
     db.add(row)
     for file_id in figure_ids:
@@ -155,6 +181,10 @@ def produce(ident: str, action: Literal["generate","render"], body: InferenceOpt
             saved_context=(getattr(row,"source_snapshot",None) or {}).get("source_context") or {}
             # Source provenance remains in the bank/project snapshot, not in lesson opening.
             context={"knowledge_tags":saved_context["knowledge_tags"]} if saved_context.get("knowledge_tags") else {}
+            knowledge = (getattr(row,"source_snapshot",None) or {}).get("business_type") == "knowledge"
+            if knowledge:
+                require_knowledge_capability()
+                context.update(business_type="knowledge", teaching_type=row.source_snapshot["teaching_type"])
             figure_ids=(getattr(row,"source_snapshot",None) or {}).get("figure_ids") or []
             if supplement["text"] or context or figure_ids:
                 try:
@@ -181,6 +211,8 @@ def edit(ident: str, body: Instruction, db: Session = Depends(get_db), user:User
         raise HTTPException(409, "审核归档的视频不可微调")
     rid=remote(row)
     # Preserve exact edit scope. The engine inherits the original lesson supplement separately.
+    if (getattr(row,"source_snapshot",None) or {}).get("business_type") == "knowledge":
+        require_knowledge_capability()
     instruction=body.instruction
     with production_model_lock:
         prepare_model(db,body.effort,body.model)
@@ -252,7 +284,10 @@ def approve(ident: str, body: CoverSelection|None=None, db: Session = Depends(ge
         raise HTTPException(409, "引擎尚未确认成片归档")
     # Keep media in engine's durable store. Studio records carry a local, authenticated link, not a disk path.
     data = {"category":"video","file_id":None,"document_id":None,"resource_id":row.resource_id,
-            "content":"", "note":"视频引擎审核归档", "video_project_id":row.id}
+            "content":"", "note":"视频引擎审核归档", "video_project_id":row.id,
+            "video_business_type":row.source_snapshot.get("business_type","question"),
+            "video_teaching_type":row.source_snapshot.get("teaching_type",""),
+            "video_unit_type":row.source_snapshot.get("unit_type","")}
     item = StudioItem(id=str(uuid4()), kind="work", title=row.source_snapshot["title"], data=data,
                       revision=1, archived=False, created_at=now(), updated_at=now())
     db.add(item); db.flush()

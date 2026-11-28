@@ -18,7 +18,7 @@ from ...pipeline.scene_figures import load_reference_figures
 from ...pipeline.scene_publish import ScenePublication
 from ...pipeline.scene_repair import SceneRepairFailed, generate_with_repair
 from ...pipeline.source_assets import (
-    SourceInputError, lesson_question_meta, prepare_lesson_source,
+    SourceInputError, lesson_question_meta, prepare_lesson_source, knowledge_envelope,
     replace_markdown_images_for_prompt, validate_solution_ready_for_video,
 )
 from ..jobs import job_add, job_log, log_token_usage, usage_totals
@@ -32,8 +32,11 @@ def _prepare_generation_sources(lesson):
 
     problem = lesson.problem
     answer = getattr(lesson, "answer", "") or ""
-    validate_solution_ready_for_video(lesson.reference_solution or "", answer)
     base_meta = lesson_question_meta(lesson)
+    if knowledge_envelope(lesson.reference_solution) is not None:
+        source = prepare_lesson_source(problem, lesson.reference_solution, answer, meta=base_meta)
+        return source, source.source_sha256
+    validate_solution_ready_for_video(lesson.reference_solution or "", answer)
     authoritative = prepare_lesson_source(
         problem, lesson.reference_solution, answer, meta=base_meta
     )
