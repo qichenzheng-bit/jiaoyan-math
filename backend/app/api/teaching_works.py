@@ -1,5 +1,5 @@
 """Authenticated finished works catalogue. Videos remain in the existing engine."""
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 from pathlib import Path
 import os, shutil, tempfile, zipfile, threading, time, re
@@ -73,7 +73,7 @@ def listing(q: str = Query("", max_length=200), kind: str = Query("", max_length
             knowledge_point: str = "", knowledge_tag: str = "", subjects_all: str = "",
             video_business: Literal["","question","knowledge"] = "",
             video_teaching: Literal["","with_proof","without_proof","auto"] = "",
-            video_unit_type: str = Query("",max_length=24), video_chapter: str = Query("",max_length=120)):
+            video_unit_type: Annotated[str, Query(max_length=24)] = "", video_chapter: Annotated[str, Query(max_length=120)] = ""):
     filters = {"source_types":source_type,"institutions":institution,"years":year,
                "knowledge_points":knowledge_point,"knowledge_tags":knowledge_tag,"subjects":subjects_all}
     if any(len(value)>500 for value in filters.values()):

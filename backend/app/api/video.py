@@ -45,7 +45,10 @@ def view(row,db=None):
     result={k: getattr(row, k) for k in ("id", "resource_id", "resource_revision", "source_snapshot", "engine_id", "work_id", "created_at")}
     if db is not None and row.work_id:
         item=db.get(StudioItem,row.work_id)
-        if item:result.update(cover_file_id=item.data.get("cover_file_id"),cover_timestamp=item.data.get("cover_timestamp"))
+        if item:
+            result.update(cover_file_id=item.data.get("cover_file_id"),cover_timestamp=item.data.get("cover_timestamp"))
+            if row.source_snapshot.get("business_type")=="knowledge":
+                result["teaching_type"]=item.data.get("video_teaching_type") or row.source_snapshot.get("teaching_type","auto")
     return result
 
 def save_cover(db,row,item,body):
